@@ -5,6 +5,7 @@ import cors from 'cors';
 
 import connectDB from './src/config/db.js';
 import authRoutes from './src/routes/auth.js';
+import authlog from './src/controllers/authen.js';
 
 
 console.log('🔍 MONGODB_URI:', process.env.MONGODB_URI ? '✅ Chargé' : '❌ Non défini');
@@ -26,7 +27,7 @@ app.use("/uploads", express.static("uploads"));
 
 // ✅ 3. Tes routes après
 app.use('/api/auth', authRoutes);
-app.use('/api/users', authRoutes);
+app.use('/api/users', authlog);
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

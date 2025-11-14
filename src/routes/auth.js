@@ -5,15 +5,19 @@ import {
   resendOtp,
   } from '../controllers/authController.js';
 
+
+
 import { uploadProfilePicture,
   uploadMiddleware}  from '../controllers/uploadController.js'
 import authMiddleware from '../middleware/auth.js'
+
 
 const router = express.Router();
 
 router.post('/register', register);
 router.post('/verify-otp', verifyOtp);
 router.post('/resend-otp', resendOtp);
+
 
 // ✅ Route corrigée - utilisez le middleware d'upload puis le handler
 router.post("/upload-profile", 
