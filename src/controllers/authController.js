@@ -5,7 +5,7 @@ import axios from 'axios';
 import { UAParser } from 'ua-parser-js';
 import User from '../models/User.js';
 import PendingUser from '../models/PendingUser.js';
-import sendEmail from '../utils/sendEmail.js'; // SEULE FONCTION EMAIL
+import sendEmail from '../utils/sendEmail.js';
 
 // ========================================
 // FONCTION UNIQUE DE GÉNÉRATION D'OTP
@@ -14,10 +14,12 @@ const generateOtp = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-const signToken = (user) =>
-  jwt.sign({ id: user._id, email: user.email }, process.env.JWT_SECRET, {
-    expiresIn: process.env.JWT_EXPIRES_IN || '7d',
-  });
+// ========================================
+// FONCTION UNIVERSELLE JWT — UNE SEULE POUR TOUTES LES FONCTIONNALITÉS
+// ========================================
+const generateToken = (payload, expiresIn = '7d') => {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
+};
 
 // ========================================
 // ENVOIE EMAIL À CHAQUE CONNEXION
@@ -60,7 +62,7 @@ const sendLoginAlertEmail = async (user, req, email) => {
 };
 
 // ========================================
-// 1. REGISTER — UTILISE sendEmail.js
+// 1. REGISTER
 // ========================================
 export const register = async (req, res) => {
   try {
@@ -99,7 +101,6 @@ export const register = async (req, res) => {
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
-    // ENVOI OTP AVEC sendEmail.js
     const html = `
       <div style="font-family:Arial;text-align:center;padding:30px;background:#e3f2fd;border-radius:12px;">
         <h2 style="color:#007bff;">Vérifiez votre inscription</h2>
@@ -139,7 +140,10 @@ export const verifyOtp = async (req, res) => {
       passwordHash: pending.passwordHash,
     });
     await PendingUser.deleteOne({ email });
-    const token = signToken(newUser);
+
+    // UNE SEULE FONCTION → TOKEN INSCRIPTION
+    const token = generateToken({ id: newUser._id, email: newUser.email });
+
     return res.status(201).json({
       message: 'Compte créé avec succès.',
       data: { token, user: { id: newUser._id, username: newUser.username, email: newUser.email } },
@@ -151,7 +155,7 @@ export const verifyOtp = async (req, res) => {
 };
 
 // ========================================
-// 3. RESEND OTP — UTILISE sendEmail.js
+// 3. RESEND OTP
 // ========================================
 export const resendOtp = async (req, res) => {
   try {
@@ -185,61 +189,40 @@ export const resendOtp = async (req, res) => {
 };
 
 // ========================================
-// 4. LOGIN — CORRIGÉ À 100% (AUCUN DOUBLE HACHAGE)
+// 4. LOGIN
 // ========================================
 export const login = async (req, res) => {
   const { email, password } = req.body;
 
-  // Validation
-  if (!email || !password) {
-    return res.status(400).json({ message: 'Email et mot de passe requis' });
-  }
-  if (password.length < 8) {
-    return res.status(400).json({ message: 'Le mot de passe doit contenir au min 8 caractères' });
-  }
+  if (!email || !password) return res.status(400).json({ message: 'Email et mot de passe requis' });
+  if (password.length < 8) return res.status(400).json({ message: 'Le mot de passe doit contenir au min 8 caractères' });
 
   try {
-    // Trouver l'utilisateur
     const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ message: 'Identifiants invalides' });
-    }
+    if (!user) return res.status(401).json({ message: 'Identifiants invalides' });
 
     const now = new Date();
     const oneWeekAgo = new Date(now);
     oneWeekAgo.setDate(now.getDate() - 7);
 
-    // Vérifier le verrouillage
     if (user.lockedUntil && now < user.lockedUntil) {
       const secondsLeft = Math.ceil((user.lockedUntil - now) / 1000);
-      return res.status(429).json({
-        message: `Trop de tentatives. Réessayez dans ${secondsLeft}s.`,
-        retryAfter: secondsLeft
-      });
+      return res.status(429).json({ message: `Trop de tentatives. Réessayez dans ${secondsLeft}s.`, retryAfter: secondsLeft });
     }
 
-    // VÉRIFICATION DU MOT DE PASSE (SANS DOUBLE HACHAGE)
     const isMatch = await user.matchPassword(password);
     if (!isMatch) {
-      // Gestion des échecs
       if (user.lastFailedAttempt && now - user.lastFailedAttempt > 15 * 60 * 1000) {
         user.failedLoginAttempts = 0;
         user.lockedUntil = null;
       }
       user.failedLoginAttempts += 1;
       user.lastFailedAttempt = now;
-      if (user.failedLoginAttempts >= 3) {
-        user.lockedUntil = new Date(now.getTime() + 15 * 1000);
-      }
+      if (user.failedLoginAttempts >= 3) user.lockedUntil = new Date(now.getTime() + 15 * 1000);
       await user.save();
 
-      // Envoi email alerte après 3 échecs
       if (user.failedLoginAttempts === 3) {
-        const resetToken = jwt.sign(
-          { userId: user._id, type: 'reset' },
-          process.env.JWT_SECRET,
-          { expiresIn: '15m' }
-        );
+        const resetToken = generateToken({ userId: user._id, type: 'reset' }, '15m');
         const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
         const html = `
           <div style="font-family:Arial;text-align:center;padding:30px;background:#ffebee;border-radius:12px;">
@@ -253,46 +236,24 @@ export const login = async (req, res) => {
         `;
         await sendEmail(email, 'Alerte sécurité - Owly', 'Tentative suspecte', html);
       }
-
-      return res.status(401).json({
-        message: 'Mot de passe incorrect',
-        attempts: user.failedLoginAttempts
-      });
+      return res.status(401).json({ message: 'Mot de passe incorrect', attempts: user.failedLoginAttempts });
     }
 
-    // Connexion réussie → réinitialiser les tentatives
     user.failedLoginAttempts = 0;
     user.lastFailedAttempt = undefined;
     user.lockedUntil = null;
     user.lastSeen = now;
     await user.save();
 
-    // Alerte email de connexion
     await sendLoginAlertEmail(user, req, email);
 
-    // Connexion récente → token direct
     if (user.lastSeen >= oneWeekAgo) {
-      const token = jwt.sign(
-        { id: user._id },
-        process.env.JWT_SECRET,
-        { expiresIn: process.env.JWT_EXPIRE || '7d' }
-      );
-      return res.json({
-        message: 'Connexion réussie (dans les 7 jours)',
-        id: user._id,
-        username: user.username,
-        email: user.email,
-        token
-      });
+      const token = generateToken({ id: user._id });
+      return res.json({ message: 'Connexion réussie (dans les 7 jours)', id: user._id, username: user.username, email: user.email, token });
     }
 
-    // Inactif > 7 jours → OTP
     const otp = generateOtp();
-    const otpToken = jwt.sign(
-      { userId: user._id, otp, type: 'inactivity' },
-      process.env.JWT_SECRET,
-      { expiresIn: '10m' }
-    );
+    const otpToken = generateToken({ userId: user._id, otp, type: 'inactivity' }, '10m');
     const verifyUrl = `${process.env.CLIENT_URL}/verify-otp?token=${otpToken}`;
     const html = `
       <div style="font-family:Arial;text-align:center;padding:30px;background:#fff3e0;border-radius:12px;">
@@ -308,13 +269,7 @@ export const login = async (req, res) => {
       </div>
     `;
     await sendEmail(email, 'Vérification - Owly', `Code: ${otp}`, html);
-
-    return res.json({
-      message: 'Vérification requise',
-      requiresOtp: true,
-      email,
-      debug_token: otpToken
-    });
+    return res.json({ message: 'Vérification requise', requiresOtp: true, email, debug_token: otpToken });
 
   } catch (err) {
     console.error('ERREUR LOGIN:', err.message);
@@ -338,7 +293,9 @@ export const verifyInactivityOtp = async (req, res) => {
     user.lastSeen = new Date();
     await user.save();
     await sendLoginAlertEmail(user, req, user.email);
-    const authToken = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRE });
+
+    const authToken = generateToken({ id: user._id });
+
     return res.json({
       message: 'Connexion réussie après vérification',
       id: user._id, username: user.username, email: user.email, token: authToken,
@@ -366,7 +323,7 @@ export const forgotPassword = async (req, res) => {
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
     const otp = generateOtp();
-    const token = jwt.sign({ userId: user._id, otp, type: 'reset' }, process.env.JWT_SECRET, { expiresIn: '10m' });
+    const token = generateToken({ userId: user._id, otp, type: 'reset' }, '10m');
     const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
     const html = `
       <div style="font-family:Arial;text-align:center;padding:30px;background:#e3f2fd;border-radius:12px;">
