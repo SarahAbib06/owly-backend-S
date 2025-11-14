@@ -1,59 +1,68 @@
+// controllers/uploadController.js
 import multer from "multer";
-import path from "path";
+import streamifier from "streamifier";
+import cloudinary from "../config/cloudinary.js";
 import User from "../models/User.js";
 
-// Configuration Multer
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/");
-  },
-  filename: function (req, file, cb) {
-    const uniqueName = Date.now() + path.extname(file.originalname);
-    cb(null, uniqueName);
-  }
-});
+// Multer → stockage en mémoire (obligatoire pour Cloudinary)
+const storage = multer.memoryStorage();
 
-// Créez l'instance multer
-const upload = multer({ 
-  storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB max
-  },
+export const uploadMiddleware = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
   fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Seules les images sont autorisées'), false);
-    }
-  }
-});
+    if (file.mimetype.startsWith("image/")) cb(null, true);
+    else cb(new Error("Seules les images sont autorisées"), false);
+  },
+}).single("profile");
 
-// Middleware d'upload
-export const uploadMiddleware = upload.single("profile");
-
-// Route handler
+// Upload vers Cloudinary
 export const uploadProfilePicture = async (req, res) => {
   try {
-    // Vérifiez si un fichier a été uploadé
     if (!req.file) {
       return res.status(400).json({ message: "Aucun fichier uploadé" });
     }
 
     const userId = req.user.id;
-    const filePath = `/uploads/${req.file.filename}`;
 
+    // Fonction utilitaire : convertit le buffer en stream → Cloudinary
+    const uploadToCloudinary = (buffer) => {
+      return new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: "profile_pictures",
+            transformation: { width: 600, crop: "limit" },
+          },
+          (err, result) => {
+            if (err) reject(err);
+            else resolve(result);
+          }
+        );
+
+        streamifier.createReadStream(buffer).pipe(stream);
+      });
+    };
+
+    const result = await uploadToCloudinary(req.file.buffer);
+
+    // Mise à jour de l'utilisateur
     const updatedUser = await User.findByIdAndUpdate(
       userId,
-      { profilePicture: filePath },
+      {
+        profilePicture: result.secure_url,
+        profilePictureId: result.public_id,
+      },
       { new: true }
     );
 
-    res.status(200).json({ 
-      message: "Photo uploadée avec succès", 
-      user: updatedUser 
+    return res.status(200).json({
+      message: "Photo uploadée avec succès",
+      user: updatedUser,
     });
+
   } catch (error) {
-    console.error("Erreur upload:", error);
-    res.status(500).json({ message: error.message });
+    console.error("Erreur Cloudinary:", error);
+    return res.status(500).json({ message: error.message });
   }
 };
+
