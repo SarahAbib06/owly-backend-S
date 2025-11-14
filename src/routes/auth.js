@@ -1,27 +1,45 @@
 import express from 'express';
-import { 
-  register, 
-  verifyOtp, 
+
+import {
+  register,
+  verifyOtp,
   resendOtp,
-  } from '../controllers/authController.js';
+  login,
+  verifyInactivityOtp,
+  getMe,
+  forgotPassword,
+  verifyOtpReset,
+} from '../controllers/authController.js';
 
+import {
+  uploadProfilePicture,
+  uploadMiddleware,
+} from '../controllers/uploadController.js';
 
-
-import { uploadProfilePicture,
-  uploadMiddleware}  from '../controllers/uploadController.js'
-import authMiddleware from '../middleware/auth.js'
-
+import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
 
+// ========================================
+// ROUTES PUBLIQUES
+// ========================================
 router.post('/register', register);
 router.post('/verify-otp', verifyOtp);
 router.post('/resend-otp', resendOtp);
 
+router.post('/login', login);
+router.post('/verify-inactivity-otp', verifyInactivityOtp);
+router.post('/forgot-password', forgotPassword);
+router.post('/verify-otp-reset', verifyOtpReset);
 
-// ✅ Route corrigée - utilisez le middleware d'upload puis le handler
-router.post("/upload-profile", 
-  authMiddleware, 
+// ========================================
+// ROUTES PROTÉGÉES
+// ========================================
+router.get('/me', authMiddleware, getMe);
+
+router.post(
+  '/upload-profile',
+  authMiddleware,
   uploadMiddleware,
   uploadProfilePicture
 );
