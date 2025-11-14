@@ -66,8 +66,8 @@ router.post('/login', async (req, res) => {
   const { email, passwordHash } = req.body;
   if (!email || !passwordHash) return res.status(400).json({ message: 'Email et mot de passe requis' });
 
-  if (passwordHash.length > 6) {
-    return res.status(400).json({ message: 'Le mot de passe ne doit pas dépasser 6 caractères' });
+  if (passwordHash.length < 8) {
+    return res.status(400).json({ message: 'Le mot de passe doit contenir au min 8 caractères' });
   }
 
   try {
@@ -264,7 +264,7 @@ router.post('/forgot-password', async (req, res) => {
 router.post('/verify-otp-reset', async (req, res) => {
   const { token, otp, newPassword } = req.body;
 
-  if (!token || !otp || !newPassword || newPassword.length !== 6) {
+  if (!token || !otp || !newPassword || newPassword.length !== 8) {
     return res.status(400).json({ message: 'Données invalides' });
   }
 
