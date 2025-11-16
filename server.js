@@ -5,7 +5,10 @@ import { createServer } from 'http';
 import { Server } from 'socket.io';
 
 import connectDB from './src/config/db.js';
-
+import { configureChatSockets } from './src/socket/chatSocket.js';
+import messageRoutes from './src/routes/messageRoutes.js';
+import conversationRoutes from './src/routes/conversationRoutes.js';
+import notificationRoutes from './src/routes/notificationRoutes.js';
 
 dotenv.config();
 
@@ -26,23 +29,22 @@ app.use(express.urlencoded({ extended: true }));
 // Connect to database
 connectDB();
 
-
-
-// Routes (à ajouter plus tard)
+// Routes
 app.get('/', (req, res) => {
   res.json({ message: 'Owly API is running' });
 });
 
-// Socket.io (à configurer plus tard)
-io.on('connection', (socket) => {
-  console.log('User connected:', socket.id);
-  
-  socket.on('disconnect', () => {
-    console.log('User disconnected:', socket.id);
-  });
-});
+// 🎯 ROUTE PRINCIPALE POUR LES MESSAGES
+app.use('/api/messages', messageRoutes);
 
-const PORT = process.env.PORT || 7000;
+// 🆕 ROUTE POUR LES CONVERSATIONS ET COMPTEURS
+app.use('/api/conversations', conversationRoutes);
+
+// Socket.io
+configureChatSockets(io);
+app.use('/api/notifications', notificationRoutes);
+
+const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
 });
