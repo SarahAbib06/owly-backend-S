@@ -14,40 +14,40 @@ import {
   deleteAudioMessage,
 } from "../controllers/audioController.js";
 
-import { authenticateToken } from "../middleware/auth.js";
-
+// { authMiddleware } from "../middleware/auth.js";
+import authMiddleware from "../middleware/auth.js";
 import audioUpload from "../middleware/audioUpload.js";
 
 const router = express.Router();
 
 // Envoyer un message
-router.post("/send", authenticateToken, sendMessage);
+router.post("/send", authMiddleware, sendMessage);
 
 // Récupérer les messages d'une conversation
-router.get("/:conversationId", authenticateToken, getConversationMessages);
+router.get("/:conversationId", authMiddleware, getConversationMessages);
 
 // Marquer un message comme lu
-router.put("/read", authenticateToken, markAsRead);
+router.put("/read", authMiddleware, markAsRead);
 
 // Marquer tous les messages comme lus dans une conversation
-router.put("/read-all", authenticateToken, markAllAsRead);
+router.put("/read-all", authMiddleware, markAllAsRead);
 
 // Supprimer un message
-router.delete("/:messageId", authenticateToken, deleteMessage);
+router.delete("/:messageId", authMiddleware, deleteMessage);
 
 // Récupérer les messages non lus
-router.get("/unread/count", authenticateToken, getUnreadMessages);
+router.get("/unread/count", authMiddleware, getUnreadMessages);
 
 // 🔊 ROUTES AUDIO (NOUVEAU)
 router.post(
   "/audio/send",
-  authenticateToken,
+  authMiddleware,
   audioUpload.singleWithLog("audio"), // Utiliser 'audio' comme champ
   sendAudioMessage
 );
 
-router.get("/audio/:messageId", authenticateToken, getAudioInfo);
+router.get("/audio/:messageId", authMiddleware, getAudioInfo);
 
-router.delete("/audio/:messageId", authenticateToken, deleteAudioMessage);
+router.delete("/audio/:messageId", authMiddleware, deleteAudioMessage);
 
 export default router;

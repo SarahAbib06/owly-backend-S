@@ -1,64 +1,98 @@
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken"; // ⬅️ Pour l'authentification JWT
-import User from "./src/models/User.js"; // ⬅️ Modèle User
-
-import path from "path"; // ⭐ NOUVEAU
-import { fileURLToPath } from "url"; // ⭐ NOUVEAU
-
-// ⭐ NOUVEAU : Pour résoudre __dirname en ES modules
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+import jwt from "jsonwebtoken";
+import fs from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
 
 import connectDB from "./src/config/db.js";
-import userRoutes from "./src/routes/userRoutes.js";
+import User from "./src/models/User.js";
+import authRoutes from "./src/routes/auth.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
 import messageRoutes from "./src/routes/messageRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
-import { setupSocketIO } from "./src/socket/chatSocket.js"; // ⬅️ Configuration Socket.io
+import { setupSocketIO } from "./src/socket/chatSocket.js";
 
-// ⭐ Chargement des variables d'environnement
-dotenv.config();
+// ⭐ Configuration __dirname pour ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
-// ⭐ Initialisation d'Express et HTTP Server
+console.log(
+  "🔍 MONGODB_URI:",
+  process.env.MONGODB_URI ? "✅ Chargé" : "❌ Non défini"
+);
+console.log(
+  "🔍 JWT_SECRET:",
+  process.env.JWT_SECRET ? "✅ Chargé" : "❌ Non défini"
+);
+console.log(
+  "🔍 CLIENT_URL:",
+  process.env.CLIENT_URL ? "✅ Chargé" : "❌ Non défini"
+);
+
+// ⭐ Initialisation de l'application
 const app = express();
+const PORT = process.env.PORT || 5000;
+
+// ⭐ Création du serveur HTTP
 const httpServer = createServer(app);
 
-// ⭐ Configuration Socket.io avec CORS
+// ⭐ Configuration CORS pour Express
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  process.env.CLIENT_URL,
+].filter(Boolean); // Retire les valeurs undefined
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+  })
+);
+
+// ⭐ Configuration Socket.io
 const io = new Server(httpServer, {
   cors: {
-    origin: process.env.CLIENT_URL, // URL du client React
-    credentials: true, // Autoriser les cookies et authentification
+    origin: allowedOrigins,
+    credentials: true,
   },
 });
 
-// ⭐ MIDDLEWARES GLOBAUX
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
-app.use(express.json()); // Parser les requêtes JSON
-app.use(express.urlencoded({ extended: true })); // Parser les formulaires URL-encoded
+// ⭐ Middlewares Express
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-// ⭐ MIDDLEWARE DE DEBUG (optionnel - pour le développement)
-app.use((req, res, next) => {
-  console.log(`📨 ${new Date().toISOString()} - ${req.method} ${req.url}`);
-  console.log("📦 Headers:", req.headers);
-  console.log("📦 Body:", req.body);
-  next();
-});
-
-// ⭐ NOUVEAU : SERVIR LES FICHIERS AUDIO STATIQUES
+// ⭐ Servir les fichiers statiques
+app.use("/uploads", express.static("uploads"));
 app.use(
   "/uploads/audio",
   express.static(path.join(__dirname, "uploads", "audio"))
 );
-console.log("✅ Service des fichiers audio configuré: /uploads/audio");
+console.log("✅ Service des fichiers statiques configuré");
 
-// ⭐ NOUVEAU : Route pour vérifier les fichiers audio
+// ⭐ Middleware de debug (optionnel)
+app.use((req, res, next) => {
+  console.log(`📨 ${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
+
+// ⭐ Routes de l'API
+app.use("/api/auth", authRoutes);
+
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/messages", messageRoutes);
+app.use("/api/reactions", reactionRoutes);
+
+// ⭐ Route pour vérifier les fichiers audio
 app.get("/api/audio/check/:filename", (req, res) => {
   const filename = req.params.filename;
   const filePath = path.join(__dirname, "uploads", "audio", filename);
+
   if (fs.existsSync(filePath)) {
     res.json({
       exists: true,
@@ -73,26 +107,37 @@ app.get("/api/audio/check/:filename", (req, res) => {
   }
 });
 
-// ⭐ FONCTION POUR COPIER LES UTILISATEURS (logique métier spécifique)
+// ⭐ Route de test
+app.post("/api/test-body", (req, res) => {
+  console.log("✅ Route test-body appelée");
+  res.json({
+    message: "Test réussi!",
+    receivedBody: req.body,
+    bodyType: typeof req.body,
+    bodyKeys: Object.keys(req.body || {}),
+  });
+});
+
+// ⭐ Route racine
+app.get("/", (req, res) => {
+  res.json({ message: "Owly API is running" });
+});
+
+// ⭐ Fonction pour copier les utilisateurs
 const copyUsersToUsersCollection = async () => {
   try {
     console.log("📋 Début de la copie des utilisateurs...");
 
-    // Import dynamique pour éviter les dépendances circulaires
     const User = (await import("./src/models/User.js")).default;
-    const Users = (await import("./src/models/Users.js")).default;
+    const Users = (await import("./src/models/User.js")).default;
 
-    // Récupérer tous les utilisateurs existants
     const existingUsers = await User.find();
     console.log(`👥 ${existingUsers.length} utilisateurs trouvés`);
 
-    // Copier chaque utilisateur
     let copiedCount = 0;
     for (const user of existingUsers) {
-      // Vérifier si l'utilisateur existe déjà dans Users
       const exists = await Users.findById(user._id);
       if (!exists) {
-        // Créer une copie dans Users
         await Users.create(user.toObject());
         copiedCount++;
         console.log(`✅ Copié: ${user.username} (${user.email})`);
@@ -105,63 +150,27 @@ const copyUsersToUsersCollection = async () => {
   }
 };
 
-// ⭐ CONNEXION À LA BASE DE DONNÉES
-connectDB().then(() => {
-  copyUsersToUsersCollection(); // Appeler après la connexion DB
-});
-
-// ⭐ ROUTES DE L'API
-
-// Route de test pour vérifier que le serveur fonctionne
-app.post("/api/test-body", (req, res) => {
-  console.log("✅ Route test-body appelée");
-  res.json({
-    message: "Test réussi!",
-    receivedBody: req.body,
-    bodyType: typeof req.body,
-    bodyKeys: Object.keys(req.body || {}),
-  });
-});
-
-// Routes principales de l'application
-app.use("/api/users", userRoutes); // Gestion des utilisateurs
-app.use("/api/conversations", conversationRoutes); // Gestion des conversations
-app.use("/api/messages", messageRoutes); // Gestion des messages
-app.use("/api/reactions", reactionRoutes); // Gestion des réactions
-
-// Route racine - santé de l'API
-app.get("/", (req, res) => {
-  res.json({ message: "Owly API is running" });
-});
-
-// ⭐⭐⭐ CONFIGURATION SOCKET.IO ⭐⭐⭐
-
-// Middleware d'authentification Socket.io
-// S'exécute avant chaque connexion Socket.io
+// ⭐ Middleware d'authentification Socket.io
 io.use(async (socket, next) => {
   try {
-    const token = socket.handshake.auth.token; // Récupère le token d'authentification
+    const token = socket.handshake.auth.token;
     console.log(`🔐 Authentification Socket.io attempt:`, socket.id);
 
     if (token) {
-      // Vérifier et décoder le token JWT
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-      // Trouver l'utilisateur dans la base de données
       const user = await User.findById(decoded.userId).select("-passwordHash");
 
       if (!user) {
         return next(new Error("Utilisateur non trouvé"));
       }
 
-      // Attacher les informations utilisateur à la socket
-      socket.userId = decoded.userId; // ID de l'utilisateur
-      socket.user = user; // Objet utilisateur complet
+      socket.userId = decoded.userId;
+      socket.user = user;
 
       console.log(
         `✅ Socket authentifié: ${socket.id} pour user: ${socket.userId}`
       );
-      next(); // Autoriser la connexion
+      next();
     } else {
       console.log(`❌ Socket sans token: ${socket.id}`);
       next(new Error("Authentication error: Token manquant"));
@@ -172,13 +181,15 @@ io.use(async (socket, next) => {
   }
 });
 
-// ⭐ INITIALISATION DES ÉVÉNEMENTS SOCKET.IO
-// Cette fonction configure tous les événements (messages, typing, reactions, etc.)
+// ⭐ Configuration Socket.io
 setupSocketIO(io);
 
-// ⭐ DÉMARRAGE DU SERVEUR
-const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 Client URL: ${process.env.CLIENT_URL}`);
+// ⭐ Connexion à la base de données et démarrage du serveur
+connectDB().then(() => {
+  copyUsersToUsersCollection();
+
+  httpServer.listen(PORT, () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🌐 Allowed origins: ${allowedOrigins.join(", ")}`);
+  });
 });

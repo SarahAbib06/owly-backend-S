@@ -7,26 +7,27 @@ import {
   updateConversation,
   deleteConversation,
 } from "../controllers/conversationController.js";
-import { authenticateToken } from "../middleware/auth.js";
 
+// { authMiddleware } from "../middleware/auth.js";
+import authMiddleware from "../middleware/auth.js";
 const router = express.Router();
 
 // Créer ou récupérer une conversation privée
-router.post("/private", authenticateToken, getOrCreatePrivateConversation);
+router.post("/private", authMiddleware, getOrCreatePrivateConversation);
 
 // Créer une conversation de groupe
-router.post("/group", authenticateToken, createGroupConversation);
+router.post("/group", authMiddleware, createGroupConversation);
 
 // Récupérer les conversations de l'utilisateur
-router.get("/user", authenticateToken, getUserConversations);
+router.get("/user", authMiddleware, getUserConversations);
 
 // Récupérer une conversation par ID
-router.get("/:conversationId", authenticateToken, getConversationById);
+router.get("/:conversationId", authMiddleware, getConversationById);
 
 // Mettre à jour une conversation
-router.put("/:conversationId", authenticateToken, updateConversation);
+router.put("/:conversationId", authMiddleware, updateConversation);
 
 // Supprimer une conversation
-router.delete("/:conversationId", authenticateToken, deleteConversation);
+router.delete("/:conversationId", authMiddleware, deleteConversation);
 
 export default router;

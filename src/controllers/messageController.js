@@ -1,8 +1,8 @@
 import Message from "../models/Message.js";
 import Conversation from "../models/Conversation.js";
 import Participants from "../models/Participants.js";
+
 import User from "../models/User.js";
-import Users from "../models/Users.js";
 import Notification from "../models/Notification.js";
 
 // Envoyer un message

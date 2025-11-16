@@ -5,13 +5,14 @@ import {
   removeReaction,
   getMessageReactions,
 } from "../controllers/reactionController.js";
-import { authenticateToken } from "../middleware/auth.js"; // ⬅️ Import nommé CORRECT
+
+import authMiddleware from "../middleware/auth.js";
 
 const router = express.Router();
 
 // Utiliser authenticateToken au lieu de auth
-router.post("/", authenticateToken, addReaction);
-router.delete("/:messageId", authenticateToken, removeReaction);
-router.get("/message/:messageId", authenticateToken, getMessageReactions);
+router.post("/", authMiddleware, addReaction);
+router.delete("/:messageId", authMiddleware, removeReaction);
+router.get("/message/:messageId", authMiddleware, getMessageReactions);
 
 export default router;

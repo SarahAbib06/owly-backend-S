@@ -1,7 +1,7 @@
 import Conversation from "../models/Conversation.js";
 import Participants from "../models/Participants.js";
 import User from "../models/User.js";
-import Users from "../models/Users.js";
+
 import Message from "../models/Message.js";
 
 // Créer ou récupérer une conversation privée
@@ -27,8 +27,8 @@ export const getOrCreatePrivateConversation = async (req, res) => {
     }
 
     // Vérifier si les utilisateurs existent
-    const user1 = await Users.findById(userId1);
-    const user2 = await Users.findById(userId2);
+    const user1 = await User.findById(userId1); // User avec U majuscule
+    const user2 = await User.findById(userId2);
 
     if (!user1 || !user2) {
       return res.status(404).json({ message: "Utilisateur non trouvé" });
