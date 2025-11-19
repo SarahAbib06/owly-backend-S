@@ -9,6 +9,7 @@ import { configureChatSockets } from './src/socket/chatSocket.js';
 import messageRoutes from './src/routes/messageRoutes.js';
 import conversationRoutes from './src/routes/conversationRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
+import blockRoutes from './src/routes/block.routes.js';
 
 dotenv.config();
 
@@ -43,6 +44,13 @@ app.use('/api/conversations', conversationRoutes);
 // Socket.io
 configureChatSockets(io);
 app.use('/api/notifications', notificationRoutes);
+
+//Bloquer
+app.use('/api/block', blockRoutes);
+// → URLs finales :
+// POST   /api/block/block
+// POST   /api/block/unblock
+// GET    /api/block/blocked
 
 const PORT = process.env.PORT || 5000;
 httpServer.listen(PORT, () => {

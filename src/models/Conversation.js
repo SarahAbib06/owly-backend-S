@@ -46,6 +46,7 @@ const conversationSchema = new mongoose.Schema({
     enum: ["private", "group"], 
     required: true 
   },
+  
 });
 
 export default mongoose.model("Conversation", conversationSchema);

@@ -3,9 +3,41 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Owly - Messagerie</title>
+    <title>Owly - Messagerie + Blocage</title>
     <script src="https://cdn.socket.io/4.5.0/socket.io.min.js"></script>
     <link rel="stylesheet" href="test-style.css">
+    <style>
+        .block-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .block-btn.blocked {
+            background: #e74c3c;
+            color: white;
+        }
+        .block-btn.not-blocked {
+            background: #95a5a6;
+            color: white;
+        }
+        .block-btn:hover {
+            opacity: 0.9;
+            transform: scale(1.05);
+        }
+        .blocked-warning {
+            padding: 10px;
+            background: #e74c3c;
+            color: white;
+            text-align: center;
+            font-weight: bold;
+            margin: 10px 0;
+            border-radius: 8px;
+            display: none;
+        }
+    </style>
 </head>
 <body>
     <div class="app-container">
@@ -13,7 +45,7 @@
         <div class="contacts-sidebar">
             <div class="sidebar-header">
                 <div class="user-profile">
-                    <div class="user-avatar">🦉</div>
+                    <div class="user-avatar">Owly</div>
                     <div class="user-info">
                         <h2>Owly Messagerie</h2>
                         <div class="status" id="connectionStatus">Connexion...</div>
@@ -22,31 +54,23 @@
             </div>
 
             <div class="contacts-list">
-                <div class="contact active" onclick="switchUser('leticia')" data-user-id="691791b18e4991e5b073c080" data-conversation-id="6918b285b7db6b2e0eb3b1f0">
+                <div class="contact active" onclick="switchUser('leticia')" 
+                     data-user-id="691791b18e4991e5b073c080" 
+                     data-conversation-id="6918b285b7db6b2e0eb3b1f0">
                     <div class="contact-avatar">L</div>
                     <div class="contact-info">
                         <h3>leticia</h3>
-                        <p class="contact-status">🟢 En ligne</p>
+                        <p class="contact-status">En ligne</p>
                     </div>
-                    <span class="conversation-badge" style="display: none;"></span>
                 </div>
-                <div class="contact" onclick="switchUser('melina')" data-user-id="691792195d52dfdf0f44fcad" data-conversation-id="6918b285b7db6b2e0eb3b1f0">
+                <div class="contact" onclick="switchUser('melina')" 
+                     data-user-id="691792195d52dfdf0f44fcad" 
+                     data-conversation-id="6918b285b7db6b2e0eb3b1f0">
                     <div class="contact-avatar">M</div>
                     <div class="contact-info">
                         <h3>melina</h3>
-                        <p class="contact-status">🟢 En ligne</p>
+                        <p class="contact-status">En ligne</p>
                     </div>
-                    <span class="conversation-badge" style="display: none;"></span>
-                </div>
-            </div>
-
-            <!-- Section Statut Système -->
-            <div class="system-status">
-                <h4>🔧 Statut Système</h4>
-                <div class="status-items">
-                    <div>📡 WebSocket: <span id="wsStatus">Connexion...</span></div>
-                    <div>🔔 Notifications: <span id="notifStatus">En attente...</span></div>
-                    <div>👤 Présence: <span id="presenceStatus">Active</span></div>
                 </div>
             </div>
         </div>
@@ -57,45 +81,34 @@
                 <div class="chat-contact-avatar" id="currentContactAvatar">L</div>
                 <div class="chat-contact-info">
                     <h2 id="currentContactName">leticia</h2>
-                    <p id="contactStatus">En ligne - Prêt à chatter</p>
+                    <p id="contactStatus">En ligne</p>
                 </div>
                 
-                <!-- Boutons Action Chat -->
+                <!-- BOUTON BLOQUER / DÉBLOQUER -->
                 <div class="chat-actions">
-                    <button class="action-btn" onclick="markConversationRead()" title="Marquer comme lu">
-                        ✅ Lu
+                    <button id="blockButton" class="block-btn not-blocked" onclick="toggleBlock()">
+                        Bloquer
                     </button>
-                    <button class="action-btn" onclick="testNotificationSystem()" title="Tester notifications">
-                        🧪 Test
-                    </button>
+                    <button class="action-btn" onclick="markConversationRead()">Lu</button>
+                    <button class="action-btn" onclick="testNotificationSystem()">Test</button>
                 </div>
+            </div>
+
+            <!-- Message d'alerte si bloqué -->
+            <div id="blockedWarning" class="blocked-warning">
+                Vous avez bloqué cette personne. Elle ne peut plus vous écrire.
             </div>
             
             <div id="messages" class="messages-container">
                 <div class="welcome-message">
-                    <p>💬 Bienvenue sur Owly !</p>
-                    <p>Ouvrez un deuxième onglet pour tester la messagerie en temps réel</p>
-                    
-                    <!-- Instructions Test -->
-                    <div class="test-instructions">
-                        <h4>🎯 Comment tester :</h4>
-                        <ul>
-                            <li>1. Ouvrez un <strong>deuxième onglet</strong> avec l'autre utilisateur</li>
-                            <li>2. Envoyez des messages entre les onglets</li>
-                            <li>3. Les <strong>notifications</strong> apparaîtront en haut à droite</li>
-                            <li>4. Le <strong>badge</strong> compteur s'affichera en rouge</li>
-                            <li>5. Utilisez les boutons "🧪 Test" pour vérifier</li>
-                        </ul>
-                    </div>
+                    <p>Bienvenue sur Owly !</p>
+                    <p>Teste le blocage en cliquant sur le bouton rouge ci-dessus</p>
                 </div>
             </div>
 
-            <!-- Typing Indicator -->
             <div id="typing-indicator" class="typing-indicator">
                 <div class="typing-dots">
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                    <span></span><span></span><span></span>
                 </div>
                 <span id="typing-text"></span>
             </div>
@@ -107,20 +120,103 @@
                            oninput="handleTyping()">
                     <button class="send-button" onclick="sendMessage()">Envoyer</button>
                 </div>
-                
-                <!-- Statut Envoi -->
                 <div id="sendStatus" class="send-status"></div>
             </div>
         </div>
     </div>
 
-
-    <!-- Boutons Test -->
-    <div class="test-buttons-container">
-        <button class="test-notification-btn" onclick="testNotificationSystem()">🧪 Test Notifications</button>
-        <button class="notification-permission-btn" onclick="enablePushNotifications()">📢 Activer Notifications</button>
-    </div>
-
     <script src="test-script.js"></script>
+    <script>
+        // VARIABLES GLOBALES
+        let currentTargetUserId = "691791b18e4991e5b073c080"; // leticia par défaut
+        let currentUserToken = localStorage.getItem("jwt") || "ton_jwt_ici"; // À REMPLIR
+
+        // Change l'utilisateur cible + met à jour le bouton bloquer
+        function switchUser(username) {
+            document.getElementById("currentContactName").textContent = username;
+            document.getElementById("currentContactAvatar").textContent = username[0].toUpperCase();
+
+            if (username === "leticia") {
+                currentTargetUserId = "691791b18e4991e5b073c080";
+            } else if (username === "melina") {
+                currentTargetUserId = "691792195d52dfdf0f44fcad";
+            }
+
+            checkBlockStatus(); // Rafraîchir le bouton bloquer
+        }
+
+        // Vérifie si l'utilisateur courant a bloqué la cible
+        async function checkBlockStatus() {
+            try {
+                const res = await fetch('/api/block/blocked', {
+                    headers: {
+                        'Authorization': `Bearer ${currentUserToken}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                const data = await res.json();
+
+                if (data.success) {
+                    const isBlocked = data.blockedUsers.some(u => u._id === currentTargetUserId);
+                    const btn = document.getElementById("blockButton");
+                    const warning = document.getElementById("blockedWarning");
+
+                    if (isBlocked) {
+                        btn.textContent = "Débloquer";
+                        btn.classList.remove("not-blocked");
+                        btn.classList.add("blocked");
+                        warning.style.display = "block";
+                    } else {
+                        btn.textContent = "Bloquer";
+                        btn.classList.remove("blocked");
+                        btn.classList.add("not-blocked");
+                        warning.style.display = "none";
+                    }
+                }
+            } catch (err) {
+                console.error("Erreur check blocage:", err);
+            }
+        }
+
+        // Bloquer ou débloquer
+        async function toggleBlock() {
+            const btn = document.getElementById("blockButton");
+            const isCurrentlyBlocked = btn.classList.contains("blocked");
+
+            const endpoint = isCurrentlyBlocked ? '/api/block/unblock' : '/api/block/block';
+            const body = JSON.stringify({ contactId: currentTargetUserId });
+
+            try {
+                const res = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': `Bearer ${currentUserToken}`,
+                        'Content-Type': 'application/json'
+                    },
+                    body: body
+                });
+
+                const data = await res.json();
+
+                if (data.success) {
+                    checkBlockStatus(); // Rafraîchir l’état du bouton
+
+                    // Message temporaire
+                    const status = document.getElementById("sendStatus");
+                    status.textContent = data.message;
+                    status.style.color = isCurrentlyBlocked ? "#27ae60" : "#e74c3c";
+                    setTimeout(() => status.textContent = "", 3000);
+                }
+            } catch (err) {
+                alert("Erreur réseau ou token invalide");
+                console.error(err);
+            }
+        }
+
+        // Au chargement → vérifier l’état du blocage
+        window.onload = function() {
+            checkBlockStatus();
+        };
+    </script>
 </body>
 </html>

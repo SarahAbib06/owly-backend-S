@@ -32,7 +32,9 @@ const messageSchema = new mongoose.Schema({
   time: {
     type: Date,
     default: Date.now
-  }
+  },
+
+  
 });
 
 // 🆕 INDEXES POUR PERFORMANCE
