@@ -67,6 +67,29 @@ const sendLoginAlertEmail = async (user, req, email) => {
 export const register = async (req, res) => {
   try {
     const { username, email, password, passwordConfirm } = req.body;
+    // Username : autorise uniquement lettres, chiffres, ".", "-", "_"
+// Et interdit tout espace ou caractères bizarres
+const usernameRegex = /^[a-zA-Z0-9_.-]+$/;
+
+if (!usernameRegex.test(username)) {
+  return res.status(400).json({
+    message: "Le nom d'utilisateur ne doit contenir que des lettres, chiffres, '.', '-' ou '_' et aucun espace."
+  });
+}
+
+    // Normalisation du username
+let cleanUsername = username
+  .normalize("NFKD")      // retire accents + normalise unicode
+  .replace(/\p{Diacritic}/gu, "") // enlève les accents restants
+  .trim()
+  .toLowerCase()
+  .replace(/[\s\u00A0]/g, ""); // retire TOUT type d'espace
+  
+if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+  return res.status(400).json({ message: "Le nom d'utilisateur doit contenir entre 3 et 30 caractères." });
+}
+
+
     if (!username || !email || !password || !passwordConfirm) {
       return res.status(400).json({ message: 'Tous les champs sont requis.' });
     }
@@ -83,7 +106,8 @@ export const register = async (req, res) => {
     if (!emailRegex.test(email)) {
       return res.status(400).json({ message: 'Adresse email invalide.' });
     }
-    const existingUsername = await User.findOne({ username });
+    const existingUsername = await User.findOne({ username: cleanUsername });
+
     if (existingUsername) {
       return res.status(400).json({ message: "Ce nom d'utilisateur existe déjà" });
     }
@@ -97,7 +121,7 @@ export const register = async (req, res) => {
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await PendingUser.findOneAndUpdate(
       { email },
-      { username, email, passwordHash, otp, otpExpires },
+      {  username: cleanUsername, email, passwordHash, otp, otpExpires },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
@@ -332,9 +356,27 @@ export const verifyInactivityOtp = async (req, res) => {
 // ========================================
 // 6. GET CURRENT USER
 // ========================================
-export const getMe = (req, res) => {
-  return res.json(req.user);
+export const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    res.json({
+      user: {
+        id: user._id,
+        email: user.email,
+        profilePicture: user.profilePicture || null,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
 };
+
 
 // ========================================
 // 7. FORGOT PASSWORD
