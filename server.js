@@ -52,7 +52,9 @@ app.use(cors({
     "http://localhost:5173", 
     "http://localhost:5174", 
     "http://localhost:5175",
-    "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+    "http://127.0.0.1:5500",
+    "http://127.0.0.1:5501",
+    "http://localhost:5501",      // 🆕 AJOUTÉ
     "http://localhost:5500"       // 🆕 AJOUTÉ
   ],
   credentials: true,
