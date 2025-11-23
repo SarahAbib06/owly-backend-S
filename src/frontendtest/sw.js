@@ -1,5 +1,32 @@
 // Service Worker pour les notifications push
-self.addEventListener('push', function(event) {
+const CACHE_NAME = 'owly-v1';
+const urlsToCache = [
+    '/',
+    '/login.html',
+    '/conversations.html',
+    '/test-style.css',
+    '/test-script.js'
+];
+
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(CACHE_NAME)
+            .then((cache) => cache.addAll(urlsToCache))
+    );
+});
+
+self.addEventListener('fetch', (event) => {
+    event.respondWith(
+        caches.match(event.request)
+            .then((response) => {
+                // Retourne le cache si disponible, sinon fetch du réseau
+                return response || fetch(event.request);
+            }
+        )
+    );
+});
+
+self.addEventListener('push', (event) => {
     if (!event.data) return;
 
     const data = event.data.json();
@@ -8,7 +35,10 @@ self.addEventListener('push', function(event) {
         icon: '/icon.png',
         badge: '/badge.png',
         vibrate: [100, 50, 100],
-        data: data.data,
+        data: {
+            url: data.url || '/conversations.html',
+            conversationId: data.conversationId
+        },
         actions: [
             {
                 action: 'open',
@@ -26,13 +56,12 @@ self.addEventListener('push', function(event) {
     );
 });
 
-self.addEventListener('notificationclick', function(event) {
+self.addEventListener('notificationclick', (event) => {
     event.notification.close();
 
     if (event.action === 'open') {
-        // Ouvrir l'application
         event.waitUntil(
-            clients.openWindow('http://localhost:3000') // Remplace par ton URL
+            clients.openWindow(event.notification.data.url)
         );
     }
 });
