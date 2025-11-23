@@ -32,7 +32,7 @@ const sendLoginAlertEmail = async (user, req, email) => {
   const parser = new UAParser(userAgent);
   const result = parser.getResult();
   const deviceInfo = `${result.browser.name || 'Inconnu'} ${result.browser.version?.split('.')[0] || ''} on ${result.os.name || 'Inconnu'} ${result.os.version?.split('.')[0] || ''}`.trim();
-  let location = 'Localisation inconnue';
+  // let location = 'Localisation inconnue';
   try {
     const geo = await axios.get(`http://ip-api.com/json/${ip}`, { timeout: 5000 });
     if (geo.data.status === 'success') {
@@ -48,7 +48,6 @@ const sendLoginAlertEmail = async (user, req, email) => {
       <p>Quelqu'un s'est connecté à votre compte Owly.</p>
       <hr style="margin:20px 0;">
       <p><strong>Appareil :</strong> ${deviceInfo}</p>
-      <p><strong>Localisation :</strong> ${location}</p>
       <p><strong>Heure :</strong> ${loginTime}</p>
       <hr style="margin:20px 0;">
       <p style="color:#d32f2f;">Si ce n'était pas vous, changez votre mot de passe immédiatement !</p>
@@ -346,13 +345,26 @@ export const forgotPassword = async (req, res) => {
 };
 
 // ========================================
-// 8. VÉRIFIER OTP RESET
+// 8. VÉRIFIER OTP RESET + CONFIRMATION NOUVEAU MOT DE PASSE
 // ========================================
 export const verifyOtpReset = async (req, res) => {
-  const { token, otp, newPassword } = req.body;
-  if (!token || !otp || !newPassword || newPassword.length !== 8) {
-    return res.status(400).json({ message: 'Données invalides' });
+  const { token, otp, newPassword, newPasswordConfirm } = req.body;
+
+  // Vérification des champs obligatoires
+  if (!token || !otp || !newPassword || !newPasswordConfirm) {
+    return res.status(400).json({ message: 'Tous les champs sont requis (token, otp, nouveau mot de passe et confirmation)' });
   }
+
+  // Confirmation que les deux mots de passe sont identiques
+  if (newPassword !== newPasswordConfirm) {
+    return res.status(400).json({ message: 'Les deux mots de passe ne correspondent pas.' });
+  }
+
+  // Tu avais une règle de longueur = 8 exactement → je la garde pour compatibilité
+  if (newPassword.length < 8) {
+    return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 8 caractères.' });
+  }
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     if (decoded.type !== 'reset' || decoded.otp !== otp) {
@@ -360,12 +372,14 @@ export const verifyOtpReset = async (req, res) => {
     }
     const user = await User.findById(decoded.userId);
     if (!user) return res.status(404).json({ message: 'Utilisateur non trouvé' });
+
     const salt = await bcrypt.genSalt(10);
     user.passwordHash = await bcrypt.hash(newPassword, salt);
     user.lastSeen = new Date();
     user.failedLoginAttempts = 0;
     user.lockedUntil = null;
     await user.save();
+
     return res.json({ message: 'Mot de passe réinitialisé avec succès' });
   } catch (err) {
     if (err.name === 'TokenExpiredError') return res.status(400).json({ message: 'Code expiré' });
