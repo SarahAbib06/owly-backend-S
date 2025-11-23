@@ -1,10 +1,10 @@
 import express from 'express';
 import { messageController } from '../controllers/messageController.js';
-
+import { protact } from '../middleware/authen.js';
 const router = express.Router();
 
 // 🎯 ROUTE : GET /api/messages/:conversationId
-router.get('/:conversationId', async (req, res) => {
+router.get('/:conversationId', protact, async (req, res) => {
   try {
     console.log('📨 API - Récupération messages conversation:', req.params.conversationId);
     
@@ -30,22 +30,22 @@ router.get('/:conversationId', async (req, res) => {
     });
   }
 });
+
 // 🆕 ROUTE : POST /api/messages/send
-router.post('/send', async (req, res) => {
+router.post('/send', protact, async (req, res) => {
   try {
     console.log('📨 API - Envoi message:', req.body);
     
-    const { conversationId, Id_sender, Id_receiver, content, typeMessage } = req.body;
+    const { conversationId, Id_receiver, content, typeMessage } = req.body;
     
     const messageData = {
       conversationId,
-      Id_sender, 
       Id_receiver,
       content,
       typeMessage: typeMessage || 'text'
     };
     
-    const savedMessage = await messageController.createMessage(messageData);
+    const savedMessage = await messageController.createMessage(messageData, null, req.user._id);
     
     console.log('✅ API - Message envoyé:', savedMessage._id);
     res.json({

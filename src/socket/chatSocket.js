@@ -2,6 +2,8 @@ import { messageController } from '../controllers/messageController.js';
 import { conversationController } from '../controllers/conversationController.js';
 import Participants from '../models/Participants.js';
 import User from '../models/User.js';
+import Conversation from '../models/Conversation.js';
+import jwt from 'jsonwebtoken';
 
 export const configureChatSockets = (io) => {
   console.log('🔧 WebSocket configuré - Système présence avancé activé');
@@ -9,21 +11,45 @@ export const configureChatSockets = (io) => {
   // 🆕 STOCKAGE PRÉSENCE AVANCÉ
   const userPresence = new Map();
   
+  // 🆕 PARTAGE DE LA PRÉSENCE AVEC LE CONTROLLER
+  messageController.setUserPresence(userPresence);
+
+  // 🆕 MIDDLEWARE AUTHENTIFICATION WEBSOCKET
+  io.use(async (socket, next) => {
+    try {
+      const token = socket.handshake.auth.token || socket.handshake.headers.authorization;
+      
+      if (!token) {
+        return next(new Error('Token manquant'));
+      }
+
+      const cleanToken = token.replace('Bearer ', '');
+      const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET);
+      
+      const user = await User.findById(decoded.id);
+      if (!user) {
+        return next(new Error('Utilisateur non trouvé'));
+      }
+
+      socket.userId = user._id.toString();
+      socket.username = user.username;
+      next();
+    } catch (error) {
+      console.error('❌ Auth WebSocket failed:', error.message);
+      next(new Error('Authentication failed'));
+    }
+  });
+
   io.on('connection', (socket) => {
-    console.log('🔗 User connecté:', socket.id);
+    console.log('🔗 User connecté:', socket.userId, '- Socket:', socket.id);
     
-    // 🆕 GESTION PRÉSENCE UTILISATEUR
-    let currentUserId = null;
     let presenceInterval = null;
 
-    // 🆕 REJOINDRE LA SALLE DE NOTIFICATIONS PERSONNELLE
-    socket.on('join_notifications', async (userId) => {
+    // 🆕 JOIN NOTIFICATIONS AVEC USERID DU TOKEN
+    socket.on('join_notifications', async () => {
       try {
-        if (!userId) {
-          throw new Error('User ID requis');
-        }
+        const userId = socket.userId;
         
-        currentUserId = userId;
         socket.join(`user_${userId}`);
         
         // 🆕 METTRE À JOUR LA PRÉSENCE AVANCÉE
@@ -34,22 +60,22 @@ export const configureChatSockets = (io) => {
         // 🆕 NOTIFIER LES CONTACTS DE LA PRÉSENCE
         notifyUserPresence(io, userId, 'online');
         
-        // 🆕 DÉMARRER LE HEARTBEAT CORRECT
-        presenceInterval = startPresenceHeartbeat(userId);
+        // 🆕 DÉMARRER LE HEARTBEAT
+        presenceInterval = startPresenceHeartbeat(userId, socket.id);
         
       } catch (error) {
         socket.emit('notification_error', { message: error.message });
       }
     });
 
-    // Événements existants inchangés
+    // Événements existants
     socket.on('join_conversation', (conversationId) => {
       try {
         if (!conversationId || typeof conversationId !== 'string') {
           throw new Error('ID de conversation invalide');
         }
         socket.join(conversationId);
-        console.log(`📱 User ${socket.id} a rejoint: ${conversationId}`);
+        console.log(`📱 User ${socket.userId} a rejoint: ${conversationId}`);
       } catch (error) {
         socket.emit('error', { message: error.message });
       }
@@ -57,31 +83,29 @@ export const configureChatSockets = (io) => {
 
     socket.on('leave_conversation', (conversationId) => {
       socket.leave(conversationId);
-      console.log(`📱 User ${socket.id} a quitté: ${conversationId}`);
+      console.log(`📱 User ${socket.userId} a quitté: ${conversationId}`);
     });
 
     socket.on('user_typing', async (data) => {
       try {
-        const { conversationId, userId, isTyping, userName } = data;
+        const { conversationId, isTyping } = data;
         
-        if (!conversationId || !userId) {
-          throw new Error('Données typing incomplètes');
+        if (!conversationId) {
+          throw new Error('ID conversation requis');
         }
 
-        console.log(`⌨️ User ${userName || userId} ${isTyping ? 'typing...' : 'stopped typing'} in ${conversationId}`);
+        console.log(`⌨️ User ${socket.username} ${isTyping ? 'typing...' : 'stopped typing'} in ${conversationId}`);
         
         socket.to(conversationId).emit('user_typing', {
-          userId: userId,
+          userId: socket.userId,
           isTyping: isTyping,
           conversationId: conversationId,
-          userName: userName,
+          userName: socket.username,
           timestamp: new Date()
         });
         
-        // 🆕 METTRE À JOUR L'ACTIVITÉ
-        if (userId) {
-          await updateUserActivity(userId, socket.id);
-        }
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
         
       } catch (error) {
         console.error('💥 Erreur typing indicator:', error.message);
@@ -92,7 +116,7 @@ export const configureChatSockets = (io) => {
     socket.on('get_conversation_history', async (data) => {
       try {
         console.log('📜 Demande historique:', data);
-        const { conversationId, userId } = data;
+        const { conversationId } = data;
         
         const messages = await messageController.getConversationMessages(conversationId);
         
@@ -113,7 +137,7 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI MESSAGE - AVEC SYSTÈME INTELLIGENT
+    // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ
     socket.on('send_message', async (data) => {
       console.log('📨 Message reçu:', data);
       
@@ -124,73 +148,62 @@ export const configureChatSockets = (io) => {
           messageData = JSON.parse(data);
         }
 
-        const requiredFields = ['Id_sender', 'content'];
+        const requiredFields = ['content'];
         const missingFields = requiredFields.filter(field => !messageData[field]);
         
         if (missingFields.length > 0) {
           throw new Error(`Champs manquants: ${missingFields.join(', ')}`);
         }
 
+        // Vérification autorisation si conversationId fourni
         if (messageData.conversationId) {
           await conversationController.checkUserAuthorization(
-            messageData.Id_sender, 
+            socket.userId, 
             messageData.conversationId
           );
         }
 
-        // 💾 SAUVEGARDE DU MESSAGE AVEC IO POUR LES NOTIFICATIONS INTELLIGENTES
-        const savedMessage = await messageController.createMessage(messageData, io);
+        const finalMessageData = {
+          ...messageData,
+          Id_sender: socket.userId // ← SÉCURISÉ DU TOKEN
+        };
 
-        // 🆕 METTRE À JOUR L'ACTIVITÉ DE L'EXPÉDITEUR
-        await updateUserActivity(messageData.Id_sender, socket.id);
+        // SAUVEGARDE DU MESSAGE
+        const savedMessage = await messageController.createMessage(finalMessageData, io, socket.userId);
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
 
         // Réponse à l'émetteur
-        const senderResponse = {
-          event: 'message_sent',
+        socket.emit('message_sent', {
           success: true,
           data: savedMessage,
-          timestamp: new Date(),
-          socketId: socket.id
-        };
-        socket.emit('message_sent', senderResponse);
-
-        // Diffusion du message à tous les participants
-        const broadcastMessage = {
-          event: 'new_message',
-          data: savedMessage,
           timestamp: new Date()
-        };
-        io.to(savedMessage.conversationId.toString()).emit('new_message', broadcastMessage);
-        
+        });
+
         console.log('🎉 Message diffusé - ID:', savedMessage._id);
 
       } catch (error) {
         console.error('💥 Erreur traitement message:', error.message);
         
-        const errorResponse = {
-          event: 'message_error',
+        socket.emit('message_error', {
           success: false,
           error: error.message,
-          timestamp: new Date(),
-          socketId: socket.id
-        };
-        
-        socket.emit('message_sent', errorResponse);
+          timestamp: new Date()
+        });
       }
     });
 
-    // 🆕 ÉVÉNEMENTS POUR LES COMPTEURS
-    socket.on('get_unread_counts', async (data) => {
+    // ÉVÉNEMENTS COMPTEURS
+    socket.on('get_unread_counts', async () => {
       try {
-        const { userId } = data;
+        const userId = socket.userId;
         
-        // Récupère les conversations avec des messages non lus
         const conversations = await Participants.find({ 
           Id_User: userId 
         }).populate({
           path: 'Id_Conversation',
-          match: { "unreadCounts.count": { $gt: 0 } },
-          populate: { path: 'unreadCounts.userId' }
+          match: { "unreadCounts.count": { $gt: 0 } }
         });
 
         const unreadData = conversations
@@ -198,7 +211,7 @@ export const configureChatSockets = (io) => {
           .map(p => ({
             conversationId: p.Id_Conversation._id,
             unreadCount: p.Id_Conversation.unreadCounts.find(u => 
-              u.userId.toString() === userId.toString()
+              u.userId.toString() === userId
             )?.count || 0
           }));
 
@@ -217,11 +230,10 @@ export const configureChatSockets = (io) => {
 
     socket.on('mark_conversation_read', async (data) => {
       try {
-        const { conversationId, userId } = data;
+        const { conversationId } = data;
+        const userId = socket.userId;
         
-        // Met à jour le compteur à 0
-        const Conversation = await import('../models/Conversation.js');
-        await Conversation.default.findOneAndUpdate(
+        await Conversation.findOneAndUpdate(
           { _id: conversationId, "unreadCounts.userId": userId },
           { $set: { "unreadCounts.$.count": 0 } }
         );
@@ -236,35 +248,31 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT HEARTBEAT PRÉSENCE
-    socket.on('user_heartbeat', async (data) => {
-      if (currentUserId) {
-        await updateUserActivity(currentUserId, socket.id);
-        
-        // Mettre à jour le statut en mémoire
-        userPresence.set(currentUserId, {
-          ...userPresence.get(currentUserId),
-          lastSeen: new Date(),
-          status: 'online'
-        });
-      }
+    // ÉVÉNEMENT HEARTBEAT PRÉSENCE
+    socket.on('user_heartbeat', async () => {
+      const userId = socket.userId;
+      await updateUserActivity(userId, socket.id);
+      
+      userPresence.set(userId, {
+        ...userPresence.get(userId),
+        lastSeen: new Date(),
+        status: 'online'
+      });
     });
 
-    // 🆕 ÉVÉNEMENT CHANGEMENT STATUT
+    // ÉVÉNEMENT CHANGEMENT STATUT
     socket.on('user_status_change', async (data) => {
-      if (currentUserId && data.status) {
-        await updateUserStatus(currentUserId, data.status);
-        notifyUserPresence(io, currentUserId, data.status);
+      if (data.status) {
+        await updateUserStatus(socket.userId, data.status);
+        notifyUserPresence(io, socket.userId, data.status);
       }
     });
 
-    // Événements existants inchangés
-    socket.on('ping', (data) => {
+    // Événements existants
+    socket.on('ping', () => {
       socket.emit('pong', {
-        event: 'pong',
         message: 'Serveur actif ✅',
-        timestamp: new Date(),
-        socketId: socket.id
+        timestamp: new Date()
       });
     });
 
@@ -277,29 +285,32 @@ export const configureChatSockets = (io) => {
       }
     });
 
+    // 🆕 DÉCONNEXION ROBUSTE
     socket.on('disconnect', async (reason) => {
-      console.log('🔴 User déconnecté:', socket.id, 'Raison:', reason);
+      console.log('🔴 User déconnecté:', socket.userId, '- Raison:', reason);
       
-      // 🆕 ARRÊTER LE HEARTBEAT CORRECTEMENT
+      // NETTOYAGE INTERVAL
       if (presenceInterval) {
         clearInterval(presenceInterval);
         presenceInterval = null;
       }
       
-      // 🆕 METTRE À JOUR LA PRÉSENCE EN OFFLINE - CORRIGÉ
-      if (currentUserId) {
-        await removeUserSession(currentUserId, socket.id);
+      // GARANTIR LA DÉCONNEXION
+      if (socket.userId) {
+        await removeUserSession(socket.userId, socket.id);
         
-        // Vérifier si l'user n'a plus de sessions actives
-        const remainingSessions = await getRemainingSessions(currentUserId);
+        const remainingSessions = await getRemainingSessions(socket.userId);
         
         if (remainingSessions === 0) {
-          await updateUserStatus(currentUserId, 'offline');
-          notifyUserPresence(io, currentUserId, 'offline');
-          console.log(`🔔 User ${currentUserId} est maintenant offline (0 sessions)`);
+          await updateUserStatus(socket.userId, 'offline');
+          notifyUserPresence(io, socket.userId, 'offline');
+          console.log(`🔔 User ${socket.userId} est maintenant offline (0 sessions)`);
         } else {
-          console.log(`🔔 User ${currentUserId} a ${remainingSessions} sessions restantes`);
+          console.log(`🔔 User ${socket.userId} a ${remainingSessions} sessions restantes`);
         }
+        
+        // NETTOYAGE MÉMOIRE
+        userPresence.delete(socket.userId);
       }
     });
 
@@ -308,7 +319,7 @@ export const configureChatSockets = (io) => {
     });
   });
 
-  // 🆕 FONCTIONS HELPER PRÉSENCE AVANCÉE - CORRIGÉES
+  // FONCTIONS HELPER PRÉSENCE AVANCÉE
   
   async function updateUserPresence(userId, socketId, status = 'online') {
     try {
@@ -322,8 +333,7 @@ export const configureChatSockets = (io) => {
           $push: {
             activeSessions: {
               socketId: socketId,
-              deviceType: 'desktop',
-              userAgent: 'test-browser',
+              deviceType: 'web',
               connectedAt: new Date(),
               lastActivity: new Date()
             }
@@ -384,33 +394,33 @@ export const configureChatSockets = (io) => {
     }
   }
   
-  // 🆕 FONCTION CORRIGÉE POUR SUPPRIMER LES SESSIONS
+  // FONCTION CORRIGÉE POUR SUPPRIMER LES SESSIONS
   async function removeUserSession(userId, socketId) {
     try {
       console.log(`🗑️  Suppression session: ${socketId} pour user: ${userId}`);
       
-      // 1. Supprimer de la BDD
+      // Supprimer de la BDD
       await User.findByIdAndUpdate(userId, {
         $pull: {
           activeSessions: { socketId: socketId }
         }
       });
       
-      // 2. 🆕 CORRECTION : Mettre à jour la présence en mémoire
+      // Mettre à jour la présence en mémoire
       if (userPresence.has(userId)) {
         const presence = userPresence.get(userId);
         
-        // Filtrer les sessions pour enlever celle qui se déconnecte
-        const beforeCount = presence.sessions ? presence.sessions.length : 0;
-        presence.sessions = presence.sessions.filter(s => s.socketId !== socketId);
-        const afterCount = presence.sessions ? presence.sessions.length : 0;
-        
-        console.log(`🔢 Sessions ${userId}: ${beforeCount} → ${afterCount}`);
-        
-        // Si plus de sessions, marquer comme offline
-        if (afterCount === 0) {
-          presence.status = 'offline';
-          console.log(`🔔 User ${userId} marqué comme offline (0 sessions)`);
+        if (presence.sessions) {
+          const beforeCount = presence.sessions.length;
+          presence.sessions = presence.sessions.filter(s => s.socketId !== socketId);
+          const afterCount = presence.sessions.length;
+          
+          console.log(`🔢 Sessions ${userId}: ${beforeCount} → ${afterCount}`);
+          
+          if (afterCount === 0) {
+            presence.status = 'offline';
+            console.log(`🔔 User ${userId} marqué comme offline (0 sessions)`);
+          }
         }
       }
       
@@ -419,7 +429,6 @@ export const configureChatSockets = (io) => {
     }
   }
   
-  // 🆕 FONCTION POUR COMPTER LES SESSIONS RÉELLES
   async function getRemainingSessions(userId) {
     try {
       const user = await User.findById(userId);
@@ -429,6 +438,20 @@ export const configureChatSockets = (io) => {
       return 0;
     }
   }
-  
 
+  function startPresenceHeartbeat(userId, socketId) {
+    return setInterval(async () => {
+      if (userPresence.has(userId)) {
+        await updateUserActivity(userId, socketId);
+      }
+    }, 30000); // 30 secondes
+  }
+
+  function notifyUserPresence(io, userId, status) {
+    io.emit('user_presence_changed', {
+      userId: userId,
+      status: status,
+      lastSeen: new Date()
+    });
+  }
 };

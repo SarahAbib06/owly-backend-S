@@ -10,10 +10,13 @@ import mongoose from 'mongoose';
 let userPresence = new Map();
 
 export const messageController = {
-  createMessage: async (messageData, io = null) => {
-    const { conversationId, Id_sender, Id_receiver, content, typeMessage = 'text' } = messageData;
+  createMessage: async (messageData, io = null, userIdFromToken = null) => {
+    // 🎯 RÉCUPÉRATION Id_sender SÉCURISÉ
+    const Id_sender = userIdFromToken;
+    
+    const { conversationId, Id_receiver, content, typeMessage = 'text' } = messageData;
 
-    // 🎯 VÉRIFICATION IDs FORMAT
+    // 🎯 VÉRIFICATIONS
     if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
       throw new Error('ID expéditeur invalide');
     }
@@ -24,9 +27,8 @@ export const messageController = {
       throw new Error('ID conversation invalide');
     }
 
-    // 🎯 VÉRIFICATION CONTENU
     if (!content || typeof content !== 'string') {
-      throw new Error('Le contenu du message est requis et doit être une chaîne de caractères');
+      throw new Error('Le contenu du message est requis');
     }
 
     if (content.trim().length === 0) {
@@ -37,7 +39,6 @@ export const messageController = {
       throw new Error('Le message est trop long (max 1000 caractères)');
     }
 
-    // 🎯 VÉRIFICATION TYPE MESSAGE
     const allowedTypes = ['text', 'image', 'video', 'file'];
     if (!allowedTypes.includes(typeMessage)) {
       throw new Error(`Type de message non supporté: ${typeMessage}`);
@@ -62,131 +63,96 @@ export const messageController = {
     const savedMessage = await message.save();
     console.log('✅ Message sauvegardé:', savedMessage._id);
 
-    // 🆕 OPTIMISATION BULK : METTRE À JOUR LES COMPTEURS NON-LUS
+    // 🆕 COMPTEURS NON-LUS
     try {
-      console.log('🔢 Mise à jour BULK des compteurs non-lus...');
+      console.log('🔢 Mise à jour des compteurs non-lus...');
       
-      // Récupère tous les participants de la conversation
-      const participants = await Participants.find({ 
-        Id_Conversation: finalConversationId 
-      });
+      let participants = [];
+      const conversation = await Conversation.findById(finalConversationId);
       
-      console.log(`👥 ${participants.length} participants trouvés`);
+      if (conversation && conversation.type === "group") {
+        participants = conversation.Id_participant.map(userId => ({
+          Id_User: userId
+        }));
+      } else {
+        participants = await Participants.find({ 
+          Id_Conversation: finalConversationId 
+        });
+      }
       
-      // 🆕 OPÉRATIONS BULK POUR TOUS LES PARTICIPANTS
-      const bulkOperations = [];
-      const participantsToNotify = [];
-      
-      participants.forEach(participant => {
-        if (participant.Id_User.toString() !== Id_sender.toString()) {
-          participantsToNotify.push(participant.Id_User);
-          
-          // Opération pour incrémenter le compteur existant
-          bulkOperations.push({
-            updateOne: {
-              filter: { 
-                _id: finalConversationId,
-                "unreadCounts.userId": participant.Id_User
-              },
-              update: { 
-                $inc: { "unreadCounts.$.count": 1 },
-                $set: { lastMessageAt: new Date() }
-              }
-            }
-          });
-        }
-      });
-      
-      // 🆕 EXÉCUTER TOUTES LES OPÉRATIONS EN 1 SEUL APPEL
-      if (bulkOperations.length > 0) {
-        const bulkResult = await Conversation.bulkWrite(bulkOperations);
-        console.log(`📈 BULK: ${bulkResult.modifiedCount} compteurs mis à jour`);
+      for (let participant of participants) {
+        const participantId = participant.Id_User.toString();
         
-        // 🆕 CRÉER LES COMPTEURS MANQUANTS EN BULK AUSSI
-        const missingCountersOps = [];
-        const updatedConversation = await Conversation.findById(finalConversationId);
-        
-        for (const participantId of participantsToNotify) {
-          const hasCounter = updatedConversation.unreadCounts.some(
-            uc => uc.userId.toString() === participantId.toString()
+        if (participantId !== Id_sender.toString()) {
+          await Conversation.findOneAndUpdate(
+            { 
+              _id: finalConversationId,
+              "unreadCounts.userId": participantId
+            },
+            { 
+              $inc: { "unreadCounts.$.count": 1 },
+              $set: { lastMessageAt: new Date() }
+            },
+            { upsert: true, new: true }
           );
-          
-          if (!hasCounter) {
-            missingCountersOps.push({
-              updateOne: {
-                filter: { _id: finalConversationId },
-                update: { 
-                  $push: { 
-                    unreadCounts: { 
-                      userId: participantId, 
-                      count: 1 
-                    } 
-                  },
-                  $set: { lastMessageAt: new Date() }
-                }
-              }
-            });
-          }
-        }
-        
-        if (missingCountersOps.length > 0) {
-          const missingResult = await Conversation.bulkWrite(missingCountersOps);
-          console.log(`🆕 BULK: ${missingResult.modifiedCount} nouveaux compteurs créés`);
         }
       }
       
-      console.log('✅ Compteurs non-lus optimisés (BULK)');
+      console.log('✅ Compteurs non-lus mis à jour');
     } catch (error) {
-      console.log('⚠️ Erreur compteurs BULK:', error.message);
+      console.log('⚠️ Erreur compteurs:', error.message);
     }
 
-    // 🆕 OPTIMISATION : NOTIFICATIONS INTELLIGENTES AVEC PRÉSENCE
+    // 🆕 NOTIFICATIONS INTELLIGENTES AVEC DÉSACTIVATION COMPLÈTE
     try {
       console.log('🔔 Gestion intelligente des notifications...');
       
-      // Récupérer les participants de la conversation
-      const participants = await Participants.find({ 
-        Id_Conversation: finalConversationId 
-      }).populate('Id_User', 'username');
+      let participants = [];
+      const conversation = await Conversation.findById(finalConversationId);
       
-      // Récupérer le nom de l'expéditeur
+      if (conversation && conversation.type === "group") {
+        participants = conversation.Id_participant.map(userId => ({
+          Id_User: { _id: userId }
+        }));
+      } else {
+        participants = await Participants.find({ 
+          Id_Conversation: finalConversationId 
+        }).populate('Id_User', 'username');
+      }
+      
       const sender = await User.findById(Id_sender);
       const senderName = sender?.username || 'Quelqu\'un';
       
-      // 🆕 DEBUG AVANCÉ POUR VOIR LA LOGIQUE
-      console.log('🔍 DEBUG - Logique notifications:');
-      console.log('  - IO disponible:', !!io);
-      console.log('  - Participants:', participants.length);
-      
-      // 🆕 LOGIQUE DE PRIORITÉ INTELLIGENTE AVEC PRÉSENCE
+      // 🆕 LOGIQUE : RESPECT TOTAL DE LA DÉSACTIVATION
       for (let participant of participants) {
-        if (participant.Id_User && participant.Id_User._id.toString() !== Id_sender.toString()) {
-          const participantId = participant.Id_User._id.toString();
-          const participantName = participant.Id_User.username || 'Utilisateur';
+        const participantId = participant.Id_User._id.toString();
+        
+        if (participantId !== Id_sender.toString()) {
+          const participantUser = await User.findById(participantId);
+          const participantName = participantUser?.username || 'Utilisateur';
           
-          // 🎯 DÉTERMINER SI ON ENVOIE WEBSOCKET OU PUSH (AVEC PRÉSENCE)
-          const shouldSendWebSocket = io && await isUserOnlineAdvanced(io, participantId);
-          const shouldSendPush = await shouldSendPushNotification(participantId);
+          // 🎯 VÉRIFIER SI LES NOTIFICATIONS SONT COMPLÈTEMENT DÉSACTIVÉES
+          const notificationsEnabled = await areNotificationsEnabled(participantId);
           
-          console.log(`🔍 ${participantName}:`);
-          console.log(`    WebSocket: ${shouldSendWebSocket}`);
-          console.log(`    Push: ${shouldSendPush}`);
-          console.log(`    Décision: ${shouldSendWebSocket ? 'WebSocket UNIQUEMENT' : shouldSendPush ? 'Push UNIQUEMENT' : 'AUCUNE'}`);
+          if (!notificationsEnabled) {
+            console.log(`🔕 NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`);
+            continue; // 🚨 PAS DE NOTIFICATION DU TOUT (ni WebSocket ni Push)
+          }
           
-          const notificationTitle = `Nouveau message de ${senderName}`;
-          const notificationBody = content.length > 30 ? content.substring(0, 30) + '...' : content;
-          const notificationData = {
-            conversationId: finalConversationId.toString(),
-            messageId: savedMessage._id.toString(),
-            type: 'new_message',
-            senderName: senderName
-          };
+          // 🎯 SI NOTIFICATIONS ACTIVÉES, APPLIQUER LA LOGIQUE NORMALE
+          const isUserOnline = await isUserOnlineAdvanced(io, participantId);
           
-          // 🆕 STRATÉGIE D'ENVOI OPTIMISÉE - UN SEUL TYPE DE NOTIFICATION
-          if (shouldSendWebSocket) {
-            console.log(`🔔 Envoi WebSocket UNIQUEMENT à: ${participantName} (en ligne)`);
+          console.log(`🔍 ${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`);
+          
+          const notificationTitle = conversation?.type === "group" 
+            ? `📦 ${conversation.groupName} - ${senderName}`
+            : `Nouveau message de ${senderName}`;
             
-            // 🚫 WEBSEUL SOCKET - PAS DE PUSH SI EN LIGNE
+          const notificationBody = content.length > 30 ? content.substring(0, 30) + '...' : content;
+          
+          if (isUserOnline && io) {
+            console.log(`🔔 WebSocket à: ${participantName}`);
+            
             io.to(`user_${participantId}`).emit('new_message_alert', {
               type: 'new_message',
               conversationId: finalConversationId,
@@ -194,31 +160,50 @@ export const messageController = {
               senderName: senderName,
               messagePreview: content.substring(0, 50),
               timestamp: new Date(),
-              messageId: savedMessage._id
+              messageId: savedMessage._id,
+              isGroup: conversation?.type === "group",
+              groupName: conversation?.groupName
             });
             
-          } else if (shouldSendPush) {
-            console.log(`📱 Envoi Push UNIQUEMENT à: ${participantName} (hors ligne)`);
+          } else {
+            console.log(`📱 Push notification à: ${participantName}`);
             
-            // 🚫 PUSH UNIQUEMENT - PAS DE WEBSOCKET SI HORS LIGNE
             await pushNotificationService.sendToUser(
-              participant.Id_User._id,
+              participantId,
               notificationTitle,
               notificationBody,
-              notificationData
+              {
+                conversationId: finalConversationId.toString(),
+                messageId: savedMessage._id.toString(),
+                type: 'new_message',
+                senderName: senderName,
+                isGroup: conversation?.type === "group",
+                groupName: conversation?.groupName
+              }
             );
-          } else {
-            console.log(`⏸️  Aucune notification pour: ${participantName}`);
           }
         }
       }
       
       console.log('✅ Notifications intelligentes traitées');
     } catch (error) {
-      console.log('⚠️ Erreur notifications intelligentes:', error.message);
+      console.log('⚠️ Erreur notifications:', error.message);
     }
 
-    // 🆕 RETOURNE LE MESSAGE
+    // Diffusion WebSocket du message (toujours envoyé, indépendant des notifications)
+    if (io) {
+      io.to(finalConversationId.toString()).emit('new_message', {
+        _id: savedMessage._id,
+        conversationId: finalConversationId,
+        Id_sender: Id_sender,
+        content: content.trim(),
+        typeMessage: typeMessage,
+        status: 'sent',
+        timestamp: new Date(),
+        isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
+      });
+    }
+
     return {
       _id: savedMessage._id,
       conversationId: finalConversationId,
@@ -226,7 +211,8 @@ export const messageController = {
       content: content.trim(),
       typeMessage: typeMessage,
       status: 'sent',
-      timestamp: new Date()
+      timestamp: new Date(),
+      isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
     };
   },
 
@@ -234,7 +220,6 @@ export const messageController = {
     try {
       console.log(`🔍 Récupération messages conversation ${conversationId}, page ${page}`);
       
-      // 🎯 VÉRIFICATION ID CONVERSATION
       if (!mongoose.Types.ObjectId.isValid(conversationId)) {
         throw new Error('ID conversation invalide');
       }
@@ -242,7 +227,7 @@ export const messageController = {
       const skip = (page - 1) * limit;
       
       const messages = await Message.find({ conversationId: conversationId })
-        .sort({ createdAt: -1 }) // 🆕 OPTIMISATION: Plus récents d'abord
+        .sort({ createdAt: -1 })
         .skip(skip)
         .limit(limit)
         .lean();
@@ -256,16 +241,26 @@ export const messageController = {
     }
   },
 
-  // 🆕 FONCTION POUR INITIALISER LA PRÉSENCE (partagée avec chatSockets)
+  // 🆕 FONCTION POUR INITIALISER LA PRÉSENCE
   setUserPresence: (presenceMap) => {
     userPresence = presenceMap;
+  },
+
+  // 🆕 FONCTION POUR ENVOYER UN MESSAGE DANS UN GROUPE
+  sendGroupMessage: async (groupId, senderId, content, typeMessage = 'text', io = null) => {
+    const messageData = {
+      conversationId: groupId,
+      content: content,
+      typeMessage: typeMessage
+    };
+    
+    return await messageController.createMessage(messageData, io, senderId);
   }
 };
 
-// 🆕 FONCTION PRÉSENCE AVANCÉE (utilise userPresence partagée)
+// 🆕 FONCTION PRÉSENCE AVANCÉE
 async function isUserOnlineAdvanced(io, userId) {
   try {
-    // 🎯 VÉRIFICATION RAPIDE EN MÉMOIRE
     if (userPresence && userPresence.has(userId)) {
       const presence = userPresence.get(userId);
       const isOnline = presence.status === 'online' && presence.sessions && presence.sessions.length > 0;
@@ -273,7 +268,6 @@ async function isUserOnlineAdvanced(io, userId) {
       return isOnline;
     }
     
-    // 🎯 VÉRIFICATION EN BDD (fallback)
     const user = await User.findById(userId);
     const isOnlineDB = user && user.status === 'online' && user.activeSessions && user.activeSessions.length > 0;
     console.log(`🔍 Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`);
@@ -283,7 +277,6 @@ async function isUserOnlineAdvanced(io, userId) {
   } catch (error) {
     console.log('⚠️ Erreur vérification présence avancée:', error.message);
     
-    // 🎯 FALLBACK: Vérification WebSocket basique
     const userRoom = io.sockets.adapter.rooms.get(`user_${userId}`);
     const isOnlineWS = userRoom && userRoom.size > 0;
     console.log(`🔍 Présence WebSocket ${userId}: ${isOnlineWS}`);
@@ -292,35 +285,22 @@ async function isUserOnlineAdvanced(io, userId) {
   }
 }
 
-async function shouldSendPushNotification(userId) {
+// 🆕 FONCTION : VÉRIFIER SI LES NOTIFICATIONS SONT ACTIVÉES
+async function areNotificationsEnabled(userId) {
   try {
-    // 🆕 VÉRIFIER LES PRÉFÉRENCES UTILISATEUR
     const user = await User.findById(userId);
     
-    if (!user) return true;
+    if (!user) return true; // Par défaut activées si user non trouvé
     
-    // 🚫 USER A DÉSACTIVÉ LES NOTIFICATIONS
+    // 🎯 SI pushEnabled = false → NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES
     if (user.notificationPreferences && user.notificationPreferences.pushEnabled === false) {
-      console.log(`🔕 Notifications désactivées pour: ${user.username}`);
       return false;
-    }
-    
-    // 🕒 HEURES SILENCIEUSES
-    if (user.notificationPreferences && user.notificationPreferences.quietHours && user.notificationPreferences.quietHours.enabled) {
-      const now = new Date();
-      const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-      const { start, end } = user.notificationPreferences.quietHours;
-      
-      if (currentTime >= start || currentTime <= end) {
-        console.log(`🌙 Heures silencieuses pour: ${user.username} (${start}-${end})`);
-        return false;
-      }
     }
     
     return true;
     
   } catch (error) {
-    console.log('⚠️ Erreur vérification push:', error.message);
-    return true; // Fallback: envoyer la notification
+    console.log('⚠️ Erreur vérification notifications:', error.message);
+    return true; // Par défaut activées en cas d'erreur
   }
 }

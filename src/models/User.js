@@ -36,8 +36,8 @@ const userSchema = new mongoose.Schema(
       soundEnabled: { type: Boolean, default: true },
       quietHours: {
         enabled: { type: Boolean, default: false },
-        start: { type: String, default: '22:00' }, // Format HH:mm
-        end: { type: String, default: '08:00' }
+        start: { type: String, default: '23:00' }, // Format HH:mm
+        end: { type: String, default: '07:00' }
       }
     },
     

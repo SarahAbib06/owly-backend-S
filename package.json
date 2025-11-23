@@ -27,11 +27,12 @@
     "mongoose": "^8.19.3",
     "multer": "^2.0.2",
     "nodemailer": "^7.0.10",
+    "react-router-dom": "^7.9.6",
     "socket.io": "^4.8.1",
-    "web-push": "^3.6.7",
-    "react-router-dom": "^7.9.5",
+    "socket.io-client": "^4.8.1",
     "streamifier": "^0.1.1",
-    "ua-parser-js": "^2.0.6"
+    "ua-parser-js": "^2.0.6",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

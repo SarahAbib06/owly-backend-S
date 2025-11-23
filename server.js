@@ -1,59 +1,78 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 
 import connectDB from './src/config/db.js';
-
 import { configureChatSockets } from './src/socket/chatSocket.js';
 import messageRoutes from './src/routes/messageRoutes.js';
 import conversationRoutes from './src/routes/conversationRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
-
 import authRoutes from './src/routes/auth.js';
-
-
+import { participantController } from './src/controllers/participantController.js';
+import userRoutes from './src/routes/userRoutes.js';
 
 console.log('🔍 MONGODB_URI:', process.env.MONGODB_URI ? '✅ Chargé' : '❌ Non défini');
 console.log('🔍 JWT_SECRET:', process.env.JWT_SECRET ? '✅ Chargé' : '❌ Non défini');
-const app = express();
 
+const app = express();
+const server = createServer(app);
+const io = new Server(server, {
+  cors: {
+    origin: [
+      "http://localhost:5173", 
+      "http://localhost:5174", 
+      "http://localhost:5175",
+      "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+      "http://localhost:5500"       // 🆕 AJOUTÉ
+    ],
+    credentials: true
+  }
+});
+
+// ✅ 1. Connexion à la base de données
 connectDB();
 
+// 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
+const cleanupOrphans = async () => {
+  try {
+    console.log('🔧 Nettoyage des participants orphelins...');
+    await participantController.cleanupOrphanParticipants();
+  } catch (error) {
+    console.log('⚠️ Nettoyage participants échoué:', error.message);
+  }
+};
+cleanupOrphans();
 
-// Routes
+// ✅ 2. Middlewares CORS et JSON
+app.use(cors({
+  origin: [
+    "http://localhost:5173", 
+    "http://localhost:5174", 
+    "http://localhost:5175",
+    "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+    "http://localhost:5500"       // 🆕 AJOUTÉ
+  ],
+  credentials: true,
+}));
+app.use(express.json());
+app.use("/uploads", express.static("uploads"));
+
+// ✅ 3. Routes
 app.get('/', (req, res) => {
   res.json({ message: 'Owly API is running' });
 });
 
-// 🎯 ROUTE PRINCIPALE POUR LES MESSAGES
 app.use('/api/messages', messageRoutes);
-
-// 🆕 ROUTE POUR LES CONVERSATIONS ET COMPTEURS
 app.use('/api/conversations', conversationRoutes);
-
-// Socket.io
-configureChatSockets(io);
 app.use('/api/notifications', notificationRoutes);
-
-
-// ✅ 1. Autoriser les requêtes CORS AVANT tout
-app.use(cors({
-  origin: ["http://localhost:5173", "http://localhost:5174", "http://localhost:5175"],
-  credentials: true,
-}));
-
-// ✅ 2. Activer la lecture du JSON
-app.use(express.json());
-app.use("/uploads", express.static("uploads"));
-
-
-// ✅ 3. Tes routes après
 app.use('/api/auth', authRoutes);
+app.use('/api/users', userRoutes);
 
+// ✅ 4. Configuration Socket.io
+configureChatSockets(io);
 
+// ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-
-
-
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
