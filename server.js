@@ -1,58 +1,93 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+
 import { createServer } from 'http';
 import { Server } from 'socket.io';
-
 import connectDB from './src/config/db.js';
 import { configureChatSockets } from './src/socket/chatSocket.js';
 import messageRoutes from './src/routes/messageRoutes.js';
 import conversationRoutes from './src/routes/conversationRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
-import blockRoutes from './src/routes/block.routes.js';
+import authRoutes from './src/routes/auth.js';
+import relationRoutes from './src/routes/relation.js';
 
-dotenv.config();
+import { participantController } from './src/controllers/participantController.js';
+import userRoutes from './src/routes/userRoutes.js';
+
+console.log('🔍 MONGODB_URI:', process.env.MONGODB_URI ? '✅ Chargé' : '❌ Non défini');
+console.log('🔍 JWT_SECRET:', process.env.JWT_SECRET ? '✅ Chargé' : '❌ Non défini');
+
 
 const app = express();
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
+const server = createServer(app);
+const io = new Server(server, {
   cors: {
-    origin: process.env.CLIENT_URL,
+    origin: [
+      "http://localhost:5173", 
+      "http://localhost:5174", 
+      "http://localhost:5175",
+      "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+      "http://localhost:5500"       // 🆕 AJOUTÉ
+    ],
     credentials: true
   }
 });
 
-// Middlewares
-app.use(cors({ origin: process.env.CLIENT_URL, credentials: true }));
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Connect to database
+// ✅ 1. Connexion à la base de données
 connectDB();
 
-// Routes
+// 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
+const cleanupOrphans = async () => {
+  try {
+    console.log('🔧 Nettoyage des participants orphelins...');
+    await participantController.cleanupOrphanParticipants();
+  } catch (error) {
+    console.log('⚠️ Nettoyage participants échoué:', error.message);
+  }
+};
+cleanupOrphans();
+
+// ✅ 2. Middlewares CORS et JSON
+
+app.use(cors({
+  origin: [
+    "http://localhost:5173", 
+    "http://localhost:5174", 
+    "http://localhost:5175",
+    "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+    "http://localhost:5500"       // 🆕 AJOUTÉ
+  ],
+  credentials: true,
+}));
+app.use(express.json());
+app.use("/uploads", express.static("uploads"));
+// ✅ 3. Routes
+
 app.get('/', (req, res) => {
   res.json({ message: 'Owly API is running' });
 });
 
-// 🎯 ROUTE PRINCIPALE POUR LES MESSAGES
 app.use('/api/messages', messageRoutes);
-
-// 🆕 ROUTE POUR LES CONVERSATIONS ET COMPTEURS
 app.use('/api/conversations', conversationRoutes);
-
-// Socket.io
-configureChatSockets(io);
 app.use('/api/notifications', notificationRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api/relations', relationRoutes);
 
-//Bloquer
-app.use('/api/block', blockRoutes);
-// → URLs finales :
-// POST   /api/block/block
-// POST   /api/block/unblock
-// GET    /api/block/blocked
 
+// ✅ 3. Configuration Socket.io (APRÈS avoir créé `io`)
+configureChatSockets(io);
+
+app.use('/api/users', userRoutes);
+
+// ✅ 4. Configuration Socket.io
+configureChatSockets(io);
+
+// ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+
+
+
+

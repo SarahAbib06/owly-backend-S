@@ -3,35 +3,33 @@ import Message from '../models/Message.js';
 import Conversation from '../models/Conversation.js';
 import Participants from '../models/Participants.js';
 import User from '../models/User.js';
-import Relation from '../models/Relation.js'; // AJOUTÉ
+import Relation from '../models/Relation.js';
 import { conversationController } from './conversationController.js';
 import { pushNotificationService } from '../services/pushNotificationService.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
 
+// CLÉ SECRÈTE — METS ÇA DANS TON .env (64 caractères hex = 32 bytes)
 const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY || 'a'.repeat(64);
 const ALGORITHM = 'aes-256-gcm';
 
-function encryptMessage(plainText) {
+// CHIFFREMENT
+function encryptContent(text) {
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
-  let encrypted = cipher.update(plainText, 'utf8', 'hex');
+  let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  const payload = {
-    iv: iv.toString('hex'),
-    data: encrypted,
-    tag: cipher.getAuthTag().toString('hex')
-  };
+  const authTag = cipher.getAuthTag();
+  const payload = { iv: iv.toString('hex'), data: encrypted, tag: authTag.toString('hex') };
   return JSON.stringify(payload);
 }
 
-function decryptMessage(storedContent) {
-  if (!storedContent || typeof storedContent !== 'string') return '[Message vide]';
-  if (!storedContent.startsWith('{') || !storedContent.includes(':')) {
-    return storedContent;
-  }
+// DÉCHIFFREMENT
+function decryptContent(stored) {
+  if (!stored || typeof stored !== 'string') return '[Message vide]';
+  if (!stored.startsWith('{') || !stored.includes(':')) return stored;
   try {
-    const payload = JSON.parse(storedContent);
+    const payload = JSON.parse(stored);
     if (!payload.iv || !payload.data || !payload.tag) throw new Error('Format invalide');
     const iv = Buffer.from(payload.iv, 'hex');
     const authTag = Buffer.from(payload.tag, 'hex');
@@ -40,109 +38,126 @@ function decryptMessage(storedContent) {
     let decrypted = decipher.update(payload.data, 'hex', 'utf8');
     decrypted += decipher.final('utf8');
     return decrypted;
-  } catch (error) {
-    console.warn('Déchiffrement échoué:', error.message);
-    return storedContent.length < 2000 ? storedContent : '[Message illisible]';
+  } catch (err) {
+    console.warn('Déchiffrement échoué → ancien message');
+    return stored.length < 2000 ? stored : '[Corrompu]';
   }
 }
 
 let userPresence = new Map();
 
-// NOUVELLE FONCTION : vérifie si un blocage existe dans les deux sens
-async function isBlockedBetween(userId1, userId2) {
-  if (!userId1 || !userId2) return false;
-  const block1 = await Relation.findOne({ userId: userId1, contactId: userId2, status: 'blocked' });
-  const block2 = await Relation.findOne({ userId: userId2, contactId: userId1, status: 'blocked' });
-  return !!(block1 || block2);
-}
-
 export const messageController = {
-  createMessage: async (messageData, io = null) => {
-    const { conversationId, Id_sender, Id_receiver, content, typeMessage = 'text' } = messageData;
+  createMessage: async (messageData, io = null, userIdFromToken = null) => {
+    // 🎯 RÉCUPÉRATION Id_sender SÉCURISÉ
+    const Id_sender = userIdFromToken;
+    
+    const { conversationId, Id_receiver, content, typeMessage = 'text' } = messageData;
 
-    // VALIDATIONS
-    if (!mongoose.Types.ObjectId.isValid(Id_sender)) throw new Error('ID expéditeur invalide');
-    if (Id_receiver && !mongoose.Types.ObjectId.isValid(Id_receiver)) throw new Error('ID destinataire invalide');
-    if (conversationId && !mongoose.Types.ObjectId.isValid(conversationId)) throw new Error('ID conversation invalide');
-    if (!content || typeof content !== 'string' || content.trim().length === 0) throw new Error('Contenu vide');
-    if (content.length > 1000) throw new Error('Message trop long');
+    // 🎯 VÉRIFICATIONS
+    if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
+      throw new Error('ID expéditeur invalide');
+    }
+    if (Id_receiver && !mongoose.Types.ObjectId.isValid(Id_receiver)) {
+      throw new Error('ID destinataire invalide');
+    }
+    if (conversationId && !mongoose.Types.ObjectId.isValid(conversationId)) {
+      throw new Error('ID conversation invalide');
+    }
 
-    const allowedTypes = ['text', 'image', 'video', 'audio', 'file', 'emojis'];
+    if (!content || typeof content !== 'string') {
+      throw new Error('Le contenu du message est requis');
+    }
+
+    if (content.trim().length === 0) {
+      throw new Error('Le message ne peut pas être vide');
+    }
+
+    if (content.length > 1000) {
+      throw new Error('Le message est trop long (max 1000 caractères)');
+    }
+
+    const allowedTypes = ['text', 'image', 'video', 'file'];
     if (!allowedTypes.includes(typeMessage)) throw new Error(`Type non supporté: ${typeMessage}`);
 
-    // BLOCAGE : CONVERSATION DE GROUPE
-    if (conversationId) {
-      const participants = await Participants.find({ Id_Conversation: conversationId }).select('Id_User');
-      for (const p of participants) {
-        const pid = p.Id_User.toString();
-        if (pid === Id_sender.toString()) continue;
-        if (await isBlockedBetween(Id_sender, pid)) {
-          return {
-            _id: null,
-            blocked: true,
-            conversationId,
-            message: "Vous avez été bloqué par un participant de cette conversation.",
-            typeMessage: "system_blocked"
-          };
-        }
+    // DÉTERMINER LE DESTINATAIRE (même si Id_receiver n'est pas fourni)
+    let receiverId = Id_receiver ? Id_receiver.toString() : null;
+
+    if (!receiverId && conversationId) {
+      const participants = await Participants.find({ Id_Conversation: conversationId })
+        .select('Id_User')
+        .lean();
+
+      if (participants.length !== 2) {
+        throw new Error('Conversation invalide (doit avoir exactement 2 participants)');
       }
-    }
-    // BLOCAGE : MESSAGE PRIVÉ
-    else if (Id_receiver) {
-      if (await isBlockedBetween(Id_sender, Id_receiver)) {
-        return {
-          _id: null,
-          blocked: true,
-          message: "Vous ne pouvez pas envoyer de message à cette personne.",
-          typeMessage: "system_blocked"
-        };
+
+      const otherParticipant = participants.find(p => p.Id_User.toString() !== Id_sender.toString());
+      if (!otherParticipant) {
+        throw new Error('Impossible de trouver le destinataire dans cette conversation');
       }
+      receiverId = otherParticipant.Id_User.toString();
     }
 
-    // CRÉATION OU RÉCUPÉRATION DE LA CONVERSATION
+    if (!receiverId) {
+      throw new Error('Destinataire introuvable – Id_receiver ou conversationId requis');
+    }
+
+    // VÉRIFICATION BLOCAGE (LES 2 SENS) — TOUJOURS EXÉCUTÉE
+    const blockExists = await Relation.findOne({
+      status: "blocked",
+      $or: [
+        { userId: Id_sender, contactId: receiverId },
+        { userId: receiverId, contactId: Id_sender }
+      ]
+    });
+
+    if (blockExists) {
+      throw new Error("Impossible d'envoyer le message : vous avez bloqué cette personne ou elle vous a bloqué.");
+    }
+
+    // CONVERSATION
     let finalConversationId = conversationId;
     if (!conversationId) {
-      const conv = await conversationController.getOrCreateConversation(Id_sender, Id_receiver);
+      const conv = await conversationController.getOrCreateConversation(Id_sender, receiverId);
       finalConversationId = conv._id;
     }
 
     // CHIFFREMENT + SAUVEGARDE
-    const encryptedContentString = encryptMessage(content.trim());
-
+    const encryptedContent = encryptContent(content.trim());
     const message = new Message({
       conversationId: finalConversationId,
-      Id_sender: Id_sender,
-      content: encryptedContentString,
+      Id_sender,
+      content: encryptedContent,
       typeMessage,
       status: 'sent',
       time: new Date()
     });
 
     const savedMessage = await message.save();
-
-    // MISE À JOUR COMPTEURS NON-LUS
+    // COMPTEURS NON LUS
     try {
       const participants = await Participants.find({ Id_Conversation: finalConversationId });
-      const bulkOps = [];
-      const toNotify = [];
+      const bulkOperations = [];
+      const participantsToNotify = [];
 
-      participants.forEach(p => {
-        if (p.Id_User.toString() !== Id_sender.toString()) {
-          toNotify.push(p.Id_User);
-          bulkOps.push({
+      for (const participant of participants) {
+        if (participant.Id_User.toString() !== Id_sender.toString()) {
+          participantsToNotify.push(participant.Id_User);
+          bulkOperations.push({
             updateOne: {
-              filter: { _id: finalConversationId, "unreadCounts.userId": p.Id_User },
+              filter: { _id: finalConversationId, "unreadCounts.userId": participant.Id_User },
               update: { $inc: { "unreadCounts.$.count": 1 }, $set: { lastMessageAt: new Date() } }
             }
           });
         }
-      });
+      }
 
-      if (bulkOps.length > 0) {
-        await Conversation.bulkWrite(bulkOps);
+      if (bulkOperations.length > 0) {
+        await Conversation.bulkWrite(bulkOperations);
+
         const conv = await Conversation.findById(finalConversationId);
         const missing = [];
-        for (const uid of toNotify) {
+        for (const uid of participantsToNotify) {
           if (!conv.unreadCounts?.some(u => u.userId.toString() === uid.toString())) {
             missing.push({
               updateOne: {
@@ -154,96 +169,261 @@ export const messageController = {
         }
         if (missing.length > 0) await Conversation.bulkWrite(missing);
       }
-    } catch (err) {
-      console.log('Erreur compteurs non-lus:', err.message);
+    } catch (error) {
+      console.error('Erreur mise à jour compteurs:', error.message);
     }
 
-    // NOTIFICATIONS PUSH / SOCKET
+    // 🆕 COMPTEURS NON-LUS
     try {
-      const participants = await Participants.find({ Id_Conversation: finalConversationId }).populate('Id_User', 'username');
-      const sender = await User.findById(Id_sender);
-      const senderName = sender?.username || 'Quelqu\'un';
-      const preview = content.length > 30 ? content.substring(0, 30) + '...' : content;
-
-      for (const p of participants) {
-        if (p.Id_User?._id.toString() === Id_sender.toString()) continue;
-
-        const userId = p.Id_User._id.toString();
-        const online = io && await isUserOnlineAdvanced(io, userId);
-        const pushOk = await shouldSendPushNotification(userId);
-
-        if (online) {
-          io.to(`user_${userId}`).emit('new_message_alert', {
-            type: 'new_message',
-            conversationId: finalConversationId,
-            senderId: Id_sender,
-            senderName,
-            messagePreview: preview,
-            timestamp: new Date(),
-            messageId: savedMessage._id
-          });
-        } else if (pushOk) {
-          await pushNotificationService.sendToUser(p.Id_User._id, `Nouveau message de ${senderName}`, preview, {
-            conversationId: finalConversationId.toString(),
-            messageId: savedMessage._id.toString(),
-            type: 'new_message',
-            senderName
-          });
+      console.log('🔢 Mise à jour des compteurs non-lus...');
+      
+      let participants = [];
+      const conversation = await Conversation.findById(finalConversationId);
+      
+      if (conversation && conversation.type === "group") {
+        participants = conversation.Id_participant.map(userId => ({
+          Id_User: userId
+        }));
+      } else {
+        participants = await Participants.find({ 
+          Id_Conversation: finalConversationId 
+        });
+      }
+      
+      for (let participant of participants) {
+        const participantId = participant.Id_User.toString();
+        
+        if (participantId !== Id_sender.toString()) {
+          await Conversation.findOneAndUpdate(
+            { 
+              _id: finalConversationId,
+              "unreadCounts.userId": participantId
+            },
+            { 
+              $inc: { "unreadCounts.$.count": 1 },
+              $set: { lastMessageAt: new Date() }
+            },
+            { upsert: true, new: true }
+          );
         }
       }
-    } catch (err) {
-      console.log('Erreur notification:', err.message);
+      
+      console.log('✅ Compteurs non-lus mis à jour');
+    } catch (error) {
+      console.log('⚠️ Erreur compteurs:', error.message);
     }
 
-    // RETOUR AU FRONT (en clair)
+    // 🆕 NOTIFICATIONS INTELLIGENTES AVEC DÉSACTIVATION COMPLÈTE
+    try {
+      console.log('🔔 Gestion intelligente des notifications...');
+      
+      let participants = [];
+      const conversation = await Conversation.findById(finalConversationId);
+      
+      if (conversation && conversation.type === "group") {
+        participants = conversation.Id_participant.map(userId => ({
+          Id_User: { _id: userId }
+        }));
+      } else {
+        participants = await Participants.find({ 
+          Id_Conversation: finalConversationId 
+        }).populate('Id_User', 'username');
+      }
+      
+      const sender = await User.findById(Id_sender);
+      const senderName = sender?.username || 'Quelqu\'un';
+      
+      // 🆕 LOGIQUE : RESPECT TOTAL DE LA DÉSACTIVATION
+      for (let participant of participants) {
+        const participantId = participant.Id_User._id.toString();
+        
+        if (participantId !== Id_sender.toString()) {
+          const participantUser = await User.findById(participantId);
+          const participantName = participantUser?.username || 'Utilisateur';
+          
+          // 🎯 VÉRIFIER SI LES NOTIFICATIONS SONT COMPLÈTEMENT DÉSACTIVÉES
+          const notificationsEnabled = await areNotificationsEnabled(participantId);
+          
+          if (!notificationsEnabled) {
+            console.log(`🔕 NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`);
+            continue; // 🚨 PAS DE NOTIFICATION DU TOUT (ni WebSocket ni Push)
+          }
+          
+          // 🎯 SI NOTIFICATIONS ACTIVÉES, APPLIQUER LA LOGIQUE NORMALE
+          const isUserOnline = await isUserOnlineAdvanced(io, participantId);
+          
+          console.log(`🔍 ${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`);
+          
+          const notificationTitle = conversation?.type === "group" 
+            ? `📦 ${conversation.groupName} - ${senderName}`
+            : `Nouveau message de ${senderName}`;
+            
+          const notificationBody = content.length > 30 ? content.substring(0, 30) + '...' : content;
+          
+          if (isUserOnline && io) {
+            console.log(`🔔 WebSocket à: ${participantName}`);
+            
+            io.to(`user_${participantId}`).emit('new_message_alert', {
+              type: 'new_message',
+              conversationId: finalConversationId,
+              senderId: savedMessage.Id_sender,
+              senderName: senderName,
+              messagePreview: content.substring(0, 50),
+              timestamp: new Date(),
+              messageId: savedMessage._id,
+              isGroup: conversation?.type === "group",
+              groupName: conversation?.groupName
+            });
+            
+          } else {
+            console.log(`📱 Push notification à: ${participantName}`);
+            
+            await pushNotificationService.sendToUser(
+              participantId,
+              notificationTitle,
+              notificationBody,
+              {
+                conversationId: finalConversationId.toString(),
+                messageId: savedMessage._id.toString(),
+                type: 'new_message',
+                senderName: senderName,
+                isGroup: conversation?.type === "group",
+                groupName: conversation?.groupName
+              }
+            );
+          }
+
+        }
+      }
+    } catch (error) {
+
+      console.log('⚠️ Erreur notifications:', error.message);
+    }
+
+    // Diffusion WebSocket du message (toujours envoyé, indépendant des notifications)
+    if (io) {
+      io.to(finalConversationId.toString()).emit('new_message', {
+        _id: savedMessage._id,
+        conversationId: finalConversationId,
+        Id_sender: Id_sender,
+        content: content.trim(),
+        typeMessage: typeMessage,
+        status: 'sent',
+        timestamp: new Date(),
+        isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
+      });
+    }
+
+
+
+
+
+
     return {
       _id: savedMessage._id,
       conversationId: finalConversationId,
-      Id_sender: Id_sender,
+      Id_sender,
       content: content.trim(),
       typeMessage,
       status: 'sent',
-      time: savedMessage.time
+      timestamp: new Date(),
+      isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
+
     };
   },
 
+  // RÉCUPÉRER LES MESSAGES
   getConversationMessages: async (conversationId, page = 1, limit = 50) => {
-    if (!mongoose.Types.ObjectId.isValid(conversationId)) throw new Error('ID conversation invalide');
-    const skip = (page - 1) * limit;
 
-    const messages = await Message.find({ conversationId })
-      .sort({ time: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    return messages.map(msg => ({
-      ...msg,
-      content: decryptMessage(msg.content)
-    }));
+    try {
+      console.log(`🔍 Récupération messages conversation ${conversationId}, page ${page}`);
+      
+      if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+        throw new Error('ID conversation invalide');
+      }
+      
+      const skip = (page - 1) * limit;
+      
+      const messages = await Message.find({ conversationId: conversationId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+      
+      console.log(`✅ ${messages.length} messages trouvés`);
+      return messages;
+      
+    } catch (error) {
+      console.error('❌ Erreur:', error);
+      throw error;
+    }
   },
 
-  setUserPresence: (map) => { userPresence = map; }
+  // 🆕 FONCTION POUR INITIALISER LA PRÉSENCE
+  setUserPresence: (presenceMap) => {
+    userPresence = presenceMap;
+  },
+
+  // 🆕 FONCTION POUR ENVOYER UN MESSAGE DANS UN GROUPE
+  sendGroupMessage: async (groupId, senderId, content, typeMessage = 'text', io = null) => {
+    const messageData = {
+      conversationId: groupId,
+      content: content,
+      typeMessage: typeMessage
+    };
+    
+    return await messageController.createMessage(messageData, io, senderId);
+  }
 };
 
-// Fonctions annexes (inchangées)
+// 🆕 FONCTION PRÉSENCE AVANCÉE
 async function isUserOnlineAdvanced(io, userId) {
-  if (userPresence?.has(userId)) {
-    const p = userPresence.get(userId);
-    return p.status === 'online' && p.sessions?.length > 0;
+  try {
+    if (userPresence && userPresence.has(userId)) {
+      const presence = userPresence.get(userId);
+      const isOnline = presence.status === 'online' && presence.sessions && presence.sessions.length > 0;
+      console.log(`🔍 Présence mémoire ${userId}: ${isOnline} (${presence.sessions?.length} sessions)`);
+      return isOnline;
+    }
+    
+    const user = await User.findById(userId);
+    const isOnlineDB = user && user.status === 'online' && user.activeSessions && user.activeSessions.length > 0;
+    console.log(`🔍 Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`);
+    
+    return isOnlineDB;
+    
+  } catch (error) {
+    console.log('⚠️ Erreur vérification présence avancée:', error.message);
+    
+    const userRoom = io.sockets.adapter.rooms.get(`user_${userId}`);
+    const isOnlineWS = userRoom && userRoom.size > 0;
+    console.log(`🔍 Présence WebSocket ${userId}: ${isOnlineWS}`);
+    
+    return isOnlineWS;
+
   }
-  const user = await User.findById(userId);
+  const user = await User.findById(userId).select('status activeSessions');
   if (user?.status === 'online' && user?.activeSessions?.length > 0) return true;
   return io?.sockets?.adapter?.rooms?.get(`user_${userId}`)?.size > 0;
 }
 
-async function shouldSendPushNotification(userId) {
+// 🆕 FONCTION : VÉRIFIER SI LES NOTIFICATIONS SONT ACTIVÉES
+async function areNotificationsEnabled(userId) {
   try {
     const user = await User.findById(userId);
-    if (!user?.notificationPreferences?.pushEnabled === false) return false;
-    // ... ton code quiet hours
+    
+    if (!user) return true; // Par défaut activées si user non trouvé
+    
+    // 🎯 SI pushEnabled = false → NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES
+    if (user.notificationPreferences && user.notificationPreferences.pushEnabled === false) {
+      return false;
+    }
+    
     return true;
-  } catch {
-    return true;
+    
+  } catch (error) {
+    console.log('⚠️ Erreur vérification notifications:', error.message);
+    return true; // Par défaut activées en cas d'erreur
+
   }
 }

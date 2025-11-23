@@ -1,4 +1,6 @@
 import Participants from '../models/Participants.js';
+import User from '../models/User.js';
+import mongoose from 'mongoose';
 
 export const participantController = {
   // 🎯 AJOUTER UN PARTICIPANT À UNE CONVERSATION
@@ -46,7 +48,7 @@ export const participantController = {
   // 🎯 RÉCUPÉRER LES PARTICIPANTS D'UNE CONVERSATION
   getConversationParticipants: async (Id_Conversation) => {
     return await Participants.find({ Id_Conversation: Id_Conversation })
-      .populate('Id_User', 'username email profilePicture'); // Infos user
+      .populate('Id_User', 'username email profilePicture');
   },
 
   // 🎯 RÉCUPÉRER LES CONVERSATIONS D'UN USER
@@ -62,5 +64,50 @@ export const participantController = {
       Id_Conversation: Id_Conversation
     });
     return !!participant;
+  },
+
+// 🎯 NETTOYAGE DES PARTICIPANTS ORPHELINS (VERSION FINALE)
+cleanupOrphanParticipants: async () => {
+  try {
+    console.log('🔧 Début du nettoyage des participants orphelins...');
+    
+    // 🎯 RÉCUPÉRER TOUS LES PARTICIPANTS
+    const allParticipants = await Participants.find({});
+    console.log(`📊 ${allParticipants.length} participants au total`);
+    
+    let orphanCount = 0;
+    
+    // 🎯 VÉRIFIER CHAQUE PARTICIPANT
+    for (let participant of allParticipants) {
+      try {
+        // Vérifier si l'user existe dans la collection User
+        const userExists = await User.findById(participant.Id_User);
+        
+        if (!userExists) {
+          console.log(`🗑️  Participant orphelin trouvé:`, {
+            participantId: participant._id,
+            userId: participant.Id_User,
+            conversationId: participant.Id_Conversation
+          });
+          
+          // Supprimer le participant orphelin
+          await Participants.findByIdAndDelete(participant._id);
+          orphanCount++;
+        }
+      } catch (error) {
+        // En cas d'erreur (ID invalide, etc.)
+        console.log(`❌ Référence cassée - suppression:`, participant._id);
+        await Participants.findByIdAndDelete(participant._id);
+        orphanCount++;
+      }
+    }
+    
+    console.log(`✅ ${orphanCount} participants orphelins supprimés`);
+    return orphanCount;
+    
+  } catch (error) {
+    console.error('❌ Erreur nettoyage participants orphelins:', error);
+    throw error;
   }
+},
 };
