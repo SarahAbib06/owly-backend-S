@@ -1,0 +1,2121 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Owly - Messagerie</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        height: 100vh;
+        overflow: hidden;
+      }
+
+      .container {
+        display: flex;
+        height: 100vh;
+        max-width: 1400px;
+        margin: 0 auto;
+        background: white;
+        box-shadow: 0 0 50px rgba(0, 0, 0, 0.3);
+      }
+
+      /* Sidebar */
+      .sidebar {
+        width: 320px;
+        background: #f8f9fa;
+        border-right: 1px solid #e0e0e0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .sidebar-header {
+        padding: 20px;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+      }
+
+      .user-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .user-avatar {
+        width: 45px;
+        height: 45px;
+        border-radius: 50%;
+        background: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 20px;
+        font-weight: bold;
+        color: #667eea;
+      }
+
+      .user-details h3 {
+        font-size: 16px;
+        margin-bottom: 4px;
+      }
+
+      .status {
+        font-size: 12px;
+        opacity: 0.9;
+      }
+
+      .status.online::before {
+        content: "●";
+        color: #4caf50;
+        margin-right: 5px;
+      }
+
+      .search-box {
+        padding: 15px;
+        background: white;
+      }
+
+      .search-box input {
+        width: 100%;
+        padding: 12px;
+        border: 1px solid #e0e0e0;
+        border-radius: 25px;
+        font-size: 14px;
+        outline: none;
+      }
+
+      .conversations-list {
+        flex: 1;
+        overflow-y: auto;
+      }
+
+      .conversation-item {
+        padding: 15px 20px;
+        border-bottom: 1px solid #e0e0e0;
+        cursor: pointer;
+        transition: background 0.2s;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .conversation-item:hover {
+        background: #f0f0f0;
+      }
+
+      .conversation-item.active {
+        background: #e3f2fd;
+        border-left: 3px solid #667eea;
+      }
+
+      .conv-avatar {
+        width: 50px;
+        height: 50px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+        font-size: 18px;
+      }
+
+      .conv-info {
+        flex: 1;
+      }
+
+      .conv-name {
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+
+      .conv-preview {
+        font-size: 13px;
+        color: #666;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .unread-badge {
+        background: #667eea;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: bold;
+      }
+
+      /* Chat Area */
+      .chat-area {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        background: white;
+      }
+
+      .chat-header {
+        padding: 20px;
+        background: #f8f9fa;
+        border-bottom: 1px solid #e0e0e0;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .chat-user-info {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .typing-indicator {
+        font-size: 13px;
+        color: #667eea;
+        font-style: italic;
+      }
+
+      .chat-actions {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+      }
+
+      .chat-actions button {
+        padding: 8px 15px;
+        border: none;
+        background: #667eea;
+        color: white;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 13px;
+      }
+
+      .chat-actions button:hover {
+        background: #5568d3;
+      }
+
+      .messages-container {
+        flex: 1;
+        overflow-y: auto;
+        padding: 20px;
+        background: #fafafa;
+      }
+
+      .message {
+        display: flex;
+        margin-bottom: 20px;
+        animation: slideIn 0.3s ease;
+      }
+
+      @keyframes slideIn {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+
+      .message.sent {
+        justify-content: flex-end;
+      }
+
+      .message-content {
+        max-width: 60%;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .message.received .message-content {
+        align-items: flex-start;
+      }
+
+      .message.sent .message-content {
+        align-items: flex-end;
+      }
+
+      .message-bubble {
+        padding: 12px 16px;
+        border-radius: 18px;
+        word-wrap: break-word;
+        position: relative;
+      }
+
+      .message.received .message-bubble {
+        background: white;
+        color: #333;
+        border-bottom-left-radius: 4px;
+        box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+      }
+
+      .message.sent .message-bubble {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-bottom-right-radius: 4px;
+      }
+
+      .audio-message {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        min-width: 250px;
+      }
+
+      .audio-play-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(255, 255, 255, 0.3);
+        color: white;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+      }
+
+      .message.received .audio-play-btn {
+        background: #667eea;
+      }
+
+      .audio-progress {
+        flex: 1;
+      }
+
+      .audio-duration {
+        font-size: 12px;
+        opacity: 0.8;
+      }
+
+      .message-time {
+        font-size: 11px;
+        opacity: 0.7;
+      }
+
+      .message-reactions {
+        display: flex;
+        gap: 5px;
+        margin-top: 5px;
+      }
+
+      .reaction {
+        background: white;
+        border: 1px solid #e0e0e0;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-size: 14px;
+        cursor: pointer;
+      }
+
+      .reaction:hover {
+        background: #f0f0f0;
+      }
+
+      /* Input Area */
+      .input-area {
+        padding: 20px;
+        background: white;
+        border-top: 1px solid #e0e0e0;
+      }
+
+      .input-wrapper {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .emoji-btn,
+      .audio-btn {
+        width: 40px;
+        height: 40px;
+        border: none;
+        background: #f0f0f0;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s;
+      }
+
+      .emoji-btn:hover,
+      .audio-btn:hover {
+        background: #e0e0e0;
+      }
+
+      .audio-btn.recording {
+        background: #f44336;
+        color: white;
+        animation: pulse 1s infinite;
+      }
+
+      @keyframes pulse {
+        0%,
+        100% {
+          transform: scale(1);
+        }
+        50% {
+          transform: scale(1.1);
+        }
+      }
+
+      #messageInput {
+        flex: 1;
+        padding: 12px 20px;
+        border: 1px solid #e0e0e0;
+        border-radius: 25px;
+        font-size: 14px;
+        outline: none;
+        font-family: inherit;
+      }
+
+      .send-btn {
+        width: 40px;
+        height: 40px;
+        border: none;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 50%;
+        cursor: pointer;
+        font-size: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      .send-btn:hover {
+        opacity: 0.9;
+      }
+
+      .send-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* Login Modal */
+      .login-modal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .login-modal.hidden {
+        display: none;
+      }
+
+      .login-box {
+        background: white;
+        padding: 40px;
+        border-radius: 20px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+        width: 400px;
+        max-width: 90%;
+      }
+
+      .login-box h2 {
+        text-align: center;
+        margin-bottom: 30px;
+        color: #667eea;
+      }
+
+      .login-box input {
+        width: 100%;
+        padding: 12px;
+        margin-bottom: 15px;
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 14px;
+      }
+
+      .login-box button {
+        width: 100%;
+        padding: 12px;
+        border: none;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border-radius: 8px;
+        font-size: 16px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+
+      .login-box button:hover {
+        opacity: 0.9;
+      }
+
+      .reaction-picker-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.2);
+        z-index: 999;
+        animation: fadeIn 0.2s;
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+        }
+        to {
+          opacity: 1;
+        }
+      }
+
+      .emoji-picker {
+        position: absolute;
+        bottom: 70px;
+        left: 20px;
+        background: white;
+        border: 1px solid #e0e0e0;
+        border-radius: 12px;
+        padding: 15px;
+        box-shadow: 0 5px 20px rgba(0, 0, 0, 0.2);
+        display: none;
+        gap: 5px;
+        flex-wrap: wrap;
+        max-width: 300px;
+        z-index: 1000;
+      }
+
+      .emoji-picker.show {
+        display: flex;
+      }
+
+      .emoji-picker span {
+        font-size: 24px;
+        cursor: pointer;
+        padding: 5px;
+        border-radius: 5px;
+      }
+
+      .emoji-picker span:hover {
+        background: #f0f0f0;
+      }
+
+      .connection-status {
+        padding: 10px 20px;
+        text-align: center;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .connection-status.connected {
+        background: #4caf50;
+        color: white;
+      }
+
+      .connection-status.disconnected {
+        background: #f44336;
+        color: white;
+      }
+
+      .connection-status.connecting {
+        background: #ff9800;
+        color: white;
+      }
+
+      .debug-info {
+        position: fixed;
+        top: 10px;
+        right: 10px;
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 12px;
+        z-index: 10000;
+      }
+
+      .permission-status {
+        font-size: 16px;
+        margin-left: 10px;
+        cursor: help;
+      }
+
+      .permission-status.granted {
+        color: #4caf50;
+      }
+
+      .permission-status.denied {
+        color: #f44336;
+      }
+
+      .permission-status.prompt {
+        color: #ff9800;
+      }
+
+      .audio-uploading {
+        opacity: 0.7;
+        background: #f0f0f0 !important;
+      }
+
+      .audio-uploading::after {
+        content: "⏳ Upload...";
+        font-size: 12px;
+        color: #666;
+        margin-left: 10px;
+      }
+
+      .test-button {
+        background: #ff9800 !important;
+      }
+
+      .test-button:hover {
+        background: #f57c00 !important;
+      }
+
+      .reconnect-btn {
+        background: #4caf50 !important;
+        margin-left: 10px;
+      }
+
+      .reconnect-btn:hover {
+        background: #45a049 !important;
+      }
+
+      .connection-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 5px;
+      }
+
+      .connection-indicator.connected {
+        background: #4caf50;
+        animation: pulse 2s infinite;
+      }
+
+      .connection-indicator.disconnected {
+        background: #f44336;
+      }
+
+      .connection-indicator.connecting {
+        background: #ff9800;
+        animation: pulse 1s infinite;
+      }
+    </style>
+  </head>
+  <body>
+    <!-- Login Modal -->
+    <div id="loginModal" class="login-modal">
+      <div class="login-box">
+        <h2>🦉 Connexion Owly</h2>
+        <input type="email" id="loginEmail" placeholder="Email" />
+        <input type="password" id="loginPassword" placeholder="Mot de passe" />
+        <button onclick="login()">Se connecter</button>
+      </div>
+    </div>
+
+    <!-- Debug Info -->
+    <div id="debugInfo" class="debug-info"></div>
+
+    <!-- Main Container -->
+    <div class="container">
+      <!-- Sidebar -->
+      <div class="sidebar">
+        <div class="sidebar-header">
+          <div class="user-info">
+            <div class="user-avatar" id="currentUserAvatar">U</div>
+            <div class="user-details">
+              <h3 id="currentUsername">Utilisateur</h3>
+              <div class="status online" id="userStatus">En ligne</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="search-box">
+          <input
+            type="text"
+            placeholder="🔍 Rechercher une conversation..."
+            id="searchInput"
+          />
+        </div>
+
+        <div id="connectionStatus" class="connection-status disconnected">
+          <span class="connection-indicator disconnected"></span>
+          Déconnecté
+        </div>
+
+        <div class="conversations-list" id="conversationsList">
+          <!-- Les conversations seront ajoutées ici dynamiquement -->
+        </div>
+      </div>
+
+      <!-- Chat Area -->
+      <div class="chat-area">
+        <div class="chat-header">
+          <div class="chat-user-info">
+            <div class="conv-avatar" id="chatAvatar">?</div>
+            <div>
+              <div class="conv-name" id="chatUsername">
+                Sélectionner une conversation
+              </div>
+              <div class="typing-indicator" id="typingIndicator"></div>
+            </div>
+          </div>
+          <div class="chat-actions">
+            <div
+              class="permission-status"
+              id="micPermissionStatus"
+              title="Statut du microphone"
+            >
+              🎤
+            </div>
+            <button class="reconnect-btn" onclick="reconnectWebSocket()">
+              🔄 Reconnexion
+            </button>
+            <button class="test-button" onclick="testAudioDisplay()">
+              Test Audio
+            </button>
+            <button onclick="logout()">Déconnexion</button>
+          </div>
+        </div>
+
+        <div class="messages-container" id="messagesContainer">
+          <!-- Les messages seront ajoutés ici -->
+        </div>
+
+        <div class="emoji-picker" id="emojiPicker">
+          <span onclick="insertEmoji('😊')">😊</span>
+          <span onclick="insertEmoji('😂')">😂</span>
+          <span onclick="insertEmoji('❤️')">❤️</span>
+          <span onclick="insertEmoji('👍')">👍</span>
+          <span onclick="insertEmoji('🎉')">🎉</span>
+          <span onclick="insertEmoji('🔥')">🔥</span>
+          <span onclick="insertEmoji('😍')">😍</span>
+          <span onclick="insertEmoji('🤔')">🤔</span>
+        </div>
+
+        <div class="input-area">
+          <div class="input-wrapper">
+            <button class="emoji-btn" onclick="toggleEmojiPicker()">😊</button>
+            <button
+              class="audio-btn"
+              id="audioBtn"
+              onclick="toggleAudioRecording()"
+            >
+              🎤
+            </button>
+            <input
+              type="text"
+              id="messageInput"
+              placeholder="Écrivez votre message..."
+              onkeypress="handleKeyPress(event)"
+              oninput="handleTyping()"
+            />
+            <button class="send-btn" onclick="sendMessage()" id="sendBtn">
+              ➤
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Socket.IO CDN -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <script>
+      // Configuration - MODIFIEZ ICI L'URL DE VOTRE BACKEND
+      const API_URL = "http://localhost:5000";
+      let socket = null;
+      let currentUser = null;
+      let currentConversation = null;
+      let mediaRecorder = null;
+      let audioChunks = [];
+      let typingTimeout = null;
+      let messageCheckInterval = null;
+      let reconnectAttempts = 0;
+      const maxReconnectAttempts = 5;
+      let autoReconnect = true;
+
+      // Initialisation
+      window.onload = async () => {
+        await checkMicrophonePermission();
+        const token = localStorage.getItem("owly_token");
+        if (!token) {
+          document.getElementById("loginModal").classList.remove("hidden");
+        } else {
+          initializeApp();
+        }
+      };
+
+      // Vérifier les permissions du microphone
+      async function checkMicrophonePermission() {
+        try {
+          if (!navigator.permissions) {
+            console.log("ℹ️ API Permissions non supportée");
+            updateMicPermissionStatus("unknown");
+            return false;
+          }
+
+          const permission = await navigator.permissions.query({
+            name: "microphone",
+          });
+          console.log("🎤 Statut permission microphone:", permission.state);
+          updateMicPermissionStatus(permission.state);
+
+          permission.onchange = () => {
+            console.log("🎤 Permission microphone changée:", permission.state);
+            updateMicPermissionStatus(permission.state);
+          };
+
+          return permission.state === "granted";
+        } catch (error) {
+          console.log("ℹ️ API Permissions non supportée");
+          updateMicPermissionStatus("unknown");
+          return false;
+        }
+      }
+
+      function updateMicPermissionStatus(status) {
+        const statusElement = document.getElementById("micPermissionStatus");
+        if (statusElement) {
+          statusElement.className = "permission-status";
+          if (status === "granted") {
+            statusElement.classList.add("granted");
+            statusElement.title = "Microphone autorisé";
+          } else if (status === "denied") {
+            statusElement.classList.add("denied");
+            statusElement.title = "Microphone bloqué";
+          } else {
+            statusElement.classList.add("prompt");
+            statusElement.title = "Permission microphone en attente";
+          }
+        }
+      }
+
+      // Login
+      async function login() {
+        const email = document.getElementById("loginEmail").value;
+        const password = document.getElementById("loginPassword").value;
+
+        if (!email || !password) {
+          alert("Veuillez remplir tous les champs");
+          return;
+        }
+
+        try {
+          const response = await fetch(`${API_URL}/api/auth/login`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+
+          if (data.token) {
+            localStorage.setItem("owly_token", data.token);
+            currentUser = data;
+            document.getElementById("loginModal").classList.add("hidden");
+            initializeApp();
+          } else {
+            alert(data.message || "Erreur de connexion");
+          }
+        } catch (error) {
+          console.error("Erreur connexion:", error);
+          alert("Erreur de connexion au serveur");
+        }
+      }
+
+      // Logout
+      function logout() {
+        localStorage.removeItem("owly_token");
+        autoReconnect = false;
+        if (socket) socket.disconnect();
+        stopMessageChecker();
+        location.reload();
+      }
+
+      // Fonction de reconnexion manuelle
+      function reconnectWebSocket() {
+        console.log("🔄 Tentative de reconnexion manuelle...");
+        autoReconnect = true;
+        reconnectAttempts = 0;
+
+        updateConnectionStatus("connecting", "Connexion en cours...");
+
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+
+        setTimeout(() => {
+          connectWebSocket();
+        }, 1000);
+      }
+
+      // Mise à jour du statut de connexion
+      function updateConnectionStatus(status, message = "") {
+        const statusElement = document.getElementById("connectionStatus");
+        const indicator = statusElement.querySelector(".connection-indicator");
+
+        statusElement.className = `connection-status ${status}`;
+        indicator.className = `connection-indicator ${status}`;
+
+        if (message) {
+          statusElement.innerHTML = `<span class="connection-indicator ${status}"></span>${message}`;
+        }
+      }
+
+      // Initialisation de l'application
+      async function initializeApp() {
+        const token = localStorage.getItem("owly_token");
+
+        if (!token) {
+          console.error("❌ Token manquant");
+          document.getElementById("loginModal").classList.remove("hidden");
+          return;
+        }
+
+        // Récupérer les infos utilisateur
+        try {
+          const response = await fetch(`${API_URL}/api/auth/me`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const userData = await response.json();
+          console.log("📦 Données brutes de /me:", userData);
+
+          currentUser = {
+            id: userData._id || userData.id || userData.userId,
+            username: userData.username || userData.name || "Utilisateur",
+            email: userData.email || "",
+          };
+
+          console.log("✅ User connecté:", currentUser);
+
+          if (currentUser.username && currentUser.username !== "Utilisateur") {
+            document.getElementById("currentUsername").textContent =
+              currentUser.username;
+            document.getElementById("currentUserAvatar").textContent =
+              currentUser.username.charAt(0).toUpperCase();
+          } else {
+            throw new Error("Username non trouvé dans la réponse");
+          }
+        } catch (error) {
+          console.log(
+            "⚠️ Erreur récupération user, extraction depuis token:",
+            error.message
+          );
+          try {
+            const tokenParts = token.split(".");
+            const payload = JSON.parse(atob(tokenParts[1]));
+
+            console.log("📦 Payload du token:", payload);
+
+            currentUser = {
+              id: payload.id || payload.userId || payload._id,
+              username:
+                payload.username || payload.email?.split("@")[0] || "User",
+              email: payload.email || "",
+            };
+
+            console.log("✅ User extrait du token:", currentUser);
+
+            document.getElementById("currentUsername").textContent =
+              currentUser.username;
+            document.getElementById("currentUserAvatar").textContent =
+              currentUser.username.charAt(0).toUpperCase();
+          } catch (e) {
+            console.error("❌ Impossible d'extraire user du token:", e);
+            currentUser = {
+              id: "unknown",
+              username: "Utilisateur",
+              email: "",
+            };
+            document.getElementById("currentUsername").textContent =
+              "Utilisateur";
+            document.getElementById("currentUserAvatar").textContent = "U";
+          }
+        }
+
+        // Vérification finale des données utilisateur
+        console.log("🔍 Vérification données utilisateur:", currentUser);
+
+        if (!currentUser || !currentUser.id) {
+          console.error("❌ Données utilisateur incomplètes:", currentUser);
+          alert(
+            "Erreur: Données utilisateur manquantes. Veuillez vous reconnecter."
+          );
+          logout();
+          return;
+        }
+
+        console.log("✅ Utilisateur valide:", {
+          id: currentUser.id,
+          username: currentUser.username,
+        });
+
+        // Connexion WebSocket
+        connectWebSocket();
+
+        // Charger les conversations
+        loadConversations();
+
+        // Mise à jour du debug info
+        updateDebugInfo();
+        setInterval(updateDebugInfo, 2000);
+
+        // Test de connexion périodique
+        setInterval(testConnection, 30000);
+      }
+
+      // Test de connexion complet
+      async function testConnection() {
+        if (socket?.connected) return;
+
+        console.log("🧪 Test de connexion...");
+        const token = localStorage.getItem("owly_token");
+
+        try {
+          const response = await fetch(`${API_URL}/`, { timeout: 5000 });
+          if (response.ok) {
+            console.log("✅ Serveur accessible");
+            if (!socket?.connected && autoReconnect) {
+              reconnectWebSocket();
+            }
+          }
+        } catch (error) {
+          console.log("❌ Serveur inaccessible");
+          updateConnectionStatus("disconnected", "Serveur inaccessible");
+        }
+      }
+
+      // Connexion WebSocket - VERSION AMÉLIORÉE
+      function connectWebSocket() {
+        const token = localStorage.getItem("owly_token");
+
+        if (!token) {
+          console.error("❌ Token manquant pour WebSocket");
+          return;
+        }
+
+        console.log("🔗 Connexion WebSocket en cours...");
+        updateConnectionStatus("connecting", "Connexion en cours...");
+
+        socket = io(API_URL, {
+          auth: {
+            token: token,
+          },
+          transports: ["websocket", "polling"],
+          reconnection: true,
+          reconnectionDelay: 1000,
+          reconnectionDelayMax: 5000,
+          reconnectionAttempts: 10,
+          timeout: 20000,
+        });
+
+        // Configuration du debug WebSocket
+        setupSocketDebugging();
+
+        socket.on("connect", () => {
+          console.log("✅ WebSocket connecté - ID:", socket.id);
+          updateConnectionStatus("connected", "Connecté");
+          reconnectAttempts = 0;
+
+          // Rejoindre la salle de notifications avec l'ID user
+          if (currentUser && currentUser.id) {
+            console.log(
+              "📢 Tentative rejoindre notifications room:",
+              currentUser.id
+            );
+            socket.emit("join_notifications", currentUser.id);
+          }
+
+          // Rejoindre la conversation actuelle si elle existe
+          if (currentConversation) {
+            socket.emit("join_conversation", currentConversation._id);
+          }
+        });
+
+        socket.on("connect_error", (error) => {
+          console.error("❌ Erreur connexion Socket.io:", error.message);
+          updateConnectionStatus("disconnected", "Erreur connexion");
+
+          // Tentative de reconnexion automatique
+          if (autoReconnect && reconnectAttempts < maxReconnectAttempts) {
+            reconnectAttempts++;
+            const delay = Math.min(2000 * reconnectAttempts, 10000);
+            console.log(
+              `🔄 Tentative ${reconnectAttempts}/${maxReconnectAttempts} dans ${delay}ms`
+            );
+
+            setTimeout(() => {
+              if (socket && autoReconnect) {
+                socket.connect();
+              }
+            }, delay);
+          } else if (reconnectAttempts >= maxReconnectAttempts) {
+            console.log("❌ Nombre maximum de tentatives atteint");
+            updateConnectionStatus(
+              "disconnected",
+              "Déconnecté - Cliquez sur Reconnexion"
+            );
+          }
+        });
+
+        socket.on("disconnect", (reason) => {
+          console.log("❌ WebSocket déconnecté:", reason);
+          updateConnectionStatus("disconnected", "Déconnecté");
+
+          if (reason === "io server disconnect") {
+            // Le serveur a déconnecté, besoin de se reconnecter manuellement
+            console.log("🔌 Déconnecté par le serveur");
+          }
+        });
+
+        // Réception de nouveaux messages
+        socket.on("new_message", (data) => {
+          console.log("📨 Nouveau message reçu (event: new_message):", data);
+
+          let message = data;
+          if (data.data && data.data._id) {
+            message = data.data;
+          }
+          if (data.event === "new_message" && data.data) {
+            message = data.data;
+          }
+
+          console.log("📦 Message extrait:", message);
+
+          if (!message || !message.conversationId) {
+            console.error("❌ Message invalide:", message);
+            return;
+          }
+
+          if (
+            currentConversation &&
+            message.conversationId === currentConversation._id
+          ) {
+            const isSent =
+              message.Id_sender === currentUser.id ||
+              message.Id_sender?._id === currentUser.id;
+
+            console.log(
+              "🎯 Affichage dans conversation actuelle - isSent:",
+              isSent
+            );
+            displayMessage(message, isSent);
+          } else {
+            console.log(
+              "ℹ️ Message pour une autre conversation:",
+              message.conversationId
+            );
+          }
+
+          loadConversations();
+        });
+
+        // Message envoyé avec succès
+        socket.on("message_sent", (data) => {
+          console.log("✅ Message envoyé confirmé:", data);
+
+          if (data.success && data.data) {
+            const message = data.data;
+
+            if (
+              currentConversation &&
+              message.conversationId === currentConversation._id
+            ) {
+              console.log("🎯 Affichage message envoyé");
+              displayMessage(message, true);
+            }
+
+            loadConversations();
+          } else {
+            console.error("❌ Erreur envoi message:", data.error);
+            alert(
+              "Erreur lors de l'envoi: " + (data.error || "Erreur inconnue")
+            );
+          }
+        });
+
+        // Événement pour les messages audio
+        socket.on("audio_upload_success", (data) => {
+          console.log("🎉 Message audio uploadé avec succès:", data);
+
+          if (
+            data.message &&
+            currentConversation &&
+            data.message.conversationId === currentConversation._id
+          ) {
+            const isSent = data.message.Id_sender === currentUser.id;
+            displayMessage(data.message, isSent);
+            console.log("✅ Message audio affiché après upload");
+          }
+        });
+
+        // Réception des messages audio en temps réel
+        socket.on("new_audio_message", (data) => {
+          console.log("🔊 Nouveau message audio reçu:", data);
+
+          const message = data.message || data;
+          if (
+            message &&
+            currentConversation &&
+            message.conversationId === currentConversation._id
+          ) {
+            const isSent = message.Id_sender === currentUser.id;
+            displayMessage(message, isSent);
+            console.log("✅ Message audio affiché en temps réel");
+          }
+        });
+
+        // Indicateur de frappe
+        socket.on("user_typing", (data) => {
+          if (
+            currentConversation &&
+            data.conversationId === currentConversation._id &&
+            data.userId !== currentUser.id
+          ) {
+            document.getElementById("typingIndicator").textContent = `${
+              data.userName || "Quelqu'un"
+            } est en train d'écrire...`;
+            setTimeout(() => {
+              document.getElementById("typingIndicator").textContent = "";
+            }, 3000);
+          }
+        });
+
+        // Gestion des erreurs
+        socket.on("error", (error) => {
+          console.error("❌ Erreur WebSocket:", error);
+        });
+
+        socket.on("message_error", (error) => {
+          console.error("❌ Erreur message:", error);
+          alert("Erreur lors de l'envoi du message");
+        });
+
+        // Pong pour vérifier la connexion
+        socket.on("pong", (data) => {
+          console.log("🏓 Pong reçu:", data);
+        });
+      }
+
+      // Debug WebSocket détaillé
+      function setupSocketDebugging() {
+        socket.onAny((eventName, ...args) => {
+          if (!eventName.includes("pong")) {
+            console.log(`🔍 [WebSocket] Event: ${eventName}`, args);
+          }
+        });
+      }
+
+      // Fonction de diagnostic de connexion
+      function diagnoseConnection() {
+        console.log("🔍 Diagnostic de connexion:");
+        console.log("- API_URL:", API_URL);
+        console.log("- Token présent:", !!localStorage.getItem("owly_token"));
+        console.log("- Socket connecté:", socket?.connected);
+        console.log("- Socket ID:", socket?.id);
+        console.log("- User ID:", currentUser?.id);
+        console.log("- Tentatives reconnexion:", reconnectAttempts);
+
+        // Test de connexion API
+        fetch(`${API_URL}/`)
+          .then((response) => console.log("✅ Serveur API accessible"))
+          .catch((error) => console.log("❌ Serveur API inaccessible:", error));
+      }
+
+      // Charger les conversations
+      async function loadConversations() {
+        if (!currentUser || !currentUser.id) {
+          console.error("❌ User non défini pour charger les conversations");
+          return;
+        }
+
+        try {
+          const token = localStorage.getItem("owly_token");
+          const response = await fetch(
+            `${API_URL}/api/conversations/user/${currentUser.id}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const data = await response.json();
+          const conversationsList =
+            document.getElementById("conversationsList");
+          conversationsList.innerHTML = "";
+
+          console.log(
+            "📂 Conversations chargées:",
+            data.conversations?.length || 0
+          );
+
+          if (
+            data.success &&
+            data.conversations &&
+            data.conversations.length > 0
+          ) {
+            data.conversations.forEach((conv) => {
+              const convElement = document.createElement("div");
+              convElement.className = "conversation-item";
+              convElement.onclick = () => selectConversation(conv);
+
+              const participant =
+                conv.participants && conv.participants.length > 0
+                  ? conv.participants[0]
+                  : null;
+
+              let participantName = "Utilisateur";
+              let initial = "?";
+
+              if (participant) {
+                participantName =
+                  participant.username ||
+                  participant.name ||
+                  participant.email?.split("@")[0] ||
+                  "Utilisateur";
+                initial = participantName.charAt(0).toUpperCase();
+              }
+
+              convElement.innerHTML = `
+                <div class="conv-avatar">${initial}</div>
+                <div class="conv-info">
+                  <div class="conv-name">${participantName}</div>
+                  <div class="conv-preview">Cliquez pour ouvrir</div>
+                </div>
+                ${
+                  conv.unreadCount > 0
+                    ? `<span class="unread-badge">${conv.unreadCount}</span>`
+                    : ""
+                }
+              `;
+
+              conversationsList.appendChild(convElement);
+            });
+          } else {
+            conversationsList.innerHTML = `
+              <div style="text-align: center; padding: 20px; color: #666;">
+                💬 Aucune conversation
+              </div>
+            `;
+          }
+        } catch (error) {
+          console.error("❌ Erreur chargement conversations:", error);
+          const conversationsList =
+            document.getElementById("conversationsList");
+          conversationsList.innerHTML = `
+            <div style="text-align: center; padding: 20px; color: #f44336;">
+              ❌ Erreur chargement conversations
+            </div>
+          `;
+        }
+      }
+
+      // Sélectionner une conversation
+      async function selectConversation(conv) {
+        if (!conv || !conv._id) {
+          console.error("❌ Conversation invalide:", conv);
+          return;
+        }
+
+        currentConversation = conv;
+
+        console.log("💬 Conversation sélectionnée:", conv);
+
+        // Mise à jour de l'interface
+        const participant =
+          conv.participants && conv.participants.length > 0
+            ? conv.participants[0]
+            : null;
+
+        let participantName = "Utilisateur";
+        let initial = "?";
+
+        if (participant) {
+          participantName =
+            participant.username ||
+            participant.name ||
+            participant.email?.split("@")[0] ||
+            "Utilisateur";
+          initial = participantName.charAt(0).toUpperCase();
+        }
+
+        document.getElementById("chatUsername").textContent = participantName;
+        document.getElementById("chatAvatar").textContent = initial;
+
+        // Rejoindre la room WebSocket
+        console.log("🚪 Rejoindre conversation:", conv._id);
+        if (socket && socket.connected) {
+          socket.emit("join_conversation", conv._id);
+        }
+
+        // Marquer comme active dans la liste
+        document.querySelectorAll(".conversation-item").forEach((item) => {
+          item.classList.remove("active");
+        });
+        event.currentTarget.classList.add("active");
+
+        // Charger les messages
+        loadMessages(conv._id);
+
+        // Démarrer la vérification périodique
+        startMessageChecker();
+
+        // Marquer comme lu
+        if (socket && socket.connected) {
+          socket.emit("mark_conversation_read", {
+            conversationId: conv._id,
+            userId: currentUser.id,
+          });
+        }
+      }
+
+      // Charger les messages
+      async function loadMessages(conversationId) {
+        if (!conversationId) {
+          console.error("❌ ID conversation manquant");
+          return;
+        }
+
+        try {
+          console.log("📥 Chargement messages pour:", conversationId);
+
+          const token = localStorage.getItem("owly_token");
+          const response = await fetch(
+            `${API_URL}/api/messages/${conversationId}`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+                "Content-Type": "application/json",
+              },
+            }
+          );
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          const data = await response.json();
+          const messagesContainer =
+            document.getElementById("messagesContainer");
+
+          messagesContainer.innerHTML = "";
+
+          console.log("📦 Messages reçus de l'API:", {
+            success: data.success,
+            count: data.messages?.length || 0,
+            hasMore: data.hasMore,
+          });
+
+          if (data.success && data.messages && data.messages.length > 0) {
+            const sortedMessages = [...data.messages].reverse();
+
+            console.log(`🎯 Affichage de ${sortedMessages.length} messages`);
+
+            sortedMessages.forEach((message) => {
+              const isSent =
+                message.Id_sender === currentUser.id ||
+                message.Id_sender?._id === currentUser.id;
+              displayMessage(message, isSent);
+            });
+          } else {
+            console.log("💬 Aucun message dans cette conversation");
+            messagesContainer.innerHTML = `
+              <div style="text-align: center; padding: 40px; color: #666;">
+                💬 Aucun message dans cette conversation. Soyez le premier à envoyer un message !
+              </div>
+            `;
+          }
+
+          messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        } catch (error) {
+          console.error("❌ Erreur chargement messages:", error);
+          const messagesContainer =
+            document.getElementById("messagesContainer");
+          messagesContainer.innerHTML = `
+            <div style="text-align: center; padding: 40px; color: #f44336;">
+              ❌ Erreur lors du chargement des messages: ${error.message}
+            </div>
+          `;
+        }
+      }
+
+      // Afficher un message
+      function displayMessage(message, isSent) {
+        const messagesContainer = document.getElementById("messagesContainer");
+
+        console.log("🖥️ Affichage message:", {
+          id: message._id,
+          content: message.content,
+          isSent: isSent,
+          type: message.typeMessage,
+        });
+
+        const existingMessage = document.querySelector(
+          `[data-message-id="${message._id}"]`
+        );
+        if (existingMessage) {
+          console.log("⚠️ Message déjà affiché:", message._id);
+          return;
+        }
+
+        const messageDiv = document.createElement("div");
+        messageDiv.className = `message ${isSent ? "sent" : "received"}`;
+        messageDiv.dataset.messageId = message._id;
+
+        const time = new Date(
+          message.time || message.createdAt || message.timestamp || Date.now()
+        );
+        const timeString = time.toLocaleTimeString("fr-FR", {
+          hour: "2-digit",
+          minute: "2-digit",
+        });
+
+        // Message audio
+        if (message.typeMessage === "audio") {
+          debugAudioMessage(message);
+
+          const audioUrl =
+            message.audioUrl ||
+            (message.cloudinaryInfo ? message.cloudinaryInfo.secure_url : "");
+
+          if (!audioUrl) {
+            console.error("❌ URL audio manquante:", message);
+            messageDiv.innerHTML = `
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            <div class="audio-message">
+                                <button class="audio-play-btn" disabled>❌</button>
+                                <div class="audio-progress">
+                                    <div class="audio-duration">Erreur audio</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="message-time">${timeString}</div>
+                    </div>
+                `;
+          } else {
+            messageDiv.innerHTML = `
+                    <div class="message-content">
+                        <div class="message-bubble">
+                            <div class="audio-message">
+                                <button class="audio-play-btn" onclick="playAudio('${audioUrl}')">▶️</button>
+                                <div class="audio-progress">
+                                    <div class="audio-duration">${formatDuration(
+                                      message.audioDuration || 0
+                                    )}</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="message-time">${timeString}</div>
+                    </div>
+                `;
+          }
+        }
+        // Message texte
+        else {
+          messageDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="message-bubble" data-message-id="${
+                      message._id
+                    }">
+                        ${message.content || "Message sans contenu"}
+                    </div>
+                    <div class="message-reactions" id="reactions-${
+                      message._id
+                    }"></div>
+                    <div class="message-time">${timeString}</div>
+                </div>
+            `;
+
+          const messageBubble = messageDiv.querySelector(".message-bubble");
+          let pressTimer;
+
+          messageBubble.addEventListener("mousedown", (e) => {
+            pressTimer = setTimeout(() => {
+              showReactionPicker(message._id, e);
+            }, 2000);
+          });
+
+          messageBubble.addEventListener("mouseup", () => {
+            clearTimeout(pressTimer);
+          });
+
+          messageBubble.addEventListener("mouseleave", () => {
+            clearTimeout(pressTimer);
+          });
+
+          messageBubble.addEventListener("touchstart", (e) => {
+            pressTimer = setTimeout(() => {
+              showReactionPicker(message._id, e);
+            }, 2000);
+          });
+
+          messageBubble.addEventListener("touchend", () => {
+            clearTimeout(pressTimer);
+          });
+        }
+
+        messagesContainer.appendChild(messageDiv);
+        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+        console.log("✅ Message affiché avec succès:", message._id);
+      }
+
+      // Fonction pour debugger la structure des messages audio
+      function debugAudioMessage(message) {
+        console.log("🔍 Debug message audio:", {
+          hasAudioUrl: !!message.audioUrl,
+          audioUrl: message.audioUrl,
+          hasType: !!message.typeMessage,
+          typeMessage: message.typeMessage,
+          hasContent: !!message.content,
+          content: message.content,
+          hasDuration: !!message.audioDuration,
+          duration: message.audioDuration,
+          fullMessage: message,
+        });
+      }
+
+      // Envoyer un message
+      function sendMessage() {
+        const input = document.getElementById("messageInput");
+        const content = input.value.trim();
+
+        console.log("📤 Tentative envoi message:", {
+          content: content,
+          hasConversation: !!currentConversation,
+          conversationId: currentConversation?._id,
+        });
+
+        if (!content) {
+          console.log("❌ Message vide");
+          return;
+        }
+
+        if (!currentConversation) {
+          alert("⚠️ Veuillez d'abord sélectionner une conversation");
+          return;
+        }
+
+        if (!socket || !socket.connected) {
+          alert(
+            "❌ Connexion perdue. Veuillez utiliser le bouton Reconnexion."
+          );
+          return;
+        }
+
+        const sendBtn = document.getElementById("sendBtn");
+        sendBtn.disabled = true;
+
+        const messageData = {
+          conversationId: currentConversation._id,
+          Id_sender: currentUser.id,
+          content: content,
+          typeMessage: "text",
+          timestamp: new Date().toISOString(),
+        };
+
+        console.log("🚀 Envoi via WebSocket:", messageData);
+
+        socket.emit("send_message", messageData);
+
+        input.value = "";
+
+        clearTimeout(typingTimeout);
+        socket.emit("user_typing", {
+          conversationId: currentConversation._id,
+          userId: currentUser.id,
+          isTyping: false,
+        });
+
+        setTimeout(() => {
+          sendBtn.disabled = false;
+        }, 1000);
+      }
+
+      // Gestion de la touche Entrée
+      function handleKeyPress(event) {
+        if (event.key === "Enter") {
+          sendMessage();
+        }
+      }
+
+      // Indicateur de frappe
+      function handleTyping() {
+        if (!currentConversation || !socket || !socket.connected) return;
+
+        socket.emit("user_typing", {
+          conversationId: currentConversation._id,
+          userId: currentUser.id,
+          userName: currentUser.username,
+          isTyping: true,
+        });
+
+        clearTimeout(typingTimeout);
+        typingTimeout = setTimeout(() => {
+          socket.emit("user_typing", {
+            conversationId: currentConversation._id,
+            userId: currentUser.id,
+            isTyping: false,
+          });
+        }, 2000);
+      }
+
+      // Enregistrement audio
+      async function toggleAudioRecording() {
+        const audioBtn = document.getElementById("audioBtn");
+
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+          console.log("🛑 Arrêt de l'enregistrement...");
+          mediaRecorder.stop();
+          mediaRecorder.stream.getTracks().forEach((track) => track.stop());
+          audioBtn.classList.remove("recording");
+
+          if (currentConversation && socket) {
+            socket.emit("audio_stream_stop", {
+              conversationId: currentConversation._id,
+              userId: currentUser.id,
+            });
+          }
+          return;
+        }
+
+        try {
+          console.log("🎤 Demande d'accès au microphone...");
+
+          if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            throw new Error(
+              "Votre navigateur ne supporte pas l'enregistrement audio"
+            );
+          }
+
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              sampleRate: 44100,
+            },
+            video: false,
+          });
+
+          console.log("✅ Accès microphone autorisé");
+
+          const options = { mimeType: "audio/webm;codecs=opus" };
+          mediaRecorder = new MediaRecorder(stream, options);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = async () => {
+            console.log("🛑 Enregistrement arrêté, envoi en cours...");
+
+            const tempMessageDiv = document.createElement("div");
+            tempMessageDiv.className = "message sent audio-uploading";
+            tempMessageDiv.innerHTML = `
+                <div class="message-content">
+                    <div class="message-bubble">
+                        <div class="audio-message">
+                            <button class="audio-play-btn" disabled>⏳</button>
+                            <div class="audio-progress">
+                                <div class="audio-duration">Envoi en cours...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="message-time">${new Date().toLocaleTimeString(
+                      "fr-FR",
+                      { hour: "2-digit", minute: "2-digit" }
+                    )}</div>
+                </div>
+            `;
+
+            const messagesContainer =
+              document.getElementById("messagesContainer");
+            messagesContainer.appendChild(tempMessageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+
+            const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            await sendAudioMessage(audioBlob);
+
+            tempMessageDiv.remove();
+            audioBtn.classList.remove("recording");
+            stream.getTracks().forEach((track) => track.stop());
+          };
+
+          mediaRecorder.onerror = (event) => {
+            console.error("❌ Erreur MediaRecorder:", event.error);
+            audioBtn.classList.remove("recording");
+            stream.getTracks().forEach((track) => track.stop());
+            alert("Erreur lors de l'enregistrement audio");
+          };
+
+          mediaRecorder.start(1000);
+          audioBtn.classList.add("recording");
+
+          console.log("🎙️ Enregistrement démarré");
+
+          if (currentConversation && socket) {
+            socket.emit("audio_stream_start", {
+              conversationId: currentConversation._id,
+              userId: currentUser.id,
+            });
+          }
+        } catch (error) {
+          console.error("❌ Erreur accès microphone:", error);
+          audioBtn.classList.remove("recording");
+
+          if (error.name === "NotAllowedError") {
+            alert(
+              "L'accès au microphone a été refusé. Veuillez autoriser l'accès au microphone dans les paramètres de votre navigateur et rafraîchir la page."
+            );
+          } else if (error.name === "NotFoundError") {
+            alert(
+              "Aucun microphone n'a été trouvé. Veuillez vérifier votre matériel."
+            );
+          } else if (error.name === "NotSupportedError") {
+            alert("Votre navigateur ne supporte pas l'enregistrement audio.");
+          } else {
+            alert("Erreur d'accès au microphone: " + error.message);
+          }
+        }
+      }
+
+      // Envoyer un message audio
+      async function sendAudioMessage(audioBlob) {
+        if (!currentConversation) {
+          console.error("❌ Aucune conversation sélectionnée");
+          return;
+        }
+
+        try {
+          console.log("📤 Envoi du message audio...");
+
+          const formData = new FormData();
+          formData.append("audio", audioBlob, `audio_${Date.now()}.webm`);
+          formData.append("conversationId", currentConversation._id);
+
+          const token = localStorage.getItem("owly_token");
+          const response = await fetch(`${API_URL}/api/messages/audio/send`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: formData,
+          });
+
+          if (response.ok) {
+            const result = await response.json();
+            console.log("✅ Message audio envoyé avec succès:", result);
+
+            setTimeout(() => {
+              loadMessages(currentConversation._id);
+              console.log("🔄 Messages rechargés après envoi audio");
+            }, 1000);
+          } else {
+            const errorData = await response.json();
+            console.error("❌ Erreur serveur:", errorData);
+            alert(
+              "Erreur lors de l'envoi du message audio: " +
+                (errorData.message || "Erreur inconnue")
+            );
+          }
+        } catch (error) {
+          console.error("❌ Erreur réseau:", error);
+          alert("Erreur de connexion lors de l'envoi du message audio");
+        }
+      }
+
+      // Lire un audio
+      function playAudio(url) {
+        const audio = new Audio(url);
+        audio.play().catch((error) => {
+          console.error("❌ Erreur lecture audio:", error);
+        });
+      }
+
+      // Formater la durée
+      function formatDuration(seconds) {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, "0")}`;
+      }
+
+      // Toggle emoji picker
+      function toggleEmojiPicker() {
+        const picker = document.getElementById("emojiPicker");
+        picker.classList.toggle("show");
+      }
+
+      // Insérer un emoji
+      function insertEmoji(emoji) {
+        const input = document.getElementById("messageInput");
+        input.value += emoji;
+        input.focus();
+        document.getElementById("emojiPicker").classList.remove("show");
+      }
+
+      // Afficher le sélecteur de réactions
+      function showReactionPicker(messageId, event) {
+        document
+          .querySelectorAll(".reaction-picker-overlay")
+          .forEach((el) => el.remove());
+
+        const reactions = ["❤️", "😂", "👍", "😮", "😢", "🔥"];
+
+        const overlay = document.createElement("div");
+        overlay.className = "reaction-picker-overlay";
+        overlay.style.position = "fixed";
+        overlay.style.top = "0";
+        overlay.style.left = "0";
+        overlay.style.width = "100%";
+        overlay.style.height = "100%";
+        overlay.style.zIndex = "999";
+        overlay.style.background = "transparent";
+
+        const picker = document.createElement("div");
+        picker.className = "emoji-picker show";
+        picker.style.position = "fixed";
+        picker.style.zIndex = "1000";
+        picker.style.bottom = "auto";
+        picker.style.left = "auto";
+
+        if (event) {
+          picker.style.top = `${event.clientY - 60}px`;
+          picker.style.left = `${event.clientX - 150}px`;
+        } else {
+          picker.style.top = "50%";
+          picker.style.left = "50%";
+          picker.style.transform = "translate(-50%, -50%)";
+        }
+
+        reactions.forEach((emoji) => {
+          const span = document.createElement("span");
+          span.textContent = emoji;
+          span.style.fontSize = "28px";
+          span.onclick = (e) => {
+            e.stopPropagation();
+            addReaction(messageId, emoji);
+            overlay.remove();
+          };
+          picker.appendChild(span);
+        });
+
+        overlay.onclick = () => overlay.remove();
+        overlay.appendChild(picker);
+        document.body.appendChild(overlay);
+
+        console.log("🎭 Picker de réactions affiché pour message:", messageId);
+      }
+
+      // Ajouter une réaction
+      async function addReaction(messageId, emoji) {
+        try {
+          const token = localStorage.getItem("owly_token");
+          const response = await fetch(`${API_URL}/api/reactions`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${token}`,
+            },
+            body: JSON.stringify({ messageId, emoji }),
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            displayReaction(messageId, emoji);
+            console.log("✅ Réaction ajoutée");
+          } else {
+            const error = await response.json();
+            console.error("❌ Erreur ajout réaction:", error);
+          }
+        } catch (error) {
+          console.error("Erreur:", error);
+        }
+      }
+
+      // Afficher une réaction
+      function displayReaction(messageId, emoji) {
+        const reactionsContainer = document.getElementById(
+          `reactions-${messageId}`
+        );
+        if (reactionsContainer) {
+          const reaction = document.createElement("span");
+          reaction.className = "reaction";
+          reaction.textContent = emoji;
+          reaction.onclick = () => removeReaction(messageId, emoji);
+          reactionsContainer.appendChild(reaction);
+        }
+      }
+
+      // Supprimer une réaction
+      async function removeReaction(messageId, emoji) {
+        try {
+          const token = localStorage.getItem("owly_token");
+          await fetch(`${API_URL}/api/reactions/${messageId}`, {
+            method: "DELETE",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+          console.log("✅ Réaction supprimée");
+        } catch (error) {
+          console.error("Erreur:", error);
+        }
+      }
+
+      // Vérification périodique des nouveaux messages
+      function startMessageChecker() {
+        if (messageCheckInterval) clearInterval(messageCheckInterval);
+
+        messageCheckInterval = setInterval(() => {
+          if (currentConversation) {
+            console.log("🔄 Vérification périodique des messages...");
+            loadMessages(currentConversation._id);
+          }
+        }, 15000);
+      }
+
+      function stopMessageChecker() {
+        if (messageCheckInterval) {
+          clearInterval(messageCheckInterval);
+          messageCheckInterval = null;
+        }
+      }
+
+      // Mise à jour du debug info
+      function updateDebugInfo() {
+        const debugInfo = document.getElementById("debugInfo");
+        if (debugInfo) {
+          debugInfo.innerHTML = `
+            User: ${currentUser?.username || "None"} |
+            Conv: ${currentConversation?._id?.substring(0, 8) || "None"} |
+            Socket: ${socket?.connected ? "✅" : "❌"} |
+            Messages: ${document.querySelectorAll(".message").length}
+          `;
+        }
+      }
+
+      // Fonction de test manuel pour les messages audio
+      function testAudioDisplay() {
+        if (!currentConversation) {
+          alert("Sélectionnez d'abord une conversation");
+          return;
+        }
+
+        const testAudioMessage = {
+          _id: "test-audio-" + Date.now(),
+          conversationId: currentConversation._id,
+          Id_sender: currentUser.id,
+          typeMessage: "audio",
+          audioUrl:
+            "https://res.cloudinary.com/dv9oqjulh/video/upload/v1763763748/owly/audio_messages/uh8iel361xyqbs0yvlav.mp3",
+          audioDuration: 30,
+          content: "Message audio test",
+          timestamp: new Date(),
+        };
+
+        displayMessage(testAudioMessage, true);
+        console.log("✅ Message audio de test affiché");
+      }
+
+      // Rendre la fonction accessible depuis la console
+      window.testMessageSystem = testAudioDisplay;
+      window.diagnoseConnection = diagnoseConnection;
+      window.reconnectWebSocket = reconnectWebSocket;
+
+      // Recherche de conversations
+      document.getElementById("searchInput").addEventListener("input", (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        const conversations = document.querySelectorAll(".conversation-item");
+
+        conversations.forEach((conv) => {
+          const name = conv
+            .querySelector(".conv-name")
+            .textContent.toLowerCase();
+          if (name.includes(searchTerm)) {
+            conv.style.display = "flex";
+          } else {
+            conv.style.display = "none";
+          }
+        });
+      });
+
+      // Fermer l'emoji picker en cliquant ailleurs
+      document.addEventListener("click", (e) => {
+        const picker = document.getElementById("emojiPicker");
+        const emojiBtn = document.querySelector(".emoji-btn");
+
+        if (picker && !picker.contains(e.target) && e.target !== emojiBtn) {
+          picker.classList.remove("show");
+        }
+      });
+
+      // Gestion de la reconnexion automatique
+      document.addEventListener("visibilitychange", () => {
+        if (!document.hidden && currentConversation && socket) {
+          socket.emit("mark_conversation_read", {
+            conversationId: currentConversation._id,
+            userId: currentUser.id,
+          });
+        }
+      });
+
+      // Gestion du mode hors ligne
+      window.addEventListener("online", () => {
+        console.log("✅ Connexion internet rétablie");
+        if (!socket || !socket.connected) {
+          reconnectWebSocket();
+        }
+      });
+
+      window.addEventListener("offline", () => {
+        console.log("❌ Connexion internet perdue");
+        updateConnectionStatus("disconnected", "Hors ligne");
+      });
+
+      // Nettoyage à la fermeture
+      window.addEventListener("beforeunload", () => {
+        autoReconnect = false;
+        if (socket) {
+          socket.disconnect();
+        }
+        stopMessageChecker();
+      });
+
+      console.log("🦉 Owly Chat Interface chargée avec succès!");
+    </script>
+  </body>
+</html>

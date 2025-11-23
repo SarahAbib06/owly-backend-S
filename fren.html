@@ -1,0 +1,880 @@
+<!DOCTYPE html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Messages Vocaux - Owly Simple</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: Arial, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .container {
+        max-width: 600px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 15px;
+        padding: 20px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+
+      .header h1 {
+        color: #333;
+        margin-bottom: 10px;
+      }
+
+      .config-section {
+        background: #e9ecef;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+      }
+
+      .form-group {
+        margin-bottom: 15px;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-weight: bold;
+        color: #333;
+      }
+
+      input,
+      button {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        font-size: 14px;
+      }
+
+      button {
+        background: #007bff;
+        color: white;
+        border: none;
+        cursor: pointer;
+        font-weight: bold;
+        transition: background 0.3s;
+        margin: 5px 0;
+      }
+
+      button:hover {
+        background: #0056b3;
+      }
+
+      button:disabled {
+        background: #6c757d;
+        cursor: not-allowed;
+      }
+
+      button.recording {
+        background: #dc3545;
+      }
+
+      button.success {
+        background: #28a745;
+      }
+
+      .audio-section {
+        background: #f8f9fa;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        text-align: center;
+      }
+
+      .recording-indicator {
+        display: none;
+        background: #dc3545;
+        color: white;
+        padding: 10px;
+        border-radius: 5px;
+        margin: 10px 0;
+        animation: pulse 1.5s infinite;
+      }
+
+      @keyframes pulse {
+        0% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.5;
+        }
+        100% {
+          opacity: 1;
+        }
+      }
+
+      .audio-controls {
+        display: flex;
+        gap: 10px;
+        justify-content: center;
+        flex-wrap: wrap;
+        margin: 15px 0;
+      }
+
+      .audio-controls button {
+        width: auto;
+        min-width: 120px;
+      }
+
+      .audio-visualizer {
+        width: 100%;
+        height: 60px;
+        background: #1a1a1a;
+        border-radius: 5px;
+        margin: 15px 0;
+        display: flex;
+        align-items: end;
+        justify-content: center;
+        gap: 2px;
+        padding: 10px;
+      }
+
+      .visualizer-bar {
+        width: 3px;
+        background: #007bff;
+        border-radius: 2px;
+        transition: height 0.1s;
+      }
+
+      .audio-player {
+        width: 100%;
+        margin: 10px 0;
+      }
+
+      .messages-section {
+        background: #f8f9fa;
+        padding: 15px;
+        border-radius: 10px;
+        max-height: 400px;
+        overflow-y: auto;
+      }
+
+      .message {
+        padding: 10px;
+        margin: 10px 0;
+        border-radius: 10px;
+        background: white;
+        border-left: 4px solid #007bff;
+      }
+
+      .message.audio {
+        border-left-color: #28a745;
+      }
+
+      .message.received {
+        background: #e3f2fd;
+        border-left-color: #2196f3;
+      }
+
+      .message-info {
+        font-size: 12px;
+        color: #666;
+        margin-bottom: 5px;
+      }
+
+      .audio-controls-small {
+        display: flex;
+        gap: 10px;
+        margin-top: 5px;
+      }
+
+      .audio-controls-small button {
+        padding: 5px 10px;
+        font-size: 12px;
+      }
+
+      .logs {
+        background: #1a1a1a;
+        color: #00ff00;
+        padding: 10px;
+        border-radius: 5px;
+        font-family: monospace;
+        font-size: 12px;
+        height: 120px;
+        overflow-y: auto;
+        margin-top: 15px;
+      }
+
+      .user-badge {
+        display: inline-block;
+        background: #007bff;
+        color: white;
+        padding: 2px 8px;
+        border-radius: 12px;
+        font-size: 12px;
+        margin-left: 10px;
+      }
+
+      .status-bar {
+        background: #d4edda;
+        padding: 10px;
+        border-radius: 5px;
+        margin-bottom: 10px;
+        display: none;
+      }
+
+      .login-section {
+        background: #fff3cd;
+        padding: 15px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🎤 Test Messages Vocaux</h1>
+        <p>Interface simplifiée avec authentification</p>
+      </div>
+
+      <!-- Section Login -->
+      <div class="login-section" id="loginSection">
+        <h3>🔐 Authentification</h3>
+        <div class="form-group">
+          <label>URL du Backend:</label>
+          <input type="text" id="baseUrl" value="http://localhost:5000" />
+        </div>
+        <div class="form-group">
+          <label>Email:</label>
+          <input type="email" id="loginEmail" placeholder="votre@email.com" />
+        </div>
+        <div class="form-group">
+          <label>Mot de passe:</label>
+          <input
+            type="password"
+            id="loginPassword"
+            placeholder="Votre mot de passe"
+          />
+        </div>
+        <button onclick="login()" id="loginBtn">Se connecter</button>
+        <div id="loginStatus" style="margin-top: 10px; font-size: 12px"></div>
+      </div>
+
+      <!-- Section Configuration (cachée jusqu'au login) -->
+      <div class="config-section" id="configSection" style="display: none">
+        <h3>⚙️ Configuration Conversation</h3>
+
+        <div class="form-group">
+          <label>ID de Conversation (conversationId):</label>
+          <input
+            type="text"
+            id="conversationId"
+            placeholder="Laisser vide pour création auto"
+          />
+          <small style="color: #666"
+            >Laisser vide pour créer automatiquement une conversation</small
+          >
+        </div>
+
+        <div class="form-group">
+          <label>ID du Destinataire (Id_receiver):</label>
+          <input
+            type="text"
+            id="receiverId"
+            placeholder="ID MongoDB du destinataire"
+          />
+          <small style="color: #666"
+            >ID de l'utilisateur qui recevra les messages</small
+          >
+        </div>
+
+        <button onclick="initializeConversation()" id="initBtn">
+          🚀 Initialiser la Conversation
+        </button>
+      </div>
+
+      <!-- Section Audio (cachée jusqu'à l'initialisation) -->
+      <div class="audio-section" id="audioSection" style="display: none">
+        <h3>🎤 Enregistrement Vocal</h3>
+
+        <div class="status-bar" id="statusBar">
+          <strong>Conversation Active:</strong>
+          <span id="activeConversationId"></span> |
+          <strong>Expéditeur:</strong> <span id="activeSenderId"></span> |
+          <strong>Destinataire:</strong> <span id="activeReceiverId"></span>
+        </div>
+
+        <div class="recording-indicator" id="recordingIndicator">
+          ● ENREGISTREMENT EN COURS - <span id="recordingTimer">00:00</span>
+        </div>
+
+        <div class="audio-visualizer" id="audioVisualizer">
+          <!-- Les barres seront ajoutées dynamiquement -->
+        </div>
+
+        <div class="audio-controls">
+          <button onclick="startRecording()" id="startBtn">🎤 Démarrer</button>
+          <button
+            onclick="stopRecording()"
+            id="stopBtn"
+            disabled
+            class="recording"
+          >
+            ⏹️ Arrêter
+          </button>
+          <button onclick="sendAudioMessage()" id="sendBtn" disabled>
+            📤 Envoyer
+          </button>
+          <button onclick="playRecording()" id="playBtn" disabled>
+            ▶️ Écouter
+          </button>
+        </div>
+
+        <audio
+          id="audioPreview"
+          controls
+          class="audio-player"
+          style="display: none"
+        ></audio>
+      </div>
+
+      <div class="messages-section" id="messagesSection" style="display: none">
+        <h3>📨 Messages de la Conversation</h3>
+        <div id="receivedMessages">
+          <p style="text-align: center; color: #666; padding: 20px">
+            Aucun message dans cette conversation...
+          </p>
+        </div>
+      </div>
+
+      <div class="logs" id="logs">[Logs système...]</div>
+    </div>
+
+    <script>
+      // Variables globales
+      let baseUrl = "http://localhost:5000";
+      let token = null;
+      let currentUser = null;
+      let currentConversationId = null;
+      let currentReceiverId = null;
+
+      // Variables enregistrement audio
+      let mediaRecorder = null;
+      let audioChunks = [];
+      let audioBlob = null;
+      let audioStream = null;
+      let recordingTimer = null;
+      let recordingStartTime = null;
+      let analyser = null;
+      let audioContext = null;
+      let visualizationBars = [];
+
+      // Initialisation
+      function init() {
+        initializeVisualizer();
+        updateBaseUrl();
+
+        // Vérifier si on a déjà un token
+        const savedToken = localStorage.getItem("token");
+        if (savedToken) {
+          token = savedToken;
+          verifyToken();
+        }
+      }
+
+      function initializeVisualizer() {
+        const visualizer = document.getElementById("audioVisualizer");
+        visualizer.innerHTML = "";
+        visualizationBars = [];
+
+        for (let i = 0; i < 30; i++) {
+          const bar = document.createElement("div");
+          bar.className = "visualizer-bar";
+          bar.style.height = "2px";
+          visualizer.appendChild(bar);
+          visualizationBars.push(bar);
+        }
+      }
+
+      function updateVisualizer() {
+        if (!analyser) return;
+
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+        analyser.getByteFrequencyData(dataArray);
+
+        for (let i = 0; i < visualizationBars.length; i++) {
+          const barIndex = Math.floor(
+            (i * bufferLength) / visualizationBars.length
+          );
+          const height = (dataArray[barIndex] / 255) * 60;
+          visualizationBars[i].style.height = `${Math.max(2, height)}px`;
+          visualizationBars[i].style.background = `hsl(${
+            height * 2
+          }, 100%, 50%)`;
+        }
+
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+          requestAnimationFrame(updateVisualizer);
+        }
+      }
+
+      function updateBaseUrl() {
+        baseUrl = document.getElementById("baseUrl").value;
+        log("URL backend: " + baseUrl);
+      }
+
+      // Authentification
+      async function login() {
+        const email = document.getElementById("loginEmail").value;
+        const password = document.getElementById("loginPassword").value;
+
+        if (!email || !password) {
+          log("❌ Email et mot de passe requis", "error");
+          return;
+        }
+
+        try {
+          updateBaseUrl();
+          const response = await fetch(`${baseUrl}/api/auth/login`, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ email, password }),
+          });
+
+          const data = await response.json();
+
+          if (response.ok) {
+            token = data.token;
+            currentUser = data;
+            localStorage.setItem("token", token);
+
+            // Afficher les sections après login
+            document.getElementById("loginSection").style.display = "none";
+            document.getElementById("configSection").style.display = "block";
+            document.getElementById("loginStatus").innerHTML =
+              '<span style="color: green;">✅ Connecté: ' +
+              data.username +
+              "</span>";
+
+            log(
+              "✅ Connexion réussie - Utilisateur: " +
+                data.username +
+                " (ID: " +
+                data.id +
+                ")"
+            );
+          } else {
+            log(`❌ Erreur login: ${data.message}`, "error");
+            document.getElementById("loginStatus").innerHTML =
+              '<span style="color: red;">❌ ' + data.message + "</span>";
+          }
+        } catch (error) {
+          log(`❌ Erreur connexion: ${error.message}`, "error");
+          document.getElementById("loginStatus").innerHTML =
+            '<span style="color: red;">❌ Erreur de connexion</span>';
+        }
+      }
+
+      async function verifyToken() {
+        try {
+          updateBaseUrl();
+          const response = await fetch(`${baseUrl}/api/auth/me`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          });
+
+          if (response.ok) {
+            const user = await response.json();
+            currentUser = user;
+
+            // Afficher les sections
+            document.getElementById("loginSection").style.display = "none";
+            document.getElementById("configSection").style.display = "block";
+            document.getElementById("loginStatus").innerHTML =
+              '<span style="color: green;">✅ Reconnecté: ' +
+              user.username +
+              "</span>";
+
+            log("✅ Token valide - Utilisateur reconnecté: " + user.username);
+          } else {
+            throw new Error("Token invalide");
+          }
+        } catch (error) {
+          localStorage.removeItem("token");
+          token = null;
+          log("❌ Token invalide", "error");
+        }
+      }
+
+      // Initialisation de la conversation
+      async function initializeConversation() {
+        currentReceiverId = document.getElementById("receiverId").value;
+        const conversationIdInput =
+          document.getElementById("conversationId").value;
+
+        if (!currentReceiverId) {
+          log("❌ ID destinataire requis", "error");
+          return;
+        }
+
+        if (!token || !currentUser) {
+          log("❌ Veuillez vous connecter d abord", "error");
+          return;
+        }
+
+        try {
+          updateBaseUrl();
+
+          if (conversationIdInput) {
+            // Utiliser la conversation existante
+            currentConversationId = conversationIdInput;
+            log("✅ Conversation existante: " + currentConversationId);
+          } else {
+            // Créer une nouvelle conversation
+            log("🔄 Création nouvelle conversation...");
+
+            const messageData = {
+              Id_sender: currentUser.id,
+              Id_receiver: currentReceiverId,
+              content: "Message initial pour créer la conversation",
+              typeMessage: "text",
+            };
+
+            const response = await fetch(`${baseUrl}/api/messages/send`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                Authorization: `Bearer ${token}`,
+              },
+              body: JSON.stringify(messageData),
+            });
+
+            const result = await response.json();
+
+            if (response.ok) {
+              currentConversationId = result.data.conversationId;
+              log("✅ Nouvelle conversation créée: " + currentConversationId);
+            } else {
+              throw new Error(result.error || "Erreur création conversation");
+            }
+          }
+
+          // Afficher les sections audio et messages
+          document.getElementById("audioSection").style.display = "block";
+          document.getElementById("messagesSection").style.display = "block";
+
+          // Mettre à jour la barre de statut
+          document.getElementById("activeConversationId").textContent =
+            currentConversationId;
+          document.getElementById("activeSenderId").textContent =
+            currentUser.id;
+          document.getElementById("activeReceiverId").textContent =
+            currentReceiverId;
+          document.getElementById("statusBar").style.display = "block";
+
+          // Charger les messages existants
+          await loadConversationMessages();
+
+          log("🎯 Prêt à envoyer des messages vocaux!");
+        } catch (error) {
+          log(`❌ Erreur initialisation: ${error.message}`, "error");
+        }
+      }
+
+      // Charger les messages de la conversation
+      async function loadConversationMessages() {
+        if (!currentConversationId) return;
+
+        try {
+          const response = await fetch(
+            `${baseUrl}/api/messages/${currentConversationId}?limit=20`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+          const result = await response.json();
+
+          if (response.ok && result.messages) {
+            displayMessages(result.messages);
+            log(`📨 ${result.messages.length} messages chargés`);
+          }
+        } catch (error) {
+          log(`❌ Erreur chargement messages: ${error.message}`, "error");
+        }
+      }
+
+      // Enregistrement audio
+      async function startRecording() {
+        if (!currentConversationId) {
+          log("❌ Initialisez d abord la conversation", "error");
+          return;
+        }
+
+        try {
+          audioStream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              channelCount: 1,
+              sampleRate: 44100,
+              echoCancellation: true,
+            },
+          });
+
+          // Configuration visualisation
+          audioContext = new (window.AudioContext ||
+            window.webkitAudioContext)();
+          analyser = audioContext.createAnalyser();
+          const source = audioContext.createMediaStreamSource(audioStream);
+          source.connect(analyser);
+          analyser.fftSize = 256;
+
+          // Configuration enregistrement
+          mediaRecorder = new MediaRecorder(audioStream, {
+            mimeType: "audio/webm;codecs=opus",
+          });
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+              audioChunks.push(event.data);
+            }
+          };
+
+          mediaRecorder.onstop = () => {
+            audioBlob = new Blob(audioChunks, { type: "audio/webm" });
+            const audioUrl = URL.createObjectURL(audioBlob);
+            document.getElementById("audioPreview").src = audioUrl;
+            document.getElementById("audioPreview").style.display = "block";
+            document.getElementById("sendBtn").disabled = false;
+            document.getElementById("playBtn").disabled = false;
+            log("✅ Enregistrement terminé - Prêt à envoyer");
+          };
+
+          mediaRecorder.start(100);
+          recordingStartTime = Date.now();
+          recordingTimer = setInterval(updateRecordingTimer, 1000);
+
+          updateVisualizer();
+
+          document.getElementById("recordingIndicator").style.display = "block";
+          document.getElementById("startBtn").disabled = true;
+          document.getElementById("stopBtn").disabled = false;
+          document.getElementById("sendBtn").disabled = true;
+
+          log("● Enregistrement démarré...");
+        } catch (error) {
+          log(`❌ Erreur microphone: ${error.message}`, "error");
+        }
+      }
+
+      function stopRecording() {
+        if (mediaRecorder && mediaRecorder.state === "recording") {
+          mediaRecorder.stop();
+          if (audioStream) {
+            audioStream.getTracks().forEach((track) => track.stop());
+          }
+
+          clearInterval(recordingTimer);
+          document.getElementById("recordingIndicator").style.display = "none";
+          document.getElementById("startBtn").disabled = false;
+          document.getElementById("stopBtn").disabled = true;
+
+          log("⏹️ Enregistrement arrêté");
+        }
+      }
+
+      function updateRecordingTimer() {
+        const elapsed = Math.floor((Date.now() - recordingStartTime) / 1000);
+        const minutes = Math.floor(elapsed / 60)
+          .toString()
+          .padStart(2, "0");
+        const seconds = (elapsed % 60).toString().padStart(2, "0");
+        document.getElementById(
+          "recordingTimer"
+        ).textContent = `${minutes}:${seconds}`;
+      }
+
+      function playRecording() {
+        document
+          .getElementById("audioPreview")
+          .play()
+          .catch((e) => {
+            log("❌ Erreur lecture: " + e.message, "error");
+          });
+        log("▶️ Lecture enregistrement");
+      }
+
+      async function sendAudioMessage() {
+        if (!audioBlob || !currentConversationId || !token) {
+          log("❌ Données manquantes", "error");
+          return;
+        }
+
+        try {
+          const formData = new FormData();
+          formData.append("audio", audioBlob, "message_vocal.webm");
+          formData.append("conversationId", currentConversationId);
+
+          log("📤 Envoi message vocal...");
+          const response = await fetch(`${baseUrl}/api/messages/audio/send`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+            body: formData,
+          });
+
+          const result = await response.json();
+
+          if (response.ok) {
+            log("✅ Message vocal envoyé!");
+            displaySentAudioMessage(result.data);
+
+            // Réinitialiser
+            audioBlob = null;
+            document.getElementById("sendBtn").disabled = true;
+            document.getElementById("playBtn").disabled = true;
+            document.getElementById("audioPreview").style.display = "none";
+
+            // Recharger les messages
+            await loadConversationMessages();
+          } else {
+            log(`❌ Erreur envoi: ${result.message}`, "error");
+          }
+        } catch (error) {
+          log(`❌ Erreur envoi: ${error.message}`, "error");
+        }
+      }
+
+      // Affichage des messages
+      function displayMessages(messages) {
+        const container = document.getElementById("receivedMessages");
+        container.innerHTML = "";
+
+        messages.forEach((message) => {
+          const messageDiv = createMessageElement(message);
+          container.appendChild(messageDiv);
+        });
+
+        scrollToBottom();
+      }
+
+      function displaySentAudioMessage(message) {
+        updateMessagesContainer();
+        const messageDiv = createMessageElement(message);
+        document.getElementById("receivedMessages").appendChild(messageDiv);
+        scrollToBottom();
+      }
+
+      function createMessageElement(message) {
+        const messageDiv = document.createElement("div");
+        const isAudio = message.typeMessage === "audio";
+        const isFromCurrentUser = message.Id_sender === currentUser.id;
+
+        messageDiv.className = `message ${isAudio ? "audio" : ""} ${
+          isFromCurrentUser ? "" : "received"
+        }`;
+
+        if (isAudio) {
+          messageDiv.innerHTML = `
+                    <div class="message-info">
+                        <strong>${
+                          isFromCurrentUser ? "Vous" : "Expéditeur"
+                        }</strong>
+                        - ${new Date(
+                          message.time || message.createdAt
+                        ).toLocaleTimeString()}
+                        <span style="float: right;">${
+                          message.audioDuration || "?"
+                        }s</span>
+                    </div>
+                    <div>${isAudio ? "🎤 Message vocal" : message.content}</div>
+                    <div class="audio-controls-small">
+                        <button onclick="playAudioMessage('${
+                          message.audioUrl
+                        }')">▶️ Écouter</button>
+                        <button onclick="downloadAudio('${
+                          message.audioUrl
+                        }', 'message_${
+            message._id
+          }.webm')">📥 Télécharger</button>
+                    </div>
+                `;
+        } else {
+          messageDiv.innerHTML = `
+                    <div class="message-info">
+                        <strong>${
+                          isFromCurrentUser ? "Vous" : "Expéditeur"
+                        }</strong>
+                        - ${new Date(
+                          message.time || message.createdAt
+                        ).toLocaleTimeString()}
+                    </div>
+                    <div>${message.content}</div>
+                `;
+        }
+
+        return messageDiv;
+      }
+
+      function updateMessagesContainer() {
+        const container = document.getElementById("receivedMessages");
+        if (container.querySelector("p")) {
+          container.innerHTML = "";
+        }
+      }
+
+      function scrollToBottom() {
+        const container = document.getElementById("receivedMessages");
+        container.scrollTop = container.scrollHeight;
+      }
+
+      function playAudioMessage(audioUrl) {
+        const audio = new Audio(audioUrl);
+        audio.play().catch((e) => {
+          log("❌ Erreur lecture audio: " + e.message, "error");
+        });
+        log("▶️ Lecture message audio");
+      }
+
+      function downloadAudio(audioUrl, filename) {
+        const link = document.createElement("a");
+        link.href = audioUrl;
+        link.download = filename;
+        link.click();
+        log("📥 Téléchargement: " + filename);
+      }
+
+      // Utilitaires
+      function log(message, type = "info") {
+        const logs = document.getElementById("logs");
+        const timestamp = new Date().toLocaleTimeString();
+        const color =
+          type === "error"
+            ? "#ff4444"
+            : type === "success"
+            ? "#44ff44"
+            : "#ffffff";
+        logs.innerHTML += `[${timestamp}] <span style="color: ${color}">${message}</span>\n`;
+        logs.scrollTop = logs.scrollHeight;
+      }
+
+      // Initialisation au chargement
+      document.addEventListener("DOMContentLoaded", init);
+    </script>
+  </body>
+</html>

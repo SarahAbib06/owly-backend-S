@@ -11,11 +11,20 @@ const messageSchema = new mongoose.Schema({
     ref: "User",
     required: true,
   },
-  //id_receiver: {type: mongoose.Schema.Types.ObjectId,ref: 'Participant',required: false},
+
+  // 🆕 AJOUT POUR LES NOTIFICATIONS - REMPLACE ton ancien "readBy"
   readBy: [
     {
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      readAt: { type: Date, default: Date.now },
+    },
+  ],
+
+  // 🆕 NOUVEAU CHAMP - Liste des users qui n'ont pas encore lu
+  unreadFor: [
+    {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Participant",
+      ref: "User",
     },
   ],
 
@@ -33,12 +42,10 @@ const messageSchema = new mongoose.Schema({
     enum: ["sent", "delivered", "seen"],
     default: "sent",
   },
-
   time: {
     type: Date,
     default: Date.now,
   },
-
   // 🔊 CHAMPS SPÉCIFIQUES AUDIO "message vocal"
   audioUrl: {
     type: String, // Chemin du fichier: "/uploads/audio/filename.webm"
@@ -56,7 +63,22 @@ const messageSchema = new mongoose.Schema({
     type: String, // Nom original: "voice_message_123456789.webm"
     default: null,
   },
+  // 🆕 NOUVEAUX CHAMPS CLOUDINARY
+  cloudinaryPublicId: {
+    type: String, // ID public Cloudinary: "owly/audio_messages/xyz123"
+    default: null,
+  },
+  cloudinaryFormat: {
+    type: String, // Format: "mp3", "webm", etc.
+    default: null,
+  },
 });
 //les fichier audio et image
+
+// 🆕 INDEXES POUR PERFORMANCE
+messageSchema.index({ conversationId: 1, createdAt: -1 });
+messageSchema.index({ Id_sender: 1 });
+messageSchema.index({ createdAt: -1 });
+messageSchema.index({ "readBy.userId": 1 });
 
 export default mongoose.model("Message", messageSchema);

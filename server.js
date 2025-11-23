@@ -11,14 +11,17 @@ import { fileURLToPath } from "url";
 import connectDB from "./src/config/db.js";
 import User from "./src/models/User.js";
 import authRoutes from "./src/routes/auth.js";
-import conversationRoutes from "./src/routes/conversationRoutes.js";
+import { configureChatSockets } from "./src/socket/chatSocket.js";
 import messageRoutes from "./src/routes/messageRoutes.js";
+import conversationRoutes from "./src/routes/conversationRoutes.js";
+import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
-import { setupSocketIO } from "./src/socket/chatSocket.js";
 
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const app = express();
+const PORT = process.env.PORT || 5000; // ⭐ DÉPLACÉ ICI
 
 console.log(
   "🔍 MONGODB_URI:",
@@ -33,10 +36,6 @@ console.log(
   process.env.CLIENT_URL ? "✅ Chargé" : "❌ Non défini"
 );
 
-// ⭐ Initialisation de l'application
-const app = express();
-const PORT = process.env.PORT || 5000;
-
 // ⭐ Création du serveur HTTP
 const httpServer = createServer(app);
 
@@ -45,8 +44,10 @@ const allowedOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
   "http://localhost:5175",
+  "null",
+
   process.env.CLIENT_URL,
-].filter(Boolean); // Retire les valeurs undefined
+].filter(Boolean);
 
 app.use(
   cors({
@@ -63,49 +64,22 @@ const io = new Server(httpServer, {
   },
 });
 
+app.set("io", io);
+
 // ⭐ Middlewares Express
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// ⭐ Servir les fichiers statiques
-app.use("/uploads", express.static("uploads"));
-app.use(
-  "/uploads/audio",
-  express.static(path.join(__dirname, "uploads", "audio"))
-);
-console.log("✅ Service des fichiers statiques configuré");
-
-// ⭐ Middleware de debug (optionnel)
-app.use((req, res, next) => {
-  console.log(`📨 ${new Date().toISOString()} - ${req.method} ${req.url}`);
-  next();
+// Routes
+app.get("/", (req, res) => {
+  res.json({ message: "Owly API is running" });
 });
 
-// ⭐ Routes de l'API
 app.use("/api/auth", authRoutes);
-
-app.use("/api/conversations", conversationRoutes);
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
-
-// ⭐ Route pour vérifier les fichiers audio
-app.get("/api/audio/check/:filename", (req, res) => {
-  const filename = req.params.filename;
-  const filePath = path.join(__dirname, "uploads", "audio", filename);
-
-  if (fs.existsSync(filePath)) {
-    res.json({
-      exists: true,
-      url: `/uploads/audio/${filename}`,
-      path: filePath,
-    });
-  } else {
-    res.status(404).json({
-      exists: false,
-      message: "Fichier audio non trouvé",
-    });
-  }
-});
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 // ⭐ Route de test
 app.post("/api/test-body", (req, res) => {
@@ -117,38 +91,6 @@ app.post("/api/test-body", (req, res) => {
     bodyKeys: Object.keys(req.body || {}),
   });
 });
-
-// ⭐ Route racine
-app.get("/", (req, res) => {
-  res.json({ message: "Owly API is running" });
-});
-
-// ⭐ Fonction pour copier les utilisateurs
-const copyUsersToUsersCollection = async () => {
-  try {
-    console.log("📋 Début de la copie des utilisateurs...");
-
-    const User = (await import("./src/models/User.js")).default;
-    const Users = (await import("./src/models/User.js")).default;
-
-    const existingUsers = await User.find();
-    console.log(`👥 ${existingUsers.length} utilisateurs trouvés`);
-
-    let copiedCount = 0;
-    for (const user of existingUsers) {
-      const exists = await Users.findById(user._id);
-      if (!exists) {
-        await Users.create(user.toObject());
-        copiedCount++;
-        console.log(`✅ Copié: ${user.username} (${user.email})`);
-      }
-    }
-
-    console.log(`🎉 Copie terminée: ${copiedCount} nouveaux utilisateurs`);
-  } catch (error) {
-    console.log("ℹ️ Users déjà copiés ou erreur mineure:", error.message);
-  }
-};
 
 // ⭐ Middleware d'authentification Socket.io
 io.use(async (socket, next) => {
@@ -182,14 +124,43 @@ io.use(async (socket, next) => {
 });
 
 // ⭐ Configuration Socket.io
-setupSocketIO(io);
+configureChatSockets(io);
+console.log("✅ Socket.IO initialisé avec configureChatSockets");
 
-// ⭐ Connexion à la base de données et démarrage du serveur
+// ⭐ Fonction pour copier les utilisateurs
+const copyUsersToUsersCollection = async () => {
+  try {
+    console.log("📋 Début de la copie des utilisateurs...");
+
+    const User = (await import("./src/models/User.js")).default;
+    const Users = (await import("./src/models/User.js")).default;
+
+    const existingUsers = await User.find();
+    console.log(`👥 ${existingUsers.length} utilisateurs trouvés`);
+
+    let copiedCount = 0;
+    for (const user of existingUsers) {
+      const exists = await Users.findById(user._id);
+      if (!exists) {
+        await Users.create(user.toObject());
+        copiedCount++;
+        console.log(`✅ Copié: ${user.username} (${user.email})`);
+      }
+    }
+
+    console.log(`🎉 Copie terminée: ${copiedCount} nouveaux utilisateurs`);
+  } catch (error) {
+    console.log("ℹ️ Users déjà copiés ou erreur mineure:", error.message);
+  }
+};
+
+// ⭐ UN SEUL APPEL À httpServer.listen
 connectDB().then(() => {
   copyUsersToUsersCollection();
 
   httpServer.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`🌐 Allowed origins: ${allowedOrigins.join(", ")}`);
+    console.log(`☁️ Stockage audio: Cloudinary activé`);
   });
 });
