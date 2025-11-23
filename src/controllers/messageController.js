@@ -134,6 +134,7 @@ export const messageController = {
     });
 
     const savedMessage = await message.save();
+
     // COMPTEURS NON LUS
     try {
       const participants = await Participants.find({ Id_Conversation: finalConversationId });
@@ -175,6 +176,7 @@ export const messageController = {
 
     // 🆕 COMPTEURS NON-LUS
     try {
+
       console.log('🔢 Mise à jour des compteurs non-lus...');
       
       let participants = [];
@@ -297,6 +299,7 @@ export const messageController = {
       }
     } catch (error) {
 
+
       console.log('⚠️ Erreur notifications:', error.message);
     }
 
@@ -313,11 +316,6 @@ export const messageController = {
         isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
       });
     }
-
-
-
-
-
 
     return {
       _id: savedMessage._id,

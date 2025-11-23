@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 
+
 const { Schema, model } = mongoose;
 
 const conversationSchema = new Schema(
@@ -84,3 +85,4 @@ conversationSchema.index({ 'Id_participant': 1, lastMessageAt: -1 }); // combo g
 const Conversation = model('Conversation', conversationSchema);
 
 export default Conversation;
+

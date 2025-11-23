@@ -6,101 +6,76 @@ import { Server } from 'socket.io';
 
 import connectDB from './src/config/db.js';
 import { configureChatSockets } from './src/socket/chatSocket.js';
-
 import messageRoutes from './src/routes/messageRoutes.js';
 import conversationRoutes from './src/routes/conversationRoutes.js';
 import notificationRoutes from './src/routes/notificationRoutes.js';
 import authRoutes from './src/routes/auth.js';
-import relationRoutes from './src/routes/relation.js';
-import userRoutes from './src/routes/userRoutes.js';
-
 import { participantController } from './src/controllers/participantController.js';
+import userRoutes from './src/routes/userRoutes.js';
+import relationRoutes from './src/routes/relation.js';
 
-// ────────────────────────────────
-// LOGS DE DÉMARRAGE (debug env)
-// ────────────────────────────────
-console.log('MONGODB_URI:', process.env.MONGODB_URI ? 'Chargé' : 'MANQUANT');
-console.log('JWT_SECRET:', process.env.JWT_SECRET ? 'Chargé' : 'MANQUANT');
+console.log('🔍 MONGODB_URI:', process.env.MONGODB_URI ? '✅ Chargé' : '❌ Non défini');
+console.log('🔍 JWT_SECRET:', process.env.JWT_SECRET ? '✅ Chargé' : '❌ Non défini');
 
-// ────────────────────────────────
-// EXPRESS + HTTP SERVER
-// ────────────────────────────────
 const app = express();
 const server = createServer(app);
-
-// ────────────────────────────────
-// SOCKET.IO + CORS (très important !)
-// ────────────────────────────────
 const io = new Server(server, {
   cors: {
-    origin: true,                 // Accepte TOUTES les origines en dev
+    origin: [
+      "http://localhost:5173", 
+      "http://localhost:5174", 
+      "http://localhost:5175",
+      "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+      "http://localhost:5500"       // 🆕 AJOUTÉ
+    ],
     credentials: true
   }
 });
 
-// ────────────────────────────────
-// CONNEXION MONGODB
-// ────────────────────────────────
+// ✅ 1. Connexion à la base de données
 connectDB();
 
-// ────────────────────────────────
-// NETTOYAGE PARTICIPANTS ORPHELINS AU DEMARRAGE
-// ────────────────────────────────
+// 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
 const cleanupOrphans = async () => {
   try {
-    console.log('Nettoyage des participants orphelins...');
+    console.log('🔧 Nettoyage des participants orphelins...');
     await participantController.cleanupOrphanParticipants();
-    console.log('Nettoyage terminé');
   } catch (error) {
-    console.log('Échec nettoyage participants:', error.message);
+    console.log('⚠️ Nettoyage participants échoué:', error.message);
   }
 };
 cleanupOrphans();
 
-// ────────────────────────────────
-// MIDDLEWARES
-// ────────────────────────────────
+// ✅ 2. Middlewares CORS et JSON
 app.use(cors({
-  origin: true,        // Accepte tout en développement (5500, 5501, 5173, etc.)
-  credentials: true
+  origin: [
+    "http://localhost:5173", 
+    "http://localhost:5174", 
+    "http://localhost:5175",
+    "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
+    "http://localhost:5500"       // 🆕 AJOUTÉ
+  ],
+  credentials: true,
 }));
-
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
-// Dossier uploads (avatars, images, etc.)
+app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 
-// ────────────────────────────────
-// ROUTES
-// ────────────────────────────────
+// ✅ 3. Routes
 app.get('/', (req, res) => {
-  res.json({ 
-    message: 'Owly API is running', 
-    version: '1.0.0',
-    time: new Date().toISOString()
-  });
+  res.json({ message: 'Owly API is running' });
 });
 
 app.use('/api/messages', messageRoutes);
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/relations', relationRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/relations', relationRoutes);
 
-// ────────────────────────────────
-// SOCKET.IO CONFIGURATION
-// ────────────────────────────────
+// ✅ 4. Configuration Socket.io
 configureChatSockets(io);
 
-// ────────────────────────────────
-// DEMARRAGE SERVEUR
-// ────────────────────────────────
+// ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
+server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
-server.listen(PORT, () => {
-  console.log(`Serveur démarré sur http://localhost:${PORT}`);
-  console.log(`Socket.IO prêt`);
-  console.log(`CORS activé pour tous les ports (dev)`);
-});
