@@ -70,6 +70,7 @@ const cleanupOrphans = async () => {
 cleanupOrphans();
 
 // ✅ 2. Middlewares CORS et JSON
+
 app.use(
   cors({
     origin: [
@@ -85,6 +86,7 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(express.json());
 app.use("/uploads", express.static("uploads"));
 

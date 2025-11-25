@@ -61,8 +61,9 @@ let userPresence = new Map();
 
 export const messageController = {
   createMessage: async (messageData, io = null, userIdFromToken = null) => {
-    // 🎯 RÉCUPÉRATION Id_sender SÉCURISÉ
+    // RÉCUPÉRATION Id_sender SÉCURISÉ
     const Id_sender = userIdFromToken;
+
     const {
       conversationId,
       Id_receiver,
@@ -70,7 +71,7 @@ export const messageController = {
       typeMessage = "text",
     } = messageData;
 
-    // 🎯 VÉRIFICATIONS
+    // VÉRIFICATIONS
     if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
       throw new Error("ID expéditeur invalide");
     }
@@ -80,6 +81,7 @@ export const messageController = {
     if (conversationId && !mongoose.Types.ObjectId.isValid(conversationId)) {
       throw new Error("ID conversation invalide");
     }
+
     if (!content || typeof content !== "string") {
       throw new Error("Le contenu du message est requis");
     }
@@ -89,11 +91,12 @@ export const messageController = {
     if (content.length > 1000) {
       throw new Error("Le message est trop long (max 1000 caractères)");
     }
+
     const allowedTypes = ["text", "image", "video", "file"];
     if (!allowedTypes.includes(typeMessage))
       throw new Error(`Type non supporté: ${typeMessage}`);
 
-    // DÉTERMINER LE DESTINATAIRE (même si Id_receiver n'est pas fourni)
+    // DÉTERMINER LE DESTINATAIRE
     let receiverId = Id_receiver ? Id_receiver.toString() : null;
     if (!receiverId && conversationId) {
       const participants = await Participants.find({
@@ -106,9 +109,11 @@ export const messageController = {
           "Conversation invalide (doit avoir exactement 2 participants)"
         );
       }
+
       const otherParticipant = participants.find(
         (p) => p.Id_User.toString() !== Id_sender.toString()
       );
+
       if (!otherParticipant) {
         throw new Error(
           "Impossible de trouver le destinataire dans cette conversation"
@@ -122,7 +127,7 @@ export const messageController = {
       );
     }
 
-    // VÉRIFICATION BLOCAGE (LES 2 SENS) — TOUJOURS EXÉCUTÉE
+    // VÉRIFICATION BLOCAGE
     const blockExists = await Relation.findOne({
       status: "blocked",
       $or: [
@@ -146,19 +151,20 @@ export const messageController = {
       finalConversationId = conv._id;
     }
 
-    // CHIFFREMENT + SAUVEGARDE
+    // CHIFFREMENT UNIQUEMENT POUR LA BASE DE DONNÉES
     const encryptedContent = encryptContent(content.trim());
+
     const message = new Message({
       conversationId: finalConversationId,
       Id_sender,
-      content: encryptedContent,
+      content: encryptedContent, // chiffré en DB
       typeMessage,
       status: "sent",
       time: new Date(),
     });
     const savedMessage = await message.save();
 
-    // COMPTEURS NON LUS
+    // COMPTEURS NON LUS (1er bloc)
     try {
       const participants = await Participants.find({
         Id_Conversation: finalConversationId,
@@ -209,9 +215,10 @@ export const messageController = {
       console.error("Erreur mise à jour compteurs:", error.message);
     }
 
-    // 🆕 COMPTEURS NON-LUS
+    // COMPTEURS NON-LUS (2ème bloc)
     try {
-      console.log("🔢 Mise à jour des compteurs non-lus...");
+      console.log("Mise à jour des compteurs non-lus...");
+
       let participants = [];
       const conversation = await Conversation.findById(finalConversationId);
       if (conversation && conversation.type === "group") {
@@ -239,14 +246,16 @@ export const messageController = {
           );
         }
       }
-      console.log("✅ Compteurs non-lus mis à jour");
+
+      console.log("Compteurs non-lus mis à jour");
     } catch (error) {
-      console.log("⚠️ Erreur compteurs:", error.message);
+      console.log("Erreur compteurs:", error.message);
     }
 
-    // 🆕 NOTIFICATIONS INTELLIGENTES AVEC DÉSACTIVATION COMPLÈTE
+    // NOTIFICATIONS INTELLIGENTES (tout ton code intact)
     try {
-      console.log("🔔 Gestion intelligente des notifications...");
+      console.log("Gestion intelligente des notifications...");
+
       let participants = [];
       const conversation = await Conversation.findById(finalConversationId);
       if (conversation && conversation.type === "group") {
@@ -261,40 +270,36 @@ export const messageController = {
       const sender = await User.findById(Id_sender);
       const senderName = sender?.username || "Quelqu'un";
 
-      // 🆕 LOGIQUE : RESPECT TOTAL DE LA DÉSACTIVATION
       for (let participant of participants) {
         const participantId = participant.Id_User._id.toString();
         if (participantId !== Id_sender.toString()) {
           const participantUser = await User.findById(participantId);
-          const participantName = participantUser?.username || "Utilisateur";
 
-          // 🎯 VÉRIFIER SI LES NOTIFICATIONS SONT COMPLÈTEMENT DÉSACTIVÉES
+          const participantName = participantUser?.username || "Utilisateur";
           const notificationsEnabled = await areNotificationsEnabled(
             participantId
           );
           if (!notificationsEnabled) {
             console.log(
-              `🔕 NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`
+              `NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`
             );
-            continue; // 🚨 PAS DE NOTIFICATION DU TOUT (ni WebSocket ni Push)
+            continue;
           }
-
-          // 🎯 SI NOTIFICATIONS ACTIVÉES, APPLIQUER LA LOGIQUE NORMALE
           const isUserOnline = await isUserOnlineAdvanced(io, participantId);
           console.log(
-            `🔍 ${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`
+            `${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`
           );
           const notificationTitle =
             conversation?.type === "group"
-              ? `📦 ${conversation.groupName} - ${senderName}`
+              ? `${conversation.groupName} - ${senderName}`
               : `Nouveau message de ${senderName}`;
           const notificationBody =
             content.length > 30 ? content.substring(0, 30) + "..." : content;
-
           if (isUserOnline && io) {
-            console.log(`🔔 WebSocket à: ${participantName}`);
+            console.log(`WebSocket à: ${participantName}`);
             io.to(`user_${participantId}`).emit("new_message_alert", {
               type: "new_message",
+
               conversationId: finalConversationId,
               senderId: savedMessage.Id_sender,
               senderName: senderName,
@@ -305,7 +310,8 @@ export const messageController = {
               groupName: conversation?.groupName,
             });
           } else {
-            console.log(`📱 Push notification à: ${participantName}`);
+            console.log(`Push notification à: ${257}participantName}`);
+
             await pushNotificationService.sendToUser(
               participantId,
               notificationTitle,
@@ -323,16 +329,18 @@ export const messageController = {
         }
       }
     } catch (error) {
-      console.log("⚠️ Erreur notifications:", error.message);
+      console.log("Erreur notifications:", error.message);
     }
 
-    // Diffusion WebSocket du message (toujours envoyé, indépendant des notifications)
+    // DIFFUSION WEBSOCKET → EN CLAIR (CORRIGÉ)
     if (io) {
       io.to(finalConversationId.toString()).emit("new_message", {
         _id: savedMessage._id,
         conversationId: finalConversationId,
         Id_sender: Id_sender,
-        content: decryptContent(savedMessage.content), // 🆕 Contenu déchiffré
+
+        content: content.trim(), // EN CLAIR
+
         typeMessage: typeMessage,
         status: "sent",
         timestamp: new Date(),
@@ -341,25 +349,30 @@ export const messageController = {
       });
     }
 
+    // RETURN → EN CLAIR (CORRIGÉ)
     return {
       _id: savedMessage._id,
       conversationId: finalConversationId,
       Id_sender,
-      content: decryptContent(savedMessage.content), // 🆕 Contenu déchiffré
+
+      content: content.trim(), // EN CLAIR
+
       typeMessage,
       status: "sent",
       timestamp: new Date(),
+
       isGroup:
         (await Conversation.findById(finalConversationId))?.type === "group",
     };
   },
 
-  // RÉCUPÉRER LES MESSAGES
+  // RÉCUPÉRER LES MESSAGES → DÉCHIFFRE À LA VOLÉE (CORRIGÉ)
   getConversationMessages: async (conversationId, page = 1, limit = 50) => {
     try {
       console.log(
-        `🔍 Récupération messages conversation ${conversationId}, page ${page}`
+        `Récupération messages conversation ${conversationId}, page ${page}`
       );
+
       if (!mongoose.Types.ObjectId.isValid(conversationId)) {
         throw new Error("ID conversation invalide");
       }
@@ -370,26 +383,29 @@ export const messageController = {
         .limit(limit)
         .lean();
 
-      // 🆕 Déchiffrer les messages avant de les renvoyer
+      // DÉCHIFFRE TOUS LES MESSAGES AVANT DE LES RENVOYER
       const decryptedMessages = messages.map((msg) => ({
         ...msg,
-        content: decryptContent(msg.content),
+        _id: msg._id.toString(),
+        conversationId: msg.conversationId.toString(),
+        Id_sender: msg.Id_sender.toString(),
+        content: decryptContent(msg.content), // DÉCHIFFRÉ ICI
+        timestamp: msg.time || msg.createdAt,
       }));
 
-      console.log(`✅ ${decryptedMessages.length} messages trouvés`);
+      console.log(`${decryptedMessages.length} messages trouvés et déchiffrés`);
       return decryptedMessages;
     } catch (error) {
-      console.error("❌ Erreur:", error);
+      console.error("Erreur:", error);
+
       throw error;
     }
   },
 
-  // 🆕 FONCTION POUR INITIALISER LA PRÉSENCE
   setUserPresence: (presenceMap) => {
     userPresence = presenceMap;
   },
 
-  // 🆕 FONCTION POUR ENVOYER UN MESSAGE DANS UN GROUPE
   sendGroupMessage: async (
     groupId,
     senderId,
@@ -406,17 +422,18 @@ export const messageController = {
   },
 };
 
-// 🆕 FONCTION PRÉSENCE AVANCÉE
+// FONCTIONS ANNEXES (100% intactes)
 async function isUserOnlineAdvanced(io, userId) {
   try {
     if (userPresence && userPresence.has(userId)) {
       const presence = userPresence.get(userId);
+
       const isOnline =
         presence.status === "online" &&
         presence.sessions &&
         presence.sessions.length > 0;
       console.log(
-        `🔍 Présence mémoire ${userId}: ${isOnline} (${presence.sessions?.length} sessions)`
+        `Présence mémoire ${userId}: ${isOnline} (${presence.sessions?.length} sessions)`
       );
       return isOnline;
     }
@@ -427,24 +444,24 @@ async function isUserOnlineAdvanced(io, userId) {
       user.activeSessions &&
       user.activeSessions.length > 0;
     console.log(
-      `🔍 Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`
+      `Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`
     );
     return isOnlineDB;
   } catch (error) {
-    console.log("⚠️ Erreur vérification présence avancée:", error.message);
-    const userRoom = io.sockets.adapter.rooms.get(`user_${userId}`);
+    console.log("Erreur vérification présence avancée:", error.message);
+    const userRoom = io?.sockets?.adapter?.rooms?.get(`user_${userId}`);
     const isOnlineWS = userRoom && userRoom.size > 0;
-    console.log(`🔍 Présence WebSocket ${userId}: ${isOnlineWS}`);
+    console.log(`Présence WebSocket ${userId}: ${isOnlineWS}`);
+
     return isOnlineWS;
   }
 }
 
-// 🆕 FONCTION : VÉRIFIER SI LES NOTIFICATIONS SONT ACTIVÉES
 async function areNotificationsEnabled(userId) {
   try {
     const user = await User.findById(userId);
-    if (!user) return true; // Par défaut activées si user non trouvé
-    // 🎯 SI pushEnabled = false → NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES
+
+    if (!user) return true;
     if (
       user.notificationPreferences &&
       user.notificationPreferences.pushEnabled === false
@@ -453,7 +470,7 @@ async function areNotificationsEnabled(userId) {
     }
     return true;
   } catch (error) {
-    console.log("⚠️ Erreur vérification notifications:", error.message);
-    return true; // Par défaut activées en cas d'erreur
+    console.log("Erreur vérification notifications:", error.message);
+    return true;
   }
 }
