@@ -19,17 +19,22 @@ console.log('🔍 JWT_SECRET:', process.env.JWT_SECRET ? '✅ Chargé' : '❌ No
 
 const app = express();
 const server = createServer(app);
+
+// 🆕 SOCKET.IO CONFIGURÉ POUR LES FICHIERS
 const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:5173", 
       "http://localhost:5174", 
       "http://localhost:5175",
-      "http://127.0.0.1:5500",      // 🆕 AJOUTÉ
-      "http://localhost:5500"       // 🆕 AJOUTÉ
+      "http://127.0.0.1:5500",
+      "http://localhost:5500",
+      "http://127.0.0.1:5501",
+      "http://localhost:5501"  
     ],
     credentials: true
-  }
+  },
+  maxHttpBufferSize: 1e8 // 🆕 POUR ENVOI DE GROS FICHIERS
 });
 
 // ✅ 1. Connexion à la base de données
@@ -46,7 +51,7 @@ const cleanupOrphans = async () => {
 };
 cleanupOrphans();
 
-// ✅ 2. Middlewares CORS et JSON
+// ✅ 2. Middlewares CORS et JSON AMÉLIORÉS
 app.use(cors({
   origin: [
     "http://localhost:5173", 
@@ -54,15 +59,18 @@ app.use(cors({
     "http://localhost:5175",
     "http://127.0.0.1:5500",
     "http://127.0.0.1:5501",
-    "http://localhost:5501",      // 🆕 AJOUTÉ
-    "http://localhost:5500"       // 🆕 AJOUTÉ
+    "http://localhost:5501",
+    "http://localhost:5500"
   ],
   credentials: true,
 }));
-app.use(express.json());
+
+// 🆕 LIMITES AUGMENTÉES POUR LES FICHIERS
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use("/uploads", express.static("uploads"));
 
-// ✅ 3. Routes
+// ✅ 3. Routes COMPLÈTES (gardées de la V1)
 app.get('/', (req, res) => {
   res.json({ message: 'Owly API is running' });
 });
@@ -80,4 +88,3 @@ configureChatSockets(io);
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
-

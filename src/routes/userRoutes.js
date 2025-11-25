@@ -51,5 +51,47 @@ router.get('/notification-preferences', protact, async (req, res) => {
     });
   }
 });
+// 🆕 ROUTE RECHERCHE UTILISATEURS
+router.get('/search', protact, async (req, res) => {
+    try {
+        const { q } = req.query;
+        
+        if (!q || q.length < 2) {
+            return res.status(400).json({
+                success: false,
+                message: 'Le terme de recherche doit contenir au moins 2 caractères'
+            });
+        }
+
+        console.log('🔍 Recherche utilisateurs:', q);
+
+        // Recherche dans la base de données
+        const users = await User.find({
+            $or: [
+                { username: { $regex: q, $options: 'i' } }, // Recherche insensible à la casse
+                { email: { $regex: q, $options: 'i' } }
+            ],
+            _id: { $ne: req.user._id } // Exclure l'utilisateur connecté
+        })
+        .select('username email profilePicture status') // Sélectionner seulement les champs nécessaires
+        .limit(10); // Limiter à 10 résultats
+
+        console.log(`✅ ${users.length} utilisateurs trouvés`);
+
+        res.json({
+            success: true,
+            users: users,
+            count: users.length
+        });
+
+    } catch (error) {
+        console.error('❌ Erreur recherche utilisateurs:', error);
+        res.status(500).json({
+            success: false,
+            message: 'Erreur lors de la recherche',
+            error: error.message
+        });
+    }
+});
 
 export default router;

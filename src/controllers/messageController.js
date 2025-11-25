@@ -8,6 +8,8 @@ import { conversationController } from './conversationController.js';
 import { pushNotificationService } from '../services/pushNotificationService.js';
 import mongoose from 'mongoose';
 import crypto from 'crypto';
+import cloudinary from '../config/cloudinary.js';
+import streamifier from 'streamifier';
 
 // CLÉ SECRÈTE — METS ÇA DANS TON .env (64 caractères hex = 32 bytes)
 const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY || 'a'.repeat(64);
@@ -24,7 +26,7 @@ function encryptContent(text) {
   return JSON.stringify(payload);
 }
 
-// DÉCHIFFREMENT (pour lecture future si besoin)
+// DÉCHIFFREMENT
 function decryptContent(stored) {
   if (!stored || typeof stored !== 'string') return '[Message vide]';
   if (!stored.startsWith('{') || !stored.includes(':')) return stored;
@@ -46,31 +48,147 @@ function decryptContent(stored) {
 
 let userPresence = new Map();
 
+// 🆕 CONFIGURATION DES FICHIERS
+const FILE_CONFIG = {
+  image: {
+    allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    maxSize: 10 * 1024 * 1024, // 10MB
+    folder: 'chat_images'
+  },
+  video: {
+    allowedTypes: ['video/mp4', 'video/mkv', 'video/avi', 'video/mov', 'video/webm'],
+    maxSize: 50 * 1024 * 1024, // 50MB
+    folder: 'chat_videos'
+  },
+  file: {
+    allowedTypes: [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'application/vnd.ms-excel',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'text/plain',
+      'application/zip',
+      'application/x-rar-compressed'
+    ],
+    maxSize: 20 * 1024 * 1024, // 20MB
+    folder: 'chat_files'
+  }
+};
+
+// 🆕 VALIDATION DES FICHIERS
+const validateFile = (file, allowedTypes, maxSize) => {
+  if (!file || !file.buffer) {
+    throw new Error('Fichier manquant');
+  }
+
+  if (file.size > maxSize) {
+    throw new Error(`Fichier trop volumineux (max: ${maxSize / 1024 / 1024}MB)`);
+  }
+
+  if (!allowedTypes.includes(file.mimetype)) {
+    throw new Error(`Type de fichier non autorisé: ${file.mimetype}`);
+  }
+
+  return true;
+};
+
+// 🆕 FONCTION GÉNÉRIQUE POUR L'UPLOAD
+const uploadToCloudinary = async (file, resourceType, folder) => {
+  return new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: folder,
+        resource_type: resourceType,
+        ...(resourceType === 'image' && {
+          quality: 'auto',
+          format: 'jpg'
+        }),
+        ...(resourceType === 'video' && {
+          chunk_size: 6000000
+        })
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    
+    streamifier.createReadStream(file.buffer).pipe(uploadStream);
+  });
+};
+
+// 🆕 VALIDATION ET CONVERSION ID UTILISATEUR
+const validateAndConvertUserId = (userId, fieldName = 'ID utilisateur') => {
+  if (!userId) {
+    throw new Error(`${fieldName} manquant`);
+  }
+
+  // Convertir en string si c'est un ObjectId
+  let userIdString = userId;
+  if (typeof userId === 'object' && userId.toString) {
+    userIdString = userId.toString();
+  }
+
+  // Nettoyer et valider le format
+  userIdString = userIdString.trim();
+  
+  if (!mongoose.Types.ObjectId.isValid(userIdString)) {
+    throw new Error(`${fieldName} invalide: "${userIdString}"`);
+  }
+
+  return new mongoose.Types.ObjectId(userIdString);
+};
+
 export const messageController = {
   createMessage: async (messageData, io = null, userIdFromToken = null) => {
+    // RÉCUPÉRATION Id_sender SÉCURISÉ
     const Id_sender = userIdFromToken;
+   
     const { conversationId, Id_receiver, content, typeMessage = 'text' } = messageData;
 
-    // === TOUTES TES VÉRIFICATIONS (inchangées) ===
-    if (!mongoose.Types.ObjectId.isValid(Id_sender)) throw new Error('ID expéditeur invalide');
-    if (Id_receiver && !mongoose.Types.ObjectId.isValid(Id_receiver)) throw new Error('ID destinataire invalide');
-    if (conversationId && !mongoose.Types.ObjectId.isValid(conversationId)) throw new Error('ID conversation invalide');
-    if (!content || typeof content !== 'string' || content.trim().length === 0) throw new Error('Message vide');
-    if (content.length > 1000) throw new Error('Message trop long (max 1000)');
-    if (!['text', 'image', 'video', 'file'].includes(typeMessage)) throw new Error(`Type non supporté: ${typeMessage}`);
+    // VÉRIFICATIONS
+    if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
+      throw new Error('ID expéditeur invalide');
+    }
+    if (Id_receiver && !mongoose.Types.ObjectId.isValid(Id_receiver)) {
+      throw new Error('ID destinataire invalide');
+    }
+    if (conversationId && !mongoose.Types.ObjectId.isValid(conversationId)) {
+      throw new Error('ID conversation invalide');
+    }
+    if (!content || typeof content !== 'string') {
+      throw new Error('Le contenu du message est requis');
+    }
+    if (content.trim().length === 0) {
+      throw new Error('Le message ne peut pas être vide');
+    }
+    if (content.length > 1000) {
+      throw new Error('Le message est trop long (max 1000 caractères)');
+    }
+    const allowedTypes = ['text', 'image', 'video', 'file', 'emojis'];
+    if (!allowedTypes.includes(typeMessage)) throw new Error(`Type non supporté: ${typeMessage}`);
 
-    // === DESTINATAIRE ===
+    // DÉTERMINER LE DESTINATAIRE
     let receiverId = Id_receiver ? Id_receiver.toString() : null;
     if (!receiverId && conversationId) {
-      const participants = await Participants.find({ Id_Conversation: conversationId }).select('Id_User').lean();
-      if (participants.length !== 2) throw new Error('Conversation invalide (doit avoir exactement 2 participants)');
+      const participants = await Participants.find({ Id_Conversation: conversationId })
+        .select('Id_User')
+        .lean();
+      if (participants.length < 2) {
+        throw new Error('Conversation invalide (doit avoir au moins 2 participants)');
+      }
       const otherParticipant = participants.find(p => p.Id_User.toString() !== Id_sender.toString());
-      if (!otherParticipant) throw new Error('Impossible de trouver le destinataire');
+      if (!otherParticipant) {
+        throw new Error('Impossible de trouver le destinataire dans cette conversation');
+      }
       receiverId = otherParticipant.Id_User.toString();
     }
-    if (!receiverId) throw new Error('Destinataire introuvable');
+    if (!receiverId) {
+      throw new Error('Destinataire introuvable – Id_receiver ou conversationId requis');
+    }
 
-    // === BLOCAGE ===
+    // VÉRIFICATION BLOCAGE
     const blockExists = await Relation.findOne({
       status: "blocked",
       $or: [
@@ -78,33 +196,134 @@ export const messageController = {
         { userId: receiverId, contactId: Id_sender }
       ]
     });
-    if (blockExists) throw new Error("Impossible d'envoyer le message : vous avez bloqué cette personne ou elle vous a bloqué.");
+    if (blockExists) {
+      throw new Error("Impossible d'envoyer le message : vous avez bloqué cette personne ou elle vous a bloqué.");
+    }
 
-    // === CONVERSATION ===
+    // CONVERSATION
     let finalConversationId = conversationId;
     if (!conversationId) {
       const conv = await conversationController.getOrCreateConversation(Id_sender, receiverId);
       finalConversationId = conv._id;
     }
 
-    // === CHIFFREMENT UNIQUEMENT POUR LA BASE ===
+    // CHIFFREMENT UNIQUEMENT POUR LA BASE DE DONNÉES
     const encryptedContent = encryptContent(content.trim());
-    const savedMessage = await new Message({
+
+    const message = new Message({
       conversationId: finalConversationId,
       Id_sender,
       content: encryptedContent,  // chiffré en DB
       typeMessage,
       status: 'sent',
       time: new Date()
-    }).save();
+    });
+    const savedMessage = await message.save();
 
-    // === COMPTEURS NON-LUS (tes blocs inchangés) ===
-    // ... (garde tout ton code ici) ...
+    // COMPTEURS NON LUS
+    try {
+      const participants = await Participants.find({ Id_Conversation: finalConversationId });
+      const bulkOperations = [];
+      const participantsToNotify = [];
+      for (const participant of participants) {
+        if (participant.Id_User.toString() !== Id_sender.toString()) {
+          participantsToNotify.push(participant.Id_User);
+          bulkOperations.push({
+            updateOne: {
+              filter: { _id: finalConversationId, "unreadCounts.userId": participant.Id_User },
+              update: { $inc: { "unreadCounts.$.count": 1 }, $set: { lastMessageAt: new Date() } }
+            }
+          });
+        }
+      }
+      if (bulkOperations.length > 0) {
+        await Conversation.bulkWrite(bulkOperations);
+        const conv = await Conversation.findById(finalConversationId);
+        const missing = [];
+        for (const uid of participantsToNotify) {
+          if (!conv.unreadCounts?.some(u => u.userId.toString() === uid.toString())) {
+            missing.push({
+              updateOne: {
+                filter: { _id: finalConversationId },
+                update: { $push: { unreadCounts: { userId: uid, count: 1 } }, $set: { lastMessageAt: new Date() } }
+              }
+            });
+          }
+        }
+        if (missing.length > 0) await Conversation.bulkWrite(missing);
+      }
+    } catch (error) {
+      console.error('Erreur mise à jour compteurs:', error.message);
+    }
 
-    // === NOTIFICATIONS (inchangé) ===
-    // ... (garde tout ton bloc try/catch) ...
+    // NOTIFICATIONS INTELLIGENTES
+    try {
+      console.log('Gestion intelligente des notifications...');
+      let participants = [];
+      const conversation = await Conversation.findById(finalConversationId);
+      if (conversation && conversation.type === "group") {
+        participants = conversation.Id_participant.map(userId => ({
+          Id_User: { _id: userId }
+        }));
+      } else {
+        participants = await Participants.find({
+          Id_Conversation: finalConversationId
+        }).populate('Id_User', 'username');
+      }
+      const sender = await User.findById(Id_sender);
+      const senderName = sender?.username || 'Quelqu\'un';
+      for (let participant of participants) {
+        const participantId = participant.Id_User._id.toString();
+        if (participantId !== Id_sender.toString()) {
+          const participantUser = await User.findById(participantId);
+          const participantName = participantUser?.username || 'Utilisateur';
+          const notificationsEnabled = await areNotificationsEnabled(participantId);
+          if (!notificationsEnabled) {
+            console.log(`NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`);
+            continue;
+          }
+          const isUserOnline = await isUserOnlineAdvanced(io, participantId);
+          console.log(`${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`);
+          const notificationTitle = conversation?.type === "group"
+            ? `${conversation.groupName} - ${senderName}`
+            : `Nouveau message de ${senderName}`;
+          const notificationBody = content.length > 30 ? content.substring(0, 30) + '...' : content;
+          if (isUserOnline && io) {
+            console.log(`WebSocket à: ${participantName}`);
+            io.to(`user_${participantId}`).emit('new_message_alert', {
+              type: 'new_message',
+              conversationId: finalConversationId,
+              senderId: savedMessage.Id_sender,
+              senderName: senderName,
+              messagePreview: content.substring(0, 50),
+              timestamp: new Date(),
+              messageId: savedMessage._id,
+              isGroup: conversation?.type === "group",
+              groupName: conversation?.groupName
+            });
+          } else {
+            console.log(`Push notification à: ${participantName}`);
+            await pushNotificationService.sendToUser(
+              participantId,
+              notificationTitle,
+              notificationBody,
+              {
+                conversationId: finalConversationId.toString(),
+                messageId: savedMessage._id.toString(),
+                type: 'new_message',
+                senderName: senderName,
+                isGroup: conversation?.type === "group",
+                groupName: conversation?.groupName
+              }
+            );
+          }
+        }
+      }
+    } catch (error) {
+      console.log('Erreur notifications:', error.message);
+    }
 
-    // === DIFFUSION WEBSOCKET → EN CLAIR (comme tu veux) ===
+    // DIFFUSION WEBSOCKET → EN CLAIR (CORRIGÉ)
     if (io) {
       io.to(finalConversationId.toString()).emit('new_message', {
         _id: savedMessage._id,
@@ -118,7 +337,7 @@ export const messageController = {
       });
     }
 
-    // === RETURN → EN CLAIR (pour API, Postman, etc.) ===
+    // RETURN → EN CLAIR (CORRIGÉ)
     return {
       _id: savedMessage._id,
       conversationId: finalConversationId,
@@ -131,34 +350,571 @@ export const messageController = {
     };
   },
 
-  // === RÉCUPÉRER LES MESSAGES → DÉCHIFFRE À LA VOLÉE ===
-  getConversationMessages: async (conversationId, page = 1, limit = 50) => {
-    if (!mongoose.Types.ObjectId.isValid(conversationId)) throw new Error('ID conversation invalide');
+  // 🆕 UPLOAD IMAGE MESSAGE - CORRIGÉ
+  uploadImageMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+    try {
+      console.log('🖼️ Début upload image - DEBUG:', {
+        userIdFromToken,
+        hasFile: !!file,
+        messageData
+      });
 
-    const skip = (page - 1) * limit;
-    const messages = await Message.find({ conversationId })
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
+      // 🆕 VALIDATION RENFORCÉE DE L'ID UTILISATEUR
+      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+      
+      const { conversationId, Id_receiver } = messageData;
 
-    // DÉCHIFFRE À LA VOLÉE → tu vois le message en clair
-    return messages.map(msg => ({
-      ...msg,
-      _id: msg._id.toString(),
-      conversationId: msg.conversationId.toString(),
-      Id_sender: msg.Id_sender.toString(),
-      content: decryptContent(msg.content),  // DÉCHIFFRÉ ICI
-      timestamp: msg.time || msg.createdAt
-    }));
+      // VALIDATION DU FICHIER
+      validateFile(file, FILE_CONFIG.image.allowedTypes, FILE_CONFIG.image.maxSize);
+
+      console.log('✅ ID expéditeur validé:', senderObjectId);
+
+      // UPLOAD IMAGE VERS CLOUDINARY
+      const uploadResult = await uploadToCloudinary(file, 'image', FILE_CONFIG.image.folder);
+
+      console.log('✅ Image uploadée sur Cloudinary:', uploadResult.secure_url);
+
+      // CONVERSION DES AUTRES IDs
+      const receiverObjectId = Id_receiver ? validateAndConvertUserId(Id_receiver, 'ID destinataire') : null;
+      const conversationObjectId = conversationId ? validateAndConvertUserId(conversationId, 'ID conversation') : null;
+
+      // DÉLÉGATION CONVERSATION
+      let finalConversationId = conversationObjectId;
+      if (!conversationObjectId && receiverObjectId) {
+        const conversation = await conversationController.getOrCreateConversation(senderObjectId, receiverObjectId);
+        finalConversationId = conversation._id;
+      } else if (!conversationObjectId) {
+        throw new Error('ConversationId ou Id_receiver requis');
+      }
+
+      // CRÉATION MESSAGE IMAGE 
+      const message = new Message({
+        conversationId: finalConversationId,
+        Id_sender: senderObjectId,
+        content: uploadResult.secure_url,
+        typeMessage: 'image',
+        status: 'sent',
+        time: new Date(),
+        readBy: [],
+        unreadFor: []
+      });
+
+      const savedMessage = await message.save();
+      console.log('✅ Message image sauvegardé:', savedMessage._id);
+
+      // MISE À JOUR COMPTEURS NON-LUS
+      try {
+        const participants = await Participants.find({ 
+          Id_Conversation: finalConversationId 
+        });
+        
+        const bulkOperations = [];
+        
+        participants.forEach(participant => {
+          if (participant.Id_User.toString() !== senderObjectId.toString()) {
+            bulkOperations.push({
+              updateOne: {
+                filter: { 
+                  _id: finalConversationId,
+                  "unreadCounts.userId": participant.Id_User
+                },
+                update: { 
+                  $inc: { "unreadCounts.$.count": 1 },
+                  $set: { lastMessageAt: new Date() }
+                }
+              }
+            });
+          }
+        });
+        
+        if (bulkOperations.length > 0) {
+          await Conversation.bulkWrite(bulkOperations);
+        }
+        
+      } catch (error) {
+        console.log('⚠️ Erreur compteurs image:', error.message);
+      }
+
+      // NOTIFICATIONS INTELLIGENTES
+      try {
+        const participants = await Participants.find({ 
+          Id_Conversation: finalConversationId 
+        }).populate('Id_User', 'username');
+        
+        const sender = await User.findById(senderObjectId);
+        const senderName = sender?.username || 'Quelqu\'un';
+        
+        for (let participant of participants) {
+          if (participant.Id_User && participant.Id_User._id.toString() !== senderObjectId.toString()) {
+            const participantId = participant.Id_User._id.toString();
+            const participantName = participant.Id_User.username || 'Utilisateur';
+            
+            const isUserOnline = await isUserOnlineAdvanced(io, participantId);
+            const shouldSendPush = await shouldSendPushNotification(participantId);
+            
+            const notificationTitle = `Nouvelle image de ${senderName}`;
+            const notificationBody = "📷 Image partagée";
+            const notificationData = {
+              conversationId: finalConversationId.toString(),
+              messageId: savedMessage._id.toString(),
+              type: 'new_message',
+              senderName: senderName
+            };
+            
+            if (isUserOnline && io) {
+              console.log(`🔔 Envoi WebSocket image à: ${participantName}`);
+              io.to(`user_${participantId}`).emit('new_message_alert', {
+                type: 'new_message',
+                conversationId: finalConversationId,
+                senderId: savedMessage.Id_sender,
+                senderName: senderName,
+                messagePreview: "📷 Image partagée",
+                timestamp: new Date(),
+                messageId: savedMessage._id
+              });
+            } else if (shouldSendPush) {
+              console.log(`📱 Envoi Push image à: ${participantName}`);
+              await pushNotificationService.sendToUser(
+                participant.Id_User._id,
+                notificationTitle,
+                notificationBody,
+                notificationData
+              );
+            }
+          }
+        }
+      } catch (error) {
+        console.log('⚠️ Erreur notifications image:', error.message);
+      }
+
+      // DIFFUSION WEBSOCKET
+      if (io) {
+        const messageToEmit = {
+          _id: savedMessage._id,
+          conversationId: finalConversationId,
+          Id_sender: senderObjectId,
+          content: uploadResult.secure_url,
+          typeMessage: 'image',
+          status: 'sent',
+          timestamp: new Date(),
+          imageInfo: {
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id,
+            width: uploadResult.width,
+            height: uploadResult.height
+          }
+        };
+        
+        io.to(finalConversationId.toString()).emit('new_message', messageToEmit);
+      }
+
+      // RETURN STRUCTURE
+      return {
+        _id: savedMessage._id,
+        conversationId: finalConversationId,
+        Id_sender: senderObjectId,
+        content: uploadResult.secure_url,
+        typeMessage: 'image',
+        status: 'sent',
+        time: savedMessage.time,
+        readBy: [],
+        unreadFor: [],
+        imageInfo: {
+          url: uploadResult.secure_url,
+          publicId: uploadResult.public_id,
+          width: uploadResult.width,
+          height: uploadResult.height
+        }
+      };
+
+    } catch (error) {
+      console.error('💥 Erreur upload image:', error);
+      throw new Error(`Échec upload image: ${error.message}`);
+    }
   },
 
-  setUserPresence: (presenceMap) => { userPresence = presenceMap; },
+  // 🆕 UPLOAD FILE MESSAGE - CORRIGÉ
+  uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+    try {
+      console.log('📎 Début upload fichier - DEBUG:', {
+        userIdFromToken,
+        hasFile: !!file,
+        messageData
+      });
+
+      // 🆕 VALIDATION RENFORCÉE DE L'ID UTILISATEUR
+      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+      
+      const { conversationId, Id_receiver, fileName, fileType, fileSize, originalName } = messageData;
+
+      // VALIDATION DU FICHIER
+      validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
+
+      console.log('✅ ID expéditeur validé:', senderObjectId);
+
+      // UPLOAD FICHIER VERS CLOUDINARY
+      const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
+
+      console.log('✅ Fichier uploadé sur Cloudinary:', uploadResult.secure_url);
+
+      // CONVERSION DES AUTRES IDs
+      const receiverObjectId = Id_receiver ? validateAndConvertUserId(Id_receiver, 'ID destinataire') : null;
+      const conversationObjectId = conversationId ? validateAndConvertUserId(conversationId, 'ID conversation') : null;
+
+      // DÉLÉGATION CONVERSATION
+      let finalConversationId = conversationObjectId;
+      if (!conversationObjectId && receiverObjectId) {
+        const conversation = await conversationController.getOrCreateConversation(senderObjectId, receiverObjectId);
+        finalConversationId = conversation._id;
+      } else if (!conversationObjectId) {
+        throw new Error('ConversationId ou Id_receiver requis');
+      }
+
+      // CRÉATION MESSAGE FICHIER
+      const message = new Message({
+        conversationId: finalConversationId,
+        Id_sender: senderObjectId,
+        content: uploadResult.secure_url,
+        typeMessage: 'file',
+        status: 'sent',
+        time: new Date(),
+        readBy: [],
+        unreadFor: []
+      });
+
+      const savedMessage = await message.save();
+      console.log('✅ Message fichier sauvegardé:', savedMessage._id);
+
+      // MISE À JOUR COMPTEURS NON-LUS
+      try {
+        const participants = await Participants.find({ Id_Conversation: finalConversationId });
+        const bulkOperations = [];
+
+        participants.forEach(participant => {
+          if (participant.Id_User.toString() !== senderObjectId.toString()) {
+            bulkOperations.push({
+              updateOne: {
+                filter: { _id: finalConversationId, "unreadCounts.userId": participant.Id_User },
+                update: { 
+                  $inc: { "unreadCounts.$.count": 1 },
+                  $set: { lastMessageAt: new Date() }
+                }
+              }
+            });
+          }
+        });
+
+        if (bulkOperations.length > 0) {
+          await Conversation.bulkWrite(bulkOperations);
+        }
+
+      } catch (error) {
+        console.log('⚠️ Erreur compteurs fichier:', error.message);
+      }
+
+      // DIFFUSION WEBSOCKET
+      if (io) {
+        const formattedMessage = {
+          _id: savedMessage._id,
+          conversationId: finalConversationId,
+          Id_sender: senderObjectId,
+          content: uploadResult.secure_url,
+          typeMessage: 'file',
+          status: 'sent',
+          time: savedMessage.time,
+          readBy: [],
+          unreadFor: [],
+          fileInfo: {
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id,
+            originalFilename: uploadResult.original_filename,
+            format: uploadResult.format,
+            bytes: uploadResult.bytes,
+            fileName: fileName,
+            fileType: fileType,
+            fileSize: fileSize,
+            originalName: originalName
+          }
+        };
+
+        io.to(finalConversationId.toString()).emit('new_message', formattedMessage);
+      }
+
+      // RETURN STRUCTURE
+      return {
+        _id: savedMessage._id,
+        conversationId: finalConversationId,
+        Id_sender: senderObjectId,
+        content: uploadResult.secure_url,
+        typeMessage: 'file',
+        status: 'sent',
+        time: savedMessage.time,
+        readBy: [],
+        unreadFor: [],
+        fileInfo: {
+          url: uploadResult.secure_url,
+          publicId: uploadResult.public_id,
+          originalFilename: uploadResult.original_filename,
+          format: uploadResult.format,
+          bytes: uploadResult.bytes,
+          fileName: fileName,
+          fileType: fileType,
+          fileSize: fileSize,
+          originalName: originalName
+        }
+      };
+
+    } catch (error) {
+      console.error('💥 Erreur upload fichier:', error);
+      throw new Error(`Échec upload fichier: ${error.message}`);
+    }
+  },
+
+  // 🆕 UPLOAD VIDEO MESSAGE - CORRIGÉ
+  uploadVideoMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+    try {
+      console.log('🎥 Début upload vidéo - DEBUG:', {
+        userIdFromToken,
+        hasFile: !!file,
+        messageData
+      });
+
+      // 🆕 VALIDATION RENFORCÉE DE L'ID UTILISATEUR
+      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+      
+      const { conversationId, Id_receiver, fileName, fileType, fileSize } = messageData;
+
+      // VALIDATION DU FICHIER
+      validateFile(file, FILE_CONFIG.video.allowedTypes, FILE_CONFIG.video.maxSize);
+
+      console.log('✅ ID expéditeur validé:', senderObjectId);
+
+      // UPLOAD VIDÉO VERS CLOUDINARY
+      const uploadResult = await uploadToCloudinary(file, 'video', FILE_CONFIG.video.folder);
+
+      console.log('✅ Vidéo uploadée sur Cloudinary:', uploadResult.secure_url);
+
+      // CONVERSION DES AUTRES IDs
+      const receiverObjectId = Id_receiver ? validateAndConvertUserId(Id_receiver, 'ID destinataire') : null;
+      const conversationObjectId = conversationId ? validateAndConvertUserId(conversationId, 'ID conversation') : null;
+
+      // DÉLÉGATION CONVERSATION
+      let finalConversationId = conversationObjectId;
+      if (!conversationObjectId && receiverObjectId) {
+        const conversation = await conversationController.getOrCreateConversation(senderObjectId, receiverObjectId);
+        finalConversationId = conversation._id;
+      } else if (!conversationObjectId) {
+        throw new Error('ConversationId ou Id_receiver requis');
+      }
+
+      // CRÉATION MESSAGE VIDÉO
+      const message = new Message({
+        conversationId: finalConversationId,
+        Id_sender: senderObjectId,
+        content: uploadResult.secure_url,
+        typeMessage: 'video',
+        status: 'sent',
+        time: new Date(),
+        readBy: [],
+        unreadFor: []
+      });
+
+      const savedMessage = await message.save();
+      console.log('✅ Message vidéo sauvegardé:', savedMessage._id);
+
+      // MISE À JOUR COMPTEURS NON-LUS
+      try {
+        const participants = await Participants.find({ Id_Conversation: finalConversationId });
+        
+        const bulkOperations = [];
+        
+        participants.forEach(participant => {
+          if (participant.Id_User.toString() !== senderObjectId.toString()) {
+            bulkOperations.push({
+              updateOne: {
+                filter: { 
+                  _id: finalConversationId,
+                  "unreadCounts.userId": participant.Id_User
+                },
+                update: { 
+                  $inc: { "unreadCounts.$.count": 1 },
+                  $set: { lastMessageAt: new Date() }
+                }
+              }
+            });
+          }
+        });
+        
+        if (bulkOperations.length > 0) {
+          await Conversation.bulkWrite(bulkOperations);
+        }
+        
+      } catch (error) {
+        console.log('⚠️ Erreur compteurs vidéo:', error.message);
+      }
+
+      // DIFFUSION WEBSOCKET
+      if (io) {
+        const formattedMessage = {
+          _id: savedMessage._id,
+          conversationId: finalConversationId,
+          Id_sender: senderObjectId,
+          content: uploadResult.secure_url,
+          typeMessage: 'video',
+          status: 'sent',
+          time: savedMessage.time,
+          readBy: [],
+          unreadFor: [],
+          videoInfo: {
+            url: uploadResult.secure_url,
+            publicId: uploadResult.public_id,
+            format: uploadResult.format,
+            bytes: uploadResult.bytes,
+            fileName: fileName,
+            fileType: fileType,
+            fileSize: fileSize
+          }
+        };
+
+        io.to(finalConversationId.toString()).emit('new_message', formattedMessage);
+      }
+
+      // RETURN STRUCTURE
+      return {
+        _id: savedMessage._id,
+        conversationId: finalConversationId,
+        Id_sender: senderObjectId,
+        content: uploadResult.secure_url,
+        typeMessage: 'video',
+        status: 'sent',
+        time: savedMessage.time,
+        readBy: [],
+        unreadFor: [],
+        videoInfo: {
+          url: uploadResult.secure_url,
+          publicId: uploadResult.public_id,
+          format: uploadResult.format,
+          bytes: uploadResult.bytes,
+          fileName: fileName,
+          fileType: fileType,
+          fileSize: fileSize
+        }
+      };
+
+    } catch (error) {
+      console.error('💥 Erreur upload vidéo:', error);
+      throw new Error(`Échec upload vidéo: ${error.message}`);
+    }
+  },
+
+  // RÉCUPÉRER LES MESSAGES → DÉCHIFFRE À LA VOLÉE
+  getConversationMessages: async (conversationId, page = 1, limit = 50) => {
+    try {
+      console.log(`📜 Récupération messages conversation ${conversationId}, page ${page}`);
+      if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+        throw new Error('ID conversation invalide');
+      }
+      const skip = (page - 1) * limit;
+      const messages = await Message.find({ conversationId: conversationId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      // DÉCHIFFRE TOUS LES MESSAGES AVANT DE LES RENVOYER
+      const decryptedMessages = messages.map(msg => ({
+        ...msg,
+        _id: msg._id.toString(),
+        conversationId: msg.conversationId.toString(),
+        Id_sender: msg.Id_sender.toString(),
+        content: decryptContent(msg.content),  // DÉCHIFFRÉ ICI
+        timestamp: msg.time || msg.createdAt
+      }));
+
+      console.log(`✅ ${decryptedMessages.length} messages trouvés et déchiffrés`);
+      return decryptedMessages;
+    } catch (error) {
+      console.error('💥 Erreur:', error);
+      throw error;
+    }
+  },
+
+  setUserPresence: (presenceMap) => {
+    userPresence = presenceMap;
+  },
+
   sendGroupMessage: async (groupId, senderId, content, typeMessage = 'text', io = null) => {
-    return await messageController.createMessage({ conversationId: groupId, content, typeMessage }, io, senderId);
+    const messageData = {
+      conversationId: groupId,
+      content: content,
+      typeMessage: typeMessage
+    };
+    return await messageController.createMessage(messageData, io, senderId);
   }
 };
 
-// === FONCTIONS ANNEXES (inchangées) ===
-async function isUserOnlineAdvanced(io, userId) { /* ... ton code ... */ }
-async function areNotificationsEnabled(userId) { /* ... ton code ... */ }
+// FONCTIONS ANNEXES
+async function isUserOnlineAdvanced(io, userId) {
+  try {
+    if (userPresence && userPresence.has(userId)) {
+      const presence = userPresence.get(userId);
+      const isOnline = presence.status === 'online' && presence.sessions && presence.sessions.length > 0;
+      console.log(`🔍 Présence mémoire ${userId}: ${isOnline} (${presence.sessions?.length} sessions)`);
+      return isOnline;
+    }
+    const user = await User.findById(userId);
+    const isOnlineDB = user && user.status === 'online' && user.activeSessions && user.activeSessions.length > 0;
+    console.log(`🔍 Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`);
+    return isOnlineDB;
+  } catch (error) {
+    console.log('⚠️ Erreur vérification présence avancée:', error.message);
+    const userRoom = io?.sockets?.adapter?.rooms?.get(`user_${userId}`);
+    const isOnlineWS = userRoom && userRoom.size > 0;
+    console.log(`🔍 Présence WebSocket ${userId}: ${isOnlineWS}`);
+    return isOnlineWS;
+  }
+}
+
+async function areNotificationsEnabled(userId) {
+  try {
+    const user = await User.findById(userId);
+    if (!user) return true;
+    if (user.notificationPreferences && user.notificationPreferences.pushEnabled === false) {
+      return false;
+    }
+    return true;
+  } catch (error) {
+    console.log('⚠️ Erreur vérification notifications:', error.message);
+    return true;
+  }
+}
+
+async function shouldSendPushNotification(userId) {
+  try {
+    const user = await User.findById(userId);
+    
+    if (!user) return true;
+    
+    if (user.notificationPreferences && user.notificationPreferences.pushEnabled === false) {
+      console.log(`🔕 Notifications désactivées pour: ${user.username}`);
+      return false;
+    }
+    
+    if (user.notificationPreferences && user.notificationPreferences.quietHours && user.notificationPreferences.quietHours.enabled) {
+      const now = new Date();
+      const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+      const { start, end } = user.notificationPreferences.quietHours;
+      
+      if (currentTime >= start || currentTime <= end) {
+        console.log(`🌙 Heures silencieuses pour: ${user.username} (${start}-${end})`);
+        return false;
+      }
+    }
+    
+    return true;
+    
+  } catch (error) {
+    console.log('⚠️ Erreur vérification push:', error.message);
+    return true;
+  }
+}

@@ -3,7 +3,8 @@ const CONFIG = {
     BACKEND_URL: 'http://localhost:5000',
     SOCKET_URL: 'http://localhost:5000',
     RECONNECT_DELAY: 3000,
-    MAX_RECONNECT_ATTEMPTS: 5
+    MAX_RECONNECT_ATTEMPTS: 5,
+    MAX_FILE_SIZE: 50 * 1024 * 1024 // 50MB
 };
 
 // ===== ÉTAT GLOBAL =====
@@ -18,7 +19,8 @@ let state = {
     reconnectAttempts: 0,
     typingUsers: new Map(),
     notificationPermission: null,
-    isLoadingMessages: false
+    isLoadingMessages: false,
+    pendingFiles: []
 };
 
 // ===== INITIALISATION =====
@@ -303,10 +305,12 @@ function initMessagingPage() {
     initUserPanel();
     initConversations();
     initMessageInput();
+    initFileUploads();
     initWebSocket();
     initTestButtons();
     initModals();
-
+    initGroupCreation();
+    
     loadInitialData();
 }
 
@@ -334,6 +338,196 @@ function initUserPanel() {
 
 function initConversations() {
     console.log('✅ Conversations initialisées');
+}
+
+function initFileUploads() {
+    const imageBtn = document.getElementById('imageBtn');
+    const fileBtn = document.getElementById('fileBtn');
+    const videoBtn = document.getElementById('videoBtn');
+    const imageInput = document.getElementById('imageInput');
+    const fileInput = document.getElementById('fileInput');
+    const videoInput = document.getElementById('videoInput');
+
+    imageBtn?.addEventListener('click', () => imageInput.click());
+    fileBtn?.addEventListener('click', () => fileInput.click());
+    videoBtn?.addEventListener('click', () => videoInput.click());
+
+    imageInput?.addEventListener('change', (e) => handleFileSelect(e, 'image'));
+    fileInput?.addEventListener('change', (e) => handleFileSelect(e, 'file'));
+    videoInput?.addEventListener('change', (e) => handleFileSelect(e, 'video'));
+
+    document.getElementById('closePreviewModal')?.addEventListener('click', closePreviewModal);
+    document.getElementById('cancelPreviewBtn')?.addEventListener('click', closePreviewModal);
+    document.getElementById('sendPreviewBtn')?.addEventListener('click', sendFileMessage);
+
+    console.log('✅ Système upload fichiers initialisé');
+}
+
+function handleFileSelect(event, type) {
+    const files = event.target.files;
+    if (!files.length) return;
+
+    const file = files[0];
+    
+    if (file.size > CONFIG.MAX_FILE_SIZE) {
+        showMessage(`Fichier trop volumineux (max ${formatFileSize(CONFIG.MAX_FILE_SIZE)})`, 'error');
+        return;
+    }
+
+    if (type === 'image' && !file.type.startsWith('image/')) {
+        showMessage('Veuillez sélectionner une image valide', 'error');
+        return;
+    }
+
+    if (type === 'video' && !file.type.startsWith('video/')) {
+        showMessage('Veuillez sélectionner une vidéo valide', 'error');
+        return;
+    }
+
+    state.pendingFiles = [{
+        file: file,
+        type: type,
+        previewUrl: URL.createObjectURL(file)
+    }];
+
+    showPreviewModal(state.pendingFiles[0]);
+    event.target.value = '';
+}
+
+function showPreviewModal(fileData) {
+    const previewContent = document.getElementById('previewContent');
+    const modal = document.getElementById('previewModal');
+
+    let content = '';
+    
+    switch (fileData.type) {
+        case 'image':
+            content = `<img src="${fileData.previewUrl}" alt="Prévisualisation">`;
+            break;
+        case 'video':
+            content = `<video controls><source src="${fileData.previewUrl}" type="${fileData.file.type}"></video>`;
+            break;
+        case 'file':
+            content = `
+                <div class="file-preview-large">
+                    <div class="file-icon">📄</div>
+                    <div class="file-info">
+                        <div class="file-name">${fileData.file.name}</div>
+                        <div class="file-size">${formatFileSize(fileData.file.size)}</div>
+                        <div class="file-type">${fileData.file.type || 'Type inconnu'}</div>
+                    </div>
+                </div>
+            `;
+            break;
+    }
+
+    previewContent.innerHTML = content;
+    modal.style.display = 'flex';
+}
+
+function closePreviewModal() {
+    const modal = document.getElementById('previewModal');
+    modal.style.display = 'none';
+    
+    state.pendingFiles.forEach(fileData => {
+        if (fileData.previewUrl) {
+            URL.revokeObjectURL(fileData.previewUrl);
+        }
+    });
+    
+    state.pendingFiles = [];
+}
+
+async function sendFileMessage() {
+    if (!state.pendingFiles.length || !state.currentConversation) {
+        showMessage('Aucun fichier à envoyer', 'error');
+        return;
+    }
+
+    const fileData = state.pendingFiles[0];
+    const sendBtn = document.getElementById('sendPreviewBtn');
+    const sendStatus = document.getElementById('sendStatus');
+
+    try {
+        setButtonLoading(sendBtn, true);
+        sendStatus.textContent = 'Envoi en cours...';
+
+        // Convertir le fichier en base64
+        const base64 = await fileToBase64(fileData.file);
+
+        // Préparer les données POUR TON BACKEND
+        const messageData = {
+            conversationId: state.currentConversation._id,
+            Id_receiver: getOtherParticipantId(),
+            file: base64,
+            fileName: fileData.file.name,
+            fileType: fileData.file.type,
+            fileSize: fileData.file.size,
+            originalName: fileData.file.name
+        };
+
+        // UTILISER UNIQUEMENT WEBSOCKET (comme ton backend est configuré)
+        if (state.socket && state.isConnected) {
+            let eventName;
+            switch (fileData.type) {
+                case 'image':
+                    eventName = 'send_image_message';
+                    break;
+                case 'video':
+                    eventName = 'send_video_message';
+                    break;
+                case 'file':
+                    eventName = 'send_file_message';
+                    break;
+            }
+
+            state.socket.emit(eventName, messageData);
+            sendStatus.textContent = 'Envoi...';
+            
+            // Fermer le modal immédiatement
+            closePreviewModal();
+            showMessage('Fichier en cours d\'envoi...', 'success');
+            
+        } else {
+            // 🆕 SOLUTION SIMPLE : DEMANDER À L'UTILISATEUR
+            closePreviewModal();
+            showMessage('WebSocket déconnecté - Recharge la page et réessaye', 'error');
+        }
+
+    } catch (error) {
+        console.error('Send file error:', error);
+        sendStatus.textContent = '❌ Erreur';
+        showMessage('Erreur: ' + error.message, 'error');
+    } finally {
+        setButtonLoading(sendBtn, false);
+    }
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function getOtherParticipantId() {
+    if (!state.currentConversation || !state.currentConversation.participants) return null;
+    
+    const otherParticipant = state.currentConversation.participants.find(
+        p => p._id !== state.user.id
+    );
+    
+    return otherParticipant?._id || null;
 }
 
 async function loadInitialData() {
@@ -401,11 +595,10 @@ function renderConversations() {
         return;
     }
 
-    // Trier les conversations par dernier message
     const sortedConversations = state.conversations.sort((a, b) => {
         const dateA = new Date(a.lastMessageAt || a.createdAt);
         const dateB = new Date(b.lastMessageAt || b.createdAt);
-        return dateB - dateA; // Plus récent en premier
+        return dateB - dateA;
     });
 
     sortedConversations.forEach(conversation => {
@@ -448,6 +641,15 @@ function getLastMessagePreview(conversation) {
         return 'Aucun message';
     }
     
+    if (conversation.lastMessageType === 'image') {
+        return '📷 Image';
+    }
+    if (conversation.lastMessageType === 'video') {
+        return '🎥 Vidéo';
+    }
+    if (conversation.lastMessageType === 'file') {
+        return '📁 Fichier';
+    }
     if (conversation.lastMessage.includes('Message audio')) {
         return '🎤 Message audio';
     }
@@ -493,7 +695,6 @@ function updateChatHeader(conversation) {
         '🟢 En ligne';
 }
 
-// 🆕 FONCTION LOAD MESSAGES CORRIGÉE
 async function loadMessages(conversationId, showLoader = true) {
     if (state.isLoadingMessages) return;
     
@@ -504,8 +705,6 @@ async function loadMessages(conversationId, showLoader = true) {
     }
     
     try {
-        console.log('📨 Chargement des messages pour la conversation:', conversationId);
-        
         const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/${conversationId}?limit=100`, {
             headers: {'Authorization': `Bearer ${state.token}`}
         });
@@ -513,16 +712,10 @@ async function loadMessages(conversationId, showLoader = true) {
         const data = await response.json();
 
         if (response.ok && data.success) {
-            console.log('✅ Messages reçus de l\'API:', data.messages.length);
-            
-            // 🆕 DEBUG COMPLET DES DONNÉES
-            debugMessageData(data.messages);
-            
-            // 🆕 TRI CHRONOLOGIQUE ROBUSTE
             const sortedMessages = data.messages.sort((a, b) => {
                 const dateA = new Date(a.createdAt || a.timestamp || a.date);
                 const dateB = new Date(b.createdAt || b.timestamp || b.date);
-                return dateA - dateB; // Ordre chronologique
+                return dateA - dateB;
             });
             
             state.messages.set(conversationId, sortedMessages);
@@ -541,12 +734,9 @@ async function loadMessages(conversationId, showLoader = true) {
     }
 }
 
-// 🆕 FONCTION RENDER MESSAGES CORRIGÉE
 function renderMessages(conversationId) {
     const messagesList = document.getElementById('messagesList');
     const messages = state.messages.get(conversationId) || [];
-    
-    console.log('🔍 Affichage de', messages.length, 'messages dans l\'ordre chronologique');
     
     messagesList.innerHTML = '';
     
@@ -560,7 +750,6 @@ function renderMessages(conversationId) {
         return;
     }
 
-    // 🆕 AFFICHAGE DANS L'ORDRE CHRONOLOGIQUE
     messages.forEach(message => {
         const messageElement = createMessageElement(message);
         messagesList.appendChild(messageElement);
@@ -569,50 +758,106 @@ function renderMessages(conversationId) {
     scrollToBottom();
 }
 
-// 🆕 FONCTION CREATE MESSAGE ELEMENT COMPLÈTEMENT CORRIGÉE
 function createMessageElement(message) {
     const element = document.createElement('div');
     
     const isSent = isMyMessage(message);
     
-    console.log(`🎯 Création message: "${message.content}" - estDeMoi: ${isSent}`);
-    console.log('📅 Données complètes:', {
-        content: message.content,
-        createdAt: message.createdAt,
-        timestamp: message.timestamp,
-        sender: message.Id_sender,
-        isSent: isSent
-    });
-    
-    element.className = `message ${isSent ? 'sent' : 'received'}`;
+    element.className = `message ${isSent ? 'sent' : 'received'} ${message.typeMessage}-message`;
     element.dataset.messageId = message._id;
     
-    // 🆕 GESTION ROBUSTE DE LA DATE ET HEURE
     const time = formatMessageTimeRobuste(message);
     const statusIcon = isSent ? (message.status === 'seen' ? '✓✓' : '✓') : '';
     
+    let contentHtml = '';
+    
+    switch (message.typeMessage) {
+        case 'image':
+            contentHtml = `
+                <div class="message-content">
+                    <img src="${message.content}" alt="Image partagée" onclick="openImageModal('${message.content}')">
+                </div>
+            `;
+            break;
+            
+        case 'video':
+            contentHtml = `
+                <div class="message-content">
+                    <video controls onclick="this.paused ? this.play() : this.pause()">
+                        <source src="${message.content}" type="video/mp4">
+                        Votre navigateur ne supporte pas la lecture vidéo.
+                    </video>
+                </div>
+            `;
+            break;
+            
+        case 'file':
+            const fileName = message.fileInfo?.fileName || message.content.split('/').pop() || 'Fichier';
+            const fileSize = message.fileInfo?.fileSize ? formatFileSize(message.fileInfo.fileSize) : '';
+            contentHtml = `
+                <div class="message-content">
+                    <div class="file-message">
+                        <div class="file-icon">📄</div>
+                        <div class="file-info">
+                            <div class="file-name">${fileName}</div>
+                            ${fileSize ? `<div class="file-size">${fileSize}</div>` : ''}
+                        </div>
+                        <a href="${message.content}" download="${fileName}" class="download-btn">
+                            Télécharger
+                        </a>
+                    </div>
+                </div>
+            `;
+            break;
+            
+        default:
+            contentHtml = `
+                <div class="message-content">${escapeHtml(message.content)}</div>
+            `;
+    }
+    
     element.innerHTML = `
-        <div class="message-content">${escapeHtml(message.content)}</div>
+        ${contentHtml}
         <div class="message-time">${time} ${statusIcon}</div>
     `;
     
-    // 🆕 STYLES FORCÉS POUR LA SÉPARATION
     element.style.alignSelf = isSent ? 'flex-end' : 'flex-start';
     element.style.marginLeft = isSent ? 'auto' : '0';
     element.style.marginRight = isSent ? '0' : 'auto';
-    element.style.maxWidth = '70%';
+    element.style.maxWidth = message.typeMessage === 'text' ? '70%' : '85%';
     
     return element;
 }
 
-// 🆕 FONCTION AMÉLIORÉE POUR DÉTERMINER SI LE MESSAGE EST DE MOI
+function openImageModal(imageUrl) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 90vw; max-height: 90vh; background: transparent; border: none;">
+            <div class="modal-header" style="justify-content: flex-end; background: transparent;">
+                <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+            </div>
+            <div class="modal-body" style="padding: 0; display: flex; justify-content: center; align-items: center; background: transparent;">
+                <img src="${imageUrl}" style="max-width: 100%; max-height: 80vh; border-radius: 12px;">
+            </div>
+        </div>
+    `;
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+    
+    document.body.appendChild(modal);
+}
+
 function isMyMessage(message) {
     if (!message || !state.user) {
-        console.log('❌ Message ou user manquant');
         return false;
     }
     
-    // 🆕 GESTION ROBUSTE DE L'EXPÉDITEUR
     let senderId;
     
     if (typeof message.Id_sender === 'string') {
@@ -627,40 +872,24 @@ function isMyMessage(message) {
     
     const myId = state.user.id || state.user._id;
     
-    console.log('🔍 Analyse expéditeur:', {
-        senderData: message.Id_sender,
-        senderId: senderId,
-        myId: myId,
-        isEqual: senderId === myId
-    });
-    
     if (!senderId || !myId) {
-        console.log('❌ ID manquant - senderId:', senderId, 'myId:', myId);
         return false;
     }
     
-    const result = senderId === myId;
-    console.log(`✅ Résultat: ${result ? 'MESSAGE DE MOI' : 'MESSAGE DE QUELQU\'UN D\'AUTRE'}`);
-    
-    return result;
+    return senderId === myId;
 }
 
-// 🆕 FONCTION FORMAT TIME ROBUSTE
 function formatMessageTimeRobuste(message) {
-    // 🆕 ESSAYER DIFFÉRENTS CHAMPS DE DATE
     const dateString = message.createdAt || message.timestamp || message.date || message.created_at;
     
     if (!dateString) {
-        console.log('❌ Aucune date trouvée pour le message:', message._id);
         return '--:--';
     }
     
     try {
         const date = new Date(dateString);
         
-        // 🆕 VÉRIFICATION QUE LA DATE EST VALIDE
         if (isNaN(date.getTime())) {
-            console.log('❌ Date invalide:', dateString);
             return '--:--';
         }
         
@@ -670,43 +899,11 @@ function formatMessageTimeRobuste(message) {
             hour12: false 
         });
         
-        console.log(`🕒 Date convertie: ${dateString} → ${timeString}`);
         return timeString;
         
     } catch (error) {
-        console.error('❌ Erreur formatage date:', error, 'Date:', dateString);
         return '--:--';
     }
-}
-
-// 🆕 FONCTION DE DEBUG COMPLÈTE
-function debugMessageData(messages) {
-    console.log('🐛 DEBUG COMPLET DES MESSAGES:');
-    console.log('📊 Nombre de messages:', messages.length);
-    console.log('👤 User actuel:', state.user);
-    
-    if (messages.length === 0) {
-        console.log('❌ Aucun message à afficher');
-        return;
-    }
-    
-    console.log('🕒 Plage temporelle:');
-    console.log('   Premier message:', messages[0].createdAt, '-', messages[0].content);
-    console.log('   Dernier message:', messages[messages.length - 1].createdAt, '-', messages[messages.length - 1].content);
-    
-    console.log('🔍 Détail de chaque message:');
-    messages.forEach((msg, index) => {
-        const isSent = isMyMessage(msg);
-        console.log(`--- Message ${index + 1} ---`);
-        console.log('Contenu:', msg.content);
-        console.log('ID Message:', msg._id);
-        console.log('Expéditeur:', msg.Id_sender);
-        console.log('Date création:', msg.createdAt);
-        console.log('Timestamp:', msg.timestamp);
-        console.log('Est mon message?:', isSent);
-        console.log('Heure formatée:', formatMessageTimeRobuste(msg));
-        console.log('-------------------');
-    });
 }
 
 function initMessageInput() {
@@ -743,7 +940,6 @@ function initMessageInput() {
     sendButton.addEventListener('click', sendMessage);
 }
 
-// 🆕 FONCTION SEND MESSAGE CORRIGÉE
 async function sendMessage() {
     const messageInput = document.getElementById('messageInput');
     const content = messageInput.value.trim();
@@ -757,11 +953,9 @@ async function sendMessage() {
         setButtonLoading(sendButton, true);
         sendStatus.textContent = 'Envoi...';
 
-        // VIDER LE CHAMP IMMÉDIATEMENT
         messageInput.value = '';
 
         if (state.socket && state.isConnected) {
-            // Utiliser WebSocket pour l'envoi en temps réel
             state.socket.emit('send_message', {
                 conversationId: state.currentConversation._id,
                 content: content,
@@ -770,7 +964,6 @@ async function sendMessage() {
             
             sendStatus.textContent = 'Envoi...';
         } else {
-            // Fallback HTTP
             const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/send`, {
                 method: 'POST',
                 headers: {
@@ -790,7 +983,6 @@ async function sendMessage() {
                 throw new Error(data.error || 'Erreur d\'envoi');
             }
             
-            // Recharger les messages après envoi réussi
             await loadMessages(state.currentConversation._id, false);
             sendStatus.textContent = '✓ Envoyé';
         }
@@ -803,8 +995,6 @@ async function sendMessage() {
         console.error('Send message error:', error);
         sendStatus.textContent = '❌ Erreur';
         showMessage('Erreur d\'envoi du message', 'error');
-        
-        // Remettre le message dans le champ en cas d'erreur
         messageInput.value = content;
     } finally {
         setButtonLoading(sendButton, false);
@@ -880,6 +1070,36 @@ function connectSocketIO() {
         handleNewMessage(message);
     });
 
+    state.socket.on('image_message_sent', (data) => {
+        console.log('✅ Image sent confirmation:', data);
+        handleFileMessageSent(data);
+    });
+
+    state.socket.on('file_message_sent', (data) => {
+        console.log('✅ File sent confirmation:', data);
+        handleFileMessageSent(data);
+    });
+
+    state.socket.on('video_message_sent', (data) => {
+        console.log('✅ Video sent confirmation:', data);
+        handleFileMessageSent(data);
+    });
+
+    state.socket.on('image_message_error', (data) => {
+        console.error('❌ Image send error:', data);
+        showMessage('Erreur d\'envoi de l\'image: ' + data.error, 'error');
+    });
+
+    state.socket.on('file_message_error', (data) => {
+        console.error('❌ File send error:', data);
+        showMessage('Erreur d\'envoi du fichier: ' + data.error, 'error');
+    });
+
+    state.socket.on('video_message_error', (data) => {
+        console.error('❌ Video send error:', data);
+        showMessage('Erreur d\'envoi de la vidéo: ' + data.error, 'error');
+    });
+
     state.socket.on('user_typing', (data) => {
         handleTypingIndicator(data);
     });
@@ -895,17 +1115,21 @@ function connectSocketIO() {
     });
 }
 
-// 🆕 FONCTION POUR GÉRER LES NOUVEAUX MESSAGES
+function handleFileMessageSent(data) {
+    if (data.success && state.currentConversation) {
+        loadMessages(state.currentConversation._id, false);
+        showMessage('Fichier envoyé avec succès!', 'success');
+    }
+}
+
 function handleNewMessage(message) {
     console.log('📨 Nouveau message reçu:', message);
     
     if (state.currentConversation && message.conversationId === state.currentConversation._id) {
-        // Vérifier si le message n'existe pas déjà
         const existingMessages = state.messages.get(state.currentConversation._id) || [];
         const messageExists = existingMessages.some(m => m._id === message._id);
         
         if (!messageExists) {
-            // Ajouter le nouveau message et trier
             existingMessages.push(message);
             const sortedMessages = existingMessages.sort((a, b) => {
                 const dateA = new Date(a.createdAt || a.timestamp || a.date);
@@ -920,11 +1144,17 @@ function handleNewMessage(message) {
         markAsRead(state.currentConversation._id);
     } else {
         updateConversationBadge(message.conversationId);
+        
+        let preview = message.content;
+        if (message.typeMessage === 'image') preview = '📷 Image';
+        if (message.typeMessage === 'video') preview = '🎥 Vidéo';
+        if (message.typeMessage === 'file') preview = '📁 Fichier';
+        
         showNotification({
             type: 'new_message',
             conversationId: message.conversationId,
             senderName: message.Id_sender?.username || 'Quelqu\'un',
-            messagePreview: message.content
+            messagePreview: preview
         });
     }
     
@@ -998,6 +1228,200 @@ function initModals() {
             }
         });
     });
+}
+
+// ===== SYSTÈME DE CRÉATION DE GROUPE =====
+function initGroupCreation() {
+    const searchInput = document.getElementById('searchMemberInput');
+    const createBtn = document.getElementById('createGroupConfirmBtn');
+    
+    searchInput?.addEventListener('input', handleUserSearch);
+    createBtn?.addEventListener('click', createGroup);
+}
+
+async function handleUserSearch(event) {
+    const searchTerm = event.target.value.trim();
+    const resultsContainer = document.getElementById('searchMemberResults');
+    
+    if (searchTerm.length < 2) {
+        resultsContainer.style.display = 'none';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/users/search?q=${encodeURIComponent(searchTerm)}`, {
+            headers: {'Authorization': `Bearer ${state.token}`}
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            displaySearchResults(data.users);
+        } else {
+            showMessage(data.message || 'Aucun utilisateur trouvé', 'info');
+            resultsContainer.innerHTML = '<div style="padding: 10px; color: #666; text-align: center;">Aucun utilisateur trouvé</div>';
+            resultsContainer.style.display = 'block';
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur recherche BDD:', error);
+        showMessage('Erreur de recherche - Vérifie que la route API existe', 'error');
+        resultsContainer.innerHTML = '<div style="padding: 10px; color: #ff4444; text-align: center;">Erreur de recherche</div>';
+        resultsContainer.style.display = 'block';
+    }
+}
+
+function displaySearchResults(users) {
+    const resultsContainer = document.getElementById('searchMemberResults');
+    
+    if (users.length === 0) {
+        resultsContainer.innerHTML = '<div style="padding: 10px; color: #666; text-align: center;">Aucun utilisateur trouvé</div>';
+        resultsContainer.style.display = 'block';
+        return;
+    }
+    
+    resultsContainer.innerHTML = users.map(user => `
+        <div class="user-result" data-user-id="${user._id}" style="display: flex; justify-content: between; align-items: center; padding: 10px; border-bottom: 1px solid #333; cursor: pointer;">
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                <div class="user-avatar" style="width: 30px; height: 30px; border-radius: 50%; background: #f9ee34; color: #1c1c1c; display: flex; align-items: center; justify-content: center; font-weight: bold;">
+                    ${user.username.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                    <div style="font-weight: bold; color: #f9ee34;">${user.username}</div>
+                    <div style="font-size: 11px; color: #ffeca2;">${user.email}</div>
+                </div>
+            </div>
+            <button class="add-user-btn" style="background: #f9ee34; color: #1c1c1c; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-weight: bold;">
+                +
+            </button>
+        </div>
+    `).join('');
+    
+    resultsContainer.style.display = 'block';
+    
+    resultsContainer.querySelectorAll('.add-user-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const userElement = btn.closest('.user-result');
+            const userId = userElement.dataset.userId;
+            const username = userElement.querySelector('div > div:first-child').textContent;
+            addUserToGroup(userId, username);
+        });
+    });
+    
+    resultsContainer.querySelectorAll('.user-result').forEach(row => {
+        row.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('add-user-btn')) {
+                const userId = row.dataset.userId;
+                const username = row.querySelector('div > div:first-child').textContent;
+                addUserToGroup(userId, username);
+            }
+        });
+    });
+}
+
+function addUserToGroup(userId, username) {
+    const selectedList = document.getElementById('selectedMembersList');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (selectedList.querySelector(`[data-user-id="${userId}"]`)) {
+        showMessage(`${username} est déjà dans le groupe`, 'info');
+        return;
+    }
+    
+    if (selectedList.children.length === 1 && selectedList.children[0].style.color === 'rgb(102, 102, 102)') {
+        selectedList.innerHTML = '';
+    }
+    
+    const memberElement = document.createElement('div');
+    memberElement.className = 'member-item';
+    memberElement.dataset.userId = userId;
+    memberElement.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #252525; border-radius: 6px; margin: 5px 0;">
+            <span style="color: #f9ee34;">${username}</span>
+            <button class="remove-user-btn" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; font-size: 12px;">
+                ×
+            </button>
+        </div>
+    `;
+    
+    memberElement.querySelector('.remove-user-btn').addEventListener('click', () => {
+        memberElement.remove();
+        updateSelectedCount();
+        
+        if (selectedList.children.length === 0) {
+            selectedList.innerHTML = '<div style="color: #666; text-align: center; font-size: 12px;">Aucun membre sélectionné</div>';
+        }
+    });
+    
+    selectedList.appendChild(memberElement);
+    updateSelectedCount();
+    
+    document.getElementById('searchMemberResults').style.display = 'none';
+    document.getElementById('searchMemberInput').value = '';
+    
+    showMessage(`${username} ajouté au groupe!`, 'success');
+}
+
+function updateSelectedCount() {
+    const selectedCount = document.getElementById('selectedCount');
+    const members = document.querySelectorAll('#selectedMembersList .member-item');
+    selectedCount.textContent = members.length;
+}
+
+async function createGroup() {
+    const groupName = document.getElementById('groupNameInput').value.trim();
+    const selectedMembers = Array.from(document.querySelectorAll('#selectedMembersList .member-item'))
+        .map(item => item.dataset.userId);
+    
+    if (!groupName) {
+        showMessage('Donne un nom à ton groupe!', 'error');
+        return;
+    }
+    
+    if (selectedMembers.length < 2) {
+        showMessage('Ajoute au moins 2 membres pour créer un groupe!', 'error');
+        return;
+    }
+    
+    try {
+        showMessage('Création du groupe en cours...', 'info');
+        
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/conversations/groups/create`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                groupName: groupName,
+                participantIds: selectedMembers
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showMessage(`✅ Groupe "${groupName}" créé avec ${selectedMembers.length} membres!`, 'success');
+            
+            document.getElementById('createGroupModal').style.display = 'none';
+            
+            document.getElementById('groupNameInput').value = '';
+            document.getElementById('selectedMembersList').innerHTML = '<div style="color: #666; text-align: center; font-size: 12px;">Aucun membre sélectionné</div>';
+            document.getElementById('selectedCount').textContent = '0';
+            document.getElementById('searchMemberResults').style.display = 'none';
+            document.getElementById('searchMemberInput').value = '';
+            
+            await loadConversations();
+            
+        } else {
+            throw new Error(data.error || data.message || 'Erreur de création');
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur création groupe:', error);
+        showMessage(`Erreur: ${error.message}`, 'error');
+    }
 }
 
 function showNewConversationModal() {
@@ -1091,18 +1515,22 @@ function updateConversationLastMessage(conversationId, message) {
         const timeElement = conversationElement.querySelector('.conversation-time');
         
         if (lastMessageElement) {
-            lastMessageElement.textContent = getLastMessagePreview({ lastMessage: message.content });
+            let preview = message.content;
+            if (message.typeMessage === 'image') preview = '📷 Image';
+            if (message.typeMessage === 'video') preview = '🎥 Vidéo';
+            if (message.typeMessage === 'file') preview = '📁 Fichier';
+            
+            lastMessageElement.textContent = preview.length > 30 ? 
+                preview.substring(0, 30) + '...' : preview;
         }
         
         if (timeElement) {
             timeElement.textContent = formatTime(message.createdAt);
         }
         
-        // Re-trier les conversations
         const contactsList = document.getElementById('contactsList');
         const conversationsContainer = contactsList.querySelector('.contacts-list') || contactsList;
         
-        // Supprimer et réinsérer pour remettre en haut
         conversationElement.remove();
         const header = conversationsContainer.querySelector('.contacts-header');
         conversationsContainer.insertBefore(conversationElement, header.nextSibling);
@@ -1210,7 +1638,6 @@ function showLoading(show) {
     }
 }
 
-// 🆕 FONCTION POUR LE CHARGEMENT DES MESSAGES
 function showMessageLoading(show) {
     const messagesList = document.getElementById('messagesList');
     if (!messagesList) return;
@@ -1290,7 +1717,14 @@ window.addEventListener('beforeunload', () => {
     if (state.socket) {
         state.socket.disconnect();
     }
+    
+    state.pendingFiles.forEach(fileData => {
+        if (fileData.previewUrl) {
+            URL.revokeObjectURL(fileData.previewUrl);
+        }
+    });
 });
 
 // Export pour debug
 window.owlyState = state;
+window.openImageModal = openImageModal;

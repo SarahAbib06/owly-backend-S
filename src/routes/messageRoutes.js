@@ -31,7 +31,7 @@ router.get('/:conversationId', protact, async (req, res) => {
   }
 });
 
-// 🆕 ROUTE : POST /api/messages/send
+// 🆕 ROUTE : POST /api/messages/send - CORRIGÉ
 router.post('/send', protact, async (req, res) => {
   try {
     console.log('📨 API - Envoi message:', req.body);
@@ -45,7 +45,12 @@ router.post('/send', protact, async (req, res) => {
       typeMessage: typeMessage || 'text'
     };
     
-    const savedMessage = await messageController.createMessage(messageData, null, req.user._id);
+    // 🆕 CORRECTION : .toString() sur req.user._id
+    const savedMessage = await messageController.createMessage(
+      messageData, 
+      null, 
+      req.user._id.toString()  // ← CORRIGÉ ICI
+    );
     
     console.log('✅ API - Message envoyé:', savedMessage._id);
     res.json({

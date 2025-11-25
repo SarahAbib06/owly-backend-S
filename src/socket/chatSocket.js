@@ -194,6 +194,271 @@ export const configureChatSockets = (io) => {
       }
     });
 
+    // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ
+    socket.on('send_image_message', async (data) => {
+      console.log('🖼️ Image message reçu:', data);
+      
+      try {
+        // Vérification autorisation
+        if (data.conversationId) {
+          await conversationController.checkUserAuthorization(
+            socket.userId, 
+            data.conversationId
+          );
+        }
+
+        // 🆕 CORRECTION : Supprimer Id_sender de messageData
+        const messageData = {
+          conversationId: data.conversationId,
+          Id_receiver: data.Id_receiver,
+          typeMessage: 'image'
+        };
+
+        // Traitement du fichier image
+        let fileBuffer;
+        if (typeof data.file === 'string' && data.file.startsWith('data:image')) {
+          const base64Data = data.file.split(',')[1];
+          fileBuffer = Buffer.from(base64Data, 'base64');
+        } else if (data.fileBuffer) {
+          fileBuffer = Buffer.from(data.fileBuffer);
+        } else {
+          throw new Error('Format de fichier image non reconnu');
+        }
+
+        // Création objet fichier
+        const file = { 
+          buffer: fileBuffer,
+          originalname: data.fileName || 'image',
+          mimetype: data.fileType || 'image/jpeg'
+        };
+
+        // 🆕 CORRECTION : Passer socket.userId comme 4ème paramètre
+        const savedMessage = await messageController.uploadImageMessage(
+          file, 
+          messageData, 
+          io, 
+          socket.userId // ← AJOUTÉ ICI
+        );
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
+
+        // 🆕 CORRECTION : Utiliser socket.to() au lieu de io.to()
+        socket.to(savedMessage.conversationId.toString()).emit('new_message', {
+          event: 'new_message',
+          data: savedMessage,
+          timestamp: new Date()
+        });
+
+        // Confirmation à l'envoyeur
+        socket.emit('image_message_sent', {
+          success: true,
+          data: savedMessage,
+          timestamp: new Date()
+        });
+
+        console.log('🖼️ Message image diffusé - ID:', savedMessage._id);
+
+      } catch (error) {
+        console.error('💥 Erreur traitement image message:', error.message);
+        socket.emit('image_message_error', {
+          success: false,
+          error: error.message,
+          timestamp: new Date()
+        });
+      }
+    });
+
+    // 🆕 ÉVÉNEMENT ENVOI FICHIER - CORRIGÉ
+    socket.on('send_file_message', async (data) => {
+      console.log('📎 File message reçu:', data);
+      
+      try {
+        // Vérification autorisation
+        if (data.conversationId) {
+          await conversationController.checkUserAuthorization(
+            socket.userId, 
+            data.conversationId
+          );
+        }
+
+        // 🆕 CORRECTION : Supprimer Id_sender de messageData
+        const messageData = {
+          conversationId: data.conversationId,
+          Id_receiver: data.Id_receiver,
+          fileName: data.fileName,
+          fileType: data.fileType,
+          fileSize: data.fileSize,
+          originalName: data.originalName,
+          typeMessage: 'file'
+        };
+
+        // Traitement du fichier
+        let fileBuffer;
+        if (typeof data.file === 'string' && data.file.startsWith('data:')) {
+          const base64Data = data.file.split(',')[1];
+          fileBuffer = Buffer.from(base64Data, 'base64');
+        } else if (data.fileBuffer) {
+          fileBuffer = Buffer.from(data.fileBuffer);
+        } else {
+          throw new Error('Format de fichier non reconnu');
+        }
+
+        // Création objet fichier
+        const file = { 
+          buffer: fileBuffer,
+          originalname: data.fileName || data.originalName || 'file',
+          mimetype: data.fileType || 'application/octet-stream',
+          size: data.fileSize
+        };
+
+        // 🆕 CORRECTION : Passer socket.userId comme 4ème paramètre
+        const savedMessage = await messageController.uploadFileMessage(
+          file,
+          messageData,
+          io,
+          socket.userId // ← AJOUTÉ ICI
+        );
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
+
+        // Formater le message pour l'interface
+        const formattedMessage = {
+          _id: savedMessage._id,
+          conversationId: savedMessage.conversationId,
+          Id_sender: savedMessage.Id_sender,
+          Id_receiver: data.Id_receiver,
+          typeMessage: savedMessage.typeMessage || 'file',
+          content: savedMessage.content,
+          fileUrl: savedMessage.fileUrl,
+          fileName: savedMessage.fileName || data.fileName,
+          fileSize: savedMessage.fileSize || data.fileSize,
+          fileType: savedMessage.fileType || data.fileType,
+          originalName: savedMessage.originalName || data.originalName,
+          status: savedMessage.status,
+          time: savedMessage.time || savedMessage.timestamp,
+          timestamp: new Date()
+        };
+
+        // 🆕 CORRECTION : Utiliser socket.to() au lieu de io.to()
+        socket.to(savedMessage.conversationId.toString()).emit('new_message', {
+          event: 'new_message',
+          data: formattedMessage,
+          timestamp: new Date()
+        });
+
+        // Confirmation à l'envoyeur
+        socket.emit('file_message_sent', {
+          success: true,
+          data: formattedMessage,
+          timestamp: new Date()
+        });
+
+        console.log('📎 Message fichier diffusé - ID:', savedMessage._id);
+
+      } catch (error) {
+        console.error('💥 Erreur traitement fichier message:', error.message);
+        socket.emit('file_message_error', {
+          success: false,
+          error: error.message,
+          timestamp: new Date()
+        });
+      }
+    });
+
+    // 🆕 ÉVÉNEMENT ENVOI VIDÉO - CORRIGÉ
+    socket.on('send_video_message', async (data) => {
+      console.log('🎥 Video message reçu:', data);
+      
+      try {
+        if (!data.file) {
+          throw new Error('Aucun fichier vidéo reçu');
+        }
+
+        // Vérification autorisation
+        if (data.conversationId) {
+          await conversationController.checkUserAuthorization(
+            socket.userId, 
+            data.conversationId
+          );
+        }
+
+        // 🆕 CORRECTION : Supprimer Id_sender de messageData
+        const messageData = {
+          conversationId: data.conversationId,
+          Id_receiver: data.Id_receiver,
+          fileName: data.fileName,
+          fileType: data.fileType,
+          fileSize: data.fileSize,
+          typeMessage: 'video'
+        };
+
+        // Conversion ArrayBuffer → Buffer Node.js
+        const fileBuffer = Buffer.from(new Uint8Array(data.file));
+
+        // Création objet fichier
+        const file = { 
+          buffer: fileBuffer,
+          originalname: data.fileName || 'video',
+          mimetype: data.fileType || 'video/mp4',
+          size: data.fileSize
+        };
+
+        // 🆕 CORRECTION : Passer socket.userId comme 4ème paramètre
+        const savedMessage = await messageController.uploadVideoMessage(
+          file,
+          messageData, 
+          io,
+          socket.userId // ← AJOUTÉ ICI
+        );
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
+
+        // Formater le message pour l'interface
+        const formattedMessage = {
+          _id: savedMessage._id,
+          conversationId: savedMessage.conversationId,
+          Id_sender: savedMessage.Id_sender,
+          Id_receiver: data.Id_receiver,
+          typeMessage: savedMessage.typeMessage || 'video',
+          content: savedMessage.content,
+          fileUrl: savedMessage.fileUrl,
+          fileName: savedMessage.fileName || data.fileName,
+          fileSize: savedMessage.fileSize || data.fileSize,
+          fileType: savedMessage.fileType || data.fileType,
+          status: savedMessage.status,
+          time: savedMessage.time || savedMessage.timestamp,
+          timestamp: new Date()
+        };
+
+        // 🆕 CORRECTION : Utiliser socket.to() au lieu de io.to()
+        socket.to(savedMessage.conversationId.toString()).emit('new_message', {
+          event: 'new_message',
+          data: formattedMessage,
+          timestamp: new Date()
+        });
+
+        // Confirmation à l'envoyeur
+        socket.emit('video_message_sent', {
+          success: true,
+          data: formattedMessage,
+          timestamp: new Date()
+        });
+
+        console.log('🎥 Message vidéo diffusé - ID:', savedMessage._id);
+
+      } catch (error) {
+        console.error('💥 Erreur traitement vidéo message:', error.message);
+        socket.emit('video_message_error', {
+          success: false,
+          error: error.message,
+          timestamp: new Date()
+        });
+      }
+    });
+
     // ÉVÉNEMENTS COMPTEURS
     socket.on('get_unread_counts', async () => {
       try {
@@ -455,4 +720,3 @@ export const configureChatSockets = (io) => {
     });
   }
 };
-
