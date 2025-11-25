@@ -5,15 +5,12 @@ import {
   getAudioMessages, // ⭐ CORRECTION : utiliser getAudioMessages au lieu de getAudioInfo
   //deleteAudioMessage,
 } from "../controllers/audioController.js";
-
-// { authMiddleware } from "../middleware/auth.js";
-import authMiddleware from "../middleware/auth.js";
+import { protact } from "../middleware/authen.js";
 import audioUpload from "../middleware/audioUpload.js";
-
 const router = express.Router();
 
 // 🎯 ROUTE : GET /api/messages/:conversationId
-router.get("/:conversationId", async (req, res) => {
+router.get("/:conversationId", protact, async (req, res) => {
   try {
     console.log(
       "📨 API - Récupération messages conversation:",
@@ -41,28 +38,31 @@ router.get("/:conversationId", async (req, res) => {
     console.error("❌ API - Erreur:", error.message);
     res.status(500).json({
       success: false,
+
       error: error.message,
     });
   }
 });
 
 // 🆕 ROUTE : POST /api/messages/send
-router.post("/send", async (req, res) => {
+router.post("/send", protact, async (req, res) => {
   try {
     console.log("📨 API - Envoi message:", req.body);
 
-    const { conversationId, Id_sender, Id_receiver, content, typeMessage } =
-      req.body;
+    const { conversationId, Id_receiver, content, typeMessage } = req.body;
 
     const messageData = {
       conversationId,
-      Id_sender,
       Id_receiver,
       content,
       typeMessage: typeMessage || "text",
     };
 
-    const savedMessage = await messageController.createMessage(messageData);
+    const savedMessage = await messageController.createMessage(
+      messageData,
+      null,
+      req.user._id
+    );
 
     console.log("✅ API - Message envoyé:", savedMessage._id);
     res.json({
@@ -81,7 +81,7 @@ router.post("/send", async (req, res) => {
 // 🔊 ROUTES AUDIO AVEC DEBUG CORRIGÉ
 router.post(
   "/audio/send",
-  authMiddleware,
+  protact,
   // Middleware de debug AVANT Multer - CORRIGÉ
   (req, res, next) => {
     console.log("🔍 DEBUG AVANT MULTER:");
@@ -124,7 +124,7 @@ router.post(
 );
 
 // ⭐ CORRECTION : Utiliser getAudioMessages au lieu de getAudioInfo
-router.get("/audio/:conversationId", authMiddleware, getAudioMessages);
+router.get("/audio/:conversationId", protact, getAudioMessages);
 
 //router.delete("/audio/:messageId", authMiddleware, deleteAudioMessage);
 

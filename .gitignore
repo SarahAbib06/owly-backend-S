@@ -1,6 +1,13 @@
 
- .env
+
+src/frontendtest/
+
+
+
+.env
+
 node_modules/
 
 
 src/frontendtest/
+

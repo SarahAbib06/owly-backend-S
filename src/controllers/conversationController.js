@@ -75,6 +75,66 @@ export const conversationController = {
     return newConversation;
   },
 
+  // 🆕 FONCTION POUR CRÉER UN GROUPE (SÉCURISÉE)
+  createGroupConversation: async (
+    creatorIdFromToken,
+    participantIds,
+    groupName
+  ) => {
+    // 🎯 VÉRIFICATIONS
+    if (!mongoose.Types.ObjectId.isValid(creatorIdFromToken)) {
+      throw new Error("ID créateur invalide");
+    }
+
+    if (!participantIds || participantIds.length < 2) {
+      throw new Error("Un groupe doit avoir au moins 2 autres participants");
+    }
+
+    if (!groupName || groupName.trim().length === 0) {
+      throw new Error("Le nom du groupe est requis");
+    }
+
+    // 🎯 VÉRIFIER QUE TOUS LES USERS EXISTENT
+    const allUserIds = [creatorIdFromToken, ...participantIds];
+    const users = await User.find({ _id: { $in: allUserIds } });
+
+    if (users.length !== allUserIds.length) {
+      throw new Error("Certains utilisateurs n'existent pas");
+    }
+
+    // 🎯 CRÉER LA CONVERSATION DE GROUPE
+    const newConversation = await Conversation.create({
+      Id_participant: allUserIds,
+      type: "group",
+      groupName: groupName.trim(),
+      createdBy: creatorIdFromToken,
+    });
+
+    console.log(
+      `✅ Groupe créé: ${groupName} (${allUserIds.length} participants)`
+    );
+
+    // 🎯 CRÉER LES PARTICIPANTS
+    try {
+      const participantsData = allUserIds.map((userId) => ({
+        Id_User: userId,
+        Id_Conversation: newConversation._id,
+        Role: userId === creatorIdFromToken ? "admin" : "membre",
+      }));
+
+      await Participants.insertMany(participantsData);
+      console.log(
+        `✅ ${participantsData.length} participants ajoutés au groupe`
+      );
+    } catch (error) {
+      // 🆕 SI ERREUR, SUPPRIMER LA CONVERSATION
+      await Conversation.findByIdAndDelete(newConversation._id);
+      throw new Error("Erreur création participants groupe: " + error.message);
+    }
+
+    return newConversation;
+  },
+
   // 🎯 VÉRIFICATION AUTORISATION CONVERSATION
   checkUserAuthorization: async (userId, conversationId) => {
     if (
@@ -102,5 +162,38 @@ export const conversationController = {
     }
 
     return true;
+  },
+
+  // 🆕 FONCTION POUR RÉCUPÉRER LES GROUPES D'UN USER
+  getUserGroups: async (userId) => {
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      throw new Error("ID utilisateur invalide");
+    }
+
+    const userGroups = await Participants.find({
+      Id_User: userId,
+    })
+      .populate({
+        path: "Id_Conversation",
+        match: { type: "group" },
+      })
+      .populate("Id_User", "username profilePicture");
+
+    const groups = userGroups
+      .filter((p) => p.Id_Conversation) // Filtrer les conversations de groupe
+      .map((p) => ({
+        _id: p.Id_Conversation._id,
+        name: p.Id_Conversation.groupName,
+        type: p.Id_Conversation.type,
+        unreadCount:
+          p.Id_Conversation.unreadCounts?.find(
+            (u) => u.userId && u.userId.toString() === userId
+          )?.count || 0,
+        lastMessageAt: p.Id_Conversation.lastMessageAt,
+        participantCount: p.Id_Conversation.Id_participant?.length || 0,
+        role: p.Role,
+      }));
+
+    return groups;
   },
 };

@@ -1,51 +1,88 @@
 import mongoose from 'mongoose';
 
-const conversationSchema = new mongoose.Schema({
-  Id_participant: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Participants',
-    required: true
-  }],
-  
-  // 🆕 AJOUT POUR LES NOTIFICATIONS - Compteur par utilisateur
-  unreadCounts: [{
-    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
-    count: { type: Number, default: 0 }
-  }],
-  
-  // 🆕 AJOUT - Dernier message pour trier les conversations
-  lastMessageAt: { type: Date, default: Date.now },
-  
-  Id_message: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: 'Message', 
-    required: false 
-  },
-  LastMessageRead: { 
-    type: String, 
-    default: null 
-  },
-  groupName: { type: String },
-  groupPic: { type: String },
-  media: {
-    type: String,
-    enum: ['text', 'image', 'video', 'audio', 'file'],
-    default: null
-  },
-  createdBy: { 
-    type: mongoose.Schema.Types.ObjectId, 
-    ref: "User", 
-    required: true 
-  },
-  createdAt: { 
-    type: Date, 
-    default: Date.now 
-  },
-  type: { 
-    type: String, 
-    enum: ["private", "group"], 
-    required: true 
-  },
-});
 
-export default mongoose.model("Conversation", conversationSchema);
+const { Schema, model } = mongoose;
+
+const conversationSchema = new Schema(
+  {
+    // Liste des participants (tu références bien ta collection Participants ? sinon remplace par 'User')
+    Id_participant: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: 'Participants',    // ou 'User' si tu n'as pas de table Participants séparée
+        required: true,
+      },
+    ],
+
+    // Compteurs de messages non lus par utilisateur
+    unreadCounts: [
+      {
+        userId: {
+          type: Schema.Types.ObjectId,
+          ref: 'User',
+          required: true,
+        },
+        count: {
+          type: Number,
+          default: 0,
+          min: 0,
+        },
+        _id: false, // pas d'_id inutile sur chaque entrée
+      },
+    ],
+
+    // Dernier message (pour trier les conversations)
+    lastMessageAt: {
+      type: Date,
+      default: Date.now,
+    },
+
+    // Nom du groupe (obligatoire si type === 'group')
+    groupName: {
+      type: String,
+      required: function () {
+        return this.type === 'group';
+      },
+      default: null,
+    },
+
+    // Photo de groupe
+    groupPic: {
+      type: String,
+      default: null,
+    },
+
+    // Créateur de la conversation
+    createdBy: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      required: true,
+    },
+
+    // Type de conversation
+    type: {
+      type: String,
+      enum: ['private', 'group'],
+      required: true,
+      default: 'private',
+    },
+  },
+  {
+    // Timestamps automatiques (createdAt + updatedAt)
+    timestamps: true,
+  }
+);
+
+// Index très importants pour les performances d’un chat
+conversationSchema.index({ lastMessageAt: -1 });                    // tri des conversations récentes
+conversationSchema.index({ 'Id_participant': 1 });                  // recherche rapide par participant
+conversationSchema.index({ 'unreadCounts.userId': 1 });             // trouver les unread d’un user
+conversationSchema.index({ type: 1 });
+conversationSchema.index({ createdBy: 1 });
+conversationSchema.index({ 'Id_participant': 1, lastMessageAt: -1 }); // combo gagnant pour pagination
+
+// Modèle
+const Conversation = model('Conversation', conversationSchema);
+
+export default Conversation;
+
