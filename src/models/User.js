@@ -1,6 +1,6 @@
 // src/models/User.js
-import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+import mongoose from "mongoose";
+import bcrypt from "bcryptjs";
 
 const userSchema = new mongoose.Schema(
   {
@@ -10,26 +10,28 @@ const userSchema = new mongoose.Schema(
     profilePicture: { type: String, default: null },
     dateOfBirth: { type: Date }, // 🆕 AJOUTÉ depuis votre version
     qrCode: { type: String },
-    status: { 
-      type: String, 
-      enum: ['online', 'offline', 'away'], 
-      default: 'offline' 
+    status: {
+      type: String,
+      enum: ["online", "offline", "away"],
+      default: "offline",
     },
-    
+
     // 🆕 SESSIONS ACTIVES POUR MULTI-DEVICES (AJOUTÉ depuis votre version)
-    activeSessions: [{
-      socketId: { type: String, required: true },
-      deviceType: { 
-        type: String, 
-        enum: ['desktop', 'mobile', 'tablet'],
-        default: 'desktop'
+    activeSessions: [
+      {
+        socketId: { type: String, required: true },
+        deviceType: {
+          type: String,
+          enum: ["desktop", "mobile", "tablet"],
+          default: "desktop",
+        },
+        userAgent: { type: String },
+        ipAddress: { type: String },
+        connectedAt: { type: Date, default: Date.now },
+        lastActivity: { type: Date, default: Date.now },
       },
-      userAgent: { type: String },
-      ipAddress: { type: String },
-      connectedAt: { type: Date, default: Date.now },
-      lastActivity: { type: Date, default: Date.now }
-    }],
-    
+    ],
+
     // 🆕 PRÉFÉRENCES NOTIFICATIONS (AJOUTÉ depuis votre version)
     notificationPreferences: {
       pushEnabled: { type: Boolean, default: true },
@@ -37,20 +39,19 @@ const userSchema = new mongoose.Schema(
       quietHours: {
         enabled: { type: Boolean, default: false },
 
-        start: { type: String, default: '23:00' }, // Format HH:mm
-        end: { type: String, default: '07:00' }
-
-      }
+        start: { type: String, default: "23:00" }, // Format HH:mm
+        end: { type: String, default: "07:00" },
+      },
     },
-    
+
     // Sécurité (DEPUIS la version GitHub)
     failedLoginAttempts: { type: Number, default: 0 },
     lastFailedAttempt: { type: Date },
     lockedUntil: { type: Date, default: null },
     knownDevices: { type: [String], default: [] },
-    
+
     createdAt: { type: Date, default: Date.now },
-    lastSeen: { type: Date }
+    lastSeen: { type: Date },
   },
   { timestamps: true } // 🆕 GARDÉ depuis GitHub
 );
@@ -78,5 +79,4 @@ userSchema.methods.resetLoginAttempts = function () {
   this.lockedUntil = null;
 };
 
-export default mongoose.model('User', userSchema);
-
+export default mongoose.model("User", userSchema);

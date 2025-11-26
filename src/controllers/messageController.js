@@ -1,48 +1,61 @@
 // controllers/messageController.js
-import Message from '../models/Message.js';
-import Conversation from '../models/Conversation.js';
-import Participants from '../models/Participants.js';
-import User from '../models/User.js';
-import Relation from '../models/Relation.js';
-import { conversationController } from './conversationController.js';
-import { pushNotificationService } from '../services/pushNotificationService.js';
-import mongoose from 'mongoose';
-import crypto from 'crypto';
+import Message from "../models/Message.js";
+import Conversation from "../models/Conversation.js";
+import Participants from "../models/Participants.js";
+import User from "../models/User.js";
+import Relation from "../models/Relation.js";
+import { conversationController } from "./conversationController.js";
+import { pushNotificationService } from "../services/pushNotificationService.js";
+import mongoose from "mongoose";
+import crypto from "crypto";
 import cloudinary from '../config/cloudinary.js';
 import streamifier from 'streamifier';
 
 // CLÉ SECRÈTE — METS ÇA DANS TON .env (64 caractères hex = 32 bytes)
-const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY || 'a'.repeat(64);
-const ALGORITHM = 'aes-256-gcm';
+const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY || "a".repeat(64);
+const ALGORITHM = "aes-256-gcm";
 
 // CHIFFREMENT
 function encryptContent(text) {
   const iv = crypto.randomBytes(12);
-  const cipher = crypto.createCipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
-  let encrypted = cipher.update(text, 'utf8', 'hex');
-  encrypted += cipher.final('hex');
+  const cipher = crypto.createCipheriv(
+    ALGORITHM,
+    Buffer.from(ENCRYPTION_KEY, "hex"),
+    iv
+  );
+  let encrypted = cipher.update(text, "utf8", "hex");
+  encrypted += cipher.final("hex");
   const authTag = cipher.getAuthTag();
-  const payload = { iv: iv.toString('hex'), data: encrypted, tag: authTag.toString('hex') };
+  const payload = {
+    iv: iv.toString("hex"),
+    data: encrypted,
+    tag: authTag.toString("hex"),
+  };
   return JSON.stringify(payload);
 }
 
 // DÉCHIFFREMENT
 function decryptContent(stored) {
-  if (!stored || typeof stored !== 'string') return '[Message vide]';
-  if (!stored.startsWith('{') || !stored.includes(':')) return stored;
+  if (!stored || typeof stored !== "string") return "[Message vide]";
+  if (!stored.startsWith("{") || !stored.includes(":")) return stored;
   try {
     const payload = JSON.parse(stored);
-    if (!payload.iv || !payload.data || !payload.tag) throw new Error('Format invalide');
-    const iv = Buffer.from(payload.iv, 'hex');
-    const authTag = Buffer.from(payload.tag, 'hex');
-    const decipher = crypto.createDecipheriv(ALGORITHM, Buffer.from(ENCRYPTION_KEY, 'hex'), iv);
+    if (!payload.iv || !payload.data || !payload.tag)
+      throw new Error("Format invalide");
+    const iv = Buffer.from(payload.iv, "hex");
+    const authTag = Buffer.from(payload.tag, "hex");
+    const decipher = crypto.createDecipheriv(
+      ALGORITHM,
+      Buffer.from(ENCRYPTION_KEY, "hex"),
+      iv
+    );
     decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(payload.data, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
+    let decrypted = decipher.update(payload.data, "hex", "utf8");
+    decrypted += decipher.final("utf8");
     return decrypted;
   } catch (err) {
-    console.warn('Déchiffrement échoué → ancien message');
-    return stored.length < 2000 ? stored : '[Corrompu]';
+    console.warn("Déchiffrement échoué → ancien message");
+    return stored.length < 2000 ? stored : "[Corrompu]";
   }
 }
 
@@ -144,8 +157,13 @@ export const messageController = {
   createMessage: async (messageData, io = null, userIdFromToken = null) => {
     // RÉCUPÉRATION Id_sender SÉCURISÉ
     const Id_sender = userIdFromToken;
-   
-    const { conversationId, Id_receiver, content, typeMessage = 'text' } = messageData;
+
+    const {
+      conversationId,
+      Id_receiver,
+      content,
+      typeMessage = "text",
+    } = messageData;
 
     // VÉRIFICATIONS
     if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
@@ -193,17 +211,22 @@ export const messageController = {
       status: "blocked",
       $or: [
         { userId: Id_sender, contactId: receiverId },
-        { userId: receiverId, contactId: Id_sender }
-      ]
+        { userId: receiverId, contactId: Id_sender },
+      ],
     });
     if (blockExists) {
-      throw new Error("Impossible d'envoyer le message : vous avez bloqué cette personne ou elle vous a bloqué.");
+      throw new Error(
+        "Impossible d'envoyer le message : vous avez bloqué cette personne ou elle vous a bloqué."
+      );
     }
 
     // CONVERSATION
     let finalConversationId = conversationId;
     if (!conversationId) {
-      const conv = await conversationController.getOrCreateConversation(Id_sender, receiverId);
+      const conv = await conversationController.getOrCreateConversation(
+        Id_sender,
+        receiverId
+      );
       finalConversationId = conv._id;
     }
 
@@ -213,16 +236,18 @@ export const messageController = {
     const message = new Message({
       conversationId: finalConversationId,
       Id_sender,
-      content: encryptedContent,  // chiffré en DB
+      content: encryptedContent, // chiffré en DB
       typeMessage,
-      status: 'sent',
-      time: new Date()
+      status: "sent",
+      time: new Date(),
     });
     const savedMessage = await message.save();
 
-    // COMPTEURS NON LUS
+    // COMPTEURS NON LUS (1er bloc)
     try {
-      const participants = await Participants.find({ Id_Conversation: finalConversationId });
+      const participants = await Participants.find({
+        Id_Conversation: finalConversationId,
+      });
       const bulkOperations = [];
       const participantsToNotify = [];
       for (const participant of participants) {
@@ -230,9 +255,15 @@ export const messageController = {
           participantsToNotify.push(participant.Id_User);
           bulkOperations.push({
             updateOne: {
-              filter: { _id: finalConversationId, "unreadCounts.userId": participant.Id_User },
-              update: { $inc: { "unreadCounts.$.count": 1 }, $set: { lastMessageAt: new Date() } }
-            }
+              filter: {
+                _id: finalConversationId,
+                "unreadCounts.userId": participant.Id_User,
+              },
+              update: {
+                $inc: { "unreadCounts.$.count": 1 },
+                $set: { lastMessageAt: new Date() },
+              },
+            },
           });
         }
       }
@@ -241,99 +272,159 @@ export const messageController = {
         const conv = await Conversation.findById(finalConversationId);
         const missing = [];
         for (const uid of participantsToNotify) {
-          if (!conv.unreadCounts?.some(u => u.userId.toString() === uid.toString())) {
+          if (
+            !conv.unreadCounts?.some(
+              (u) => u.userId.toString() === uid.toString()
+            )
+          ) {
             missing.push({
               updateOne: {
                 filter: { _id: finalConversationId },
-                update: { $push: { unreadCounts: { userId: uid, count: 1 } }, $set: { lastMessageAt: new Date() } }
-              }
+                update: {
+                  $push: { unreadCounts: { userId: uid, count: 1 } },
+                  $set: { lastMessageAt: new Date() },
+                },
+              },
             });
           }
         }
         if (missing.length > 0) await Conversation.bulkWrite(missing);
       }
     } catch (error) {
-      console.error('Erreur mise à jour compteurs:', error.message);
+      console.error("Erreur mise à jour compteurs:", error.message);
     }
 
-    // NOTIFICATIONS INTELLIGENTES
+    // COMPTEURS NON-LUS (2ème bloc)
     try {
-      console.log('Gestion intelligente des notifications...');
+      console.log("Mise à jour des compteurs non-lus...");
+
       let participants = [];
       const conversation = await Conversation.findById(finalConversationId);
       if (conversation && conversation.type === "group") {
-        participants = conversation.Id_participant.map(userId => ({
-          Id_User: { _id: userId }
+        participants = conversation.Id_participant.map((userId) => ({
+          Id_User: userId,
         }));
       } else {
         participants = await Participants.find({
-          Id_Conversation: finalConversationId
-        }).populate('Id_User', 'username');
+          Id_Conversation: finalConversationId,
+        });
+      }
+      for (let participant of participants) {
+        const participantId = participant.Id_User.toString();
+        if (participantId !== Id_sender.toString()) {
+          await Conversation.findOneAndUpdate(
+            {
+              _id: finalConversationId,
+              "unreadCounts.userId": participantId,
+            },
+            {
+              $inc: { "unreadCounts.$.count": 1 },
+              $set: { lastMessageAt: new Date() },
+            },
+            { upsert: true, new: true }
+          );
+        }
+      }
+
+      console.log("Compteurs non-lus mis à jour");
+    } catch (error) {
+      console.log("Erreur compteurs:", error.message);
+    }
+
+    // NOTIFICATIONS INTELLIGENTES (tout ton code intact)
+    try {
+      console.log("Gestion intelligente des notifications...");
+
+      let participants = [];
+      const conversation = await Conversation.findById(finalConversationId);
+      if (conversation && conversation.type === "group") {
+        participants = conversation.Id_participant.map((userId) => ({
+          Id_User: { _id: userId },
+        }));
+      } else {
+        participants = await Participants.find({
+          Id_Conversation: finalConversationId,
+        }).populate("Id_User", "username");
       }
       const sender = await User.findById(Id_sender);
-      const senderName = sender?.username || 'Quelqu\'un';
+      const senderName = sender?.username || "Quelqu'un";
+
       for (let participant of participants) {
         const participantId = participant.Id_User._id.toString();
         if (participantId !== Id_sender.toString()) {
           const participantUser = await User.findById(participantId);
-          const participantName = participantUser?.username || 'Utilisateur';
-          const notificationsEnabled = await areNotificationsEnabled(participantId);
+
+          const participantName = participantUser?.username || "Utilisateur";
+          const notificationsEnabled = await areNotificationsEnabled(
+            participantId
+          );
           if (!notificationsEnabled) {
-            console.log(`NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`);
+            console.log(
+              `NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`
+            );
             continue;
           }
           const isUserOnline = await isUserOnlineAdvanced(io, participantId);
-          console.log(`${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`);
-          const notificationTitle = conversation?.type === "group"
-            ? `${conversation.groupName} - ${senderName}`
-            : `Nouveau message de ${senderName}`;
-          const notificationBody = content.length > 30 ? content.substring(0, 30) + '...' : content;
+          console.log(
+            `${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`
+          );
+          const notificationTitle =
+            conversation?.type === "group"
+              ? `${conversation.groupName} - ${senderName}`
+              : `Nouveau message de ${senderName}`;
+          const notificationBody =
+            content.length > 30 ? content.substring(0, 30) + "..." : content;
           if (isUserOnline && io) {
             console.log(`WebSocket à: ${participantName}`);
-            io.to(`user_${participantId}`).emit('new_message_alert', {
-              type: 'new_message',
+            io.to(`user_${participantId}`).emit("new_message_alert", {
+              type: "new_message",
+
               conversationId: finalConversationId,
               senderId: savedMessage.Id_sender,
               senderName: senderName,
-              messagePreview: content.substring(0, 50),
+              messagePreview: content.substring(0, 50), // Contenu en clair
               timestamp: new Date(),
               messageId: savedMessage._id,
               isGroup: conversation?.type === "group",
-              groupName: conversation?.groupName
+              groupName: conversation?.groupName,
             });
           } else {
-            console.log(`Push notification à: ${participantName}`);
+            console.log(`Push notification à: ${257}participantName}`);
+
             await pushNotificationService.sendToUser(
               participantId,
               notificationTitle,
-              notificationBody,
+              notificationBody, // Contenu en clair
               {
                 conversationId: finalConversationId.toString(),
                 messageId: savedMessage._id.toString(),
-                type: 'new_message',
+                type: "new_message",
                 senderName: senderName,
                 isGroup: conversation?.type === "group",
-                groupName: conversation?.groupName
+                groupName: conversation?.groupName,
               }
             );
           }
         }
       }
     } catch (error) {
-      console.log('Erreur notifications:', error.message);
+      console.log("Erreur notifications:", error.message);
     }
 
     // DIFFUSION WEBSOCKET → EN CLAIR (CORRIGÉ)
     if (io) {
-      io.to(finalConversationId.toString()).emit('new_message', {
+      io.to(finalConversationId.toString()).emit("new_message", {
         _id: savedMessage._id,
         conversationId: finalConversationId,
         Id_sender: Id_sender,
-        content: content.trim(),           // EN CLAIR
+
+        content: content.trim(), // EN CLAIR
+
         typeMessage: typeMessage,
-        status: 'sent',
+        status: "sent",
         timestamp: new Date(),
-        isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
+        isGroup:
+          (await Conversation.findById(finalConversationId))?.type === "group",
       });
     }
 
@@ -342,11 +433,15 @@ export const messageController = {
       _id: savedMessage._id,
       conversationId: finalConversationId,
       Id_sender,
-      content: content.trim(),                 // EN CLAIR
+
+      content: content.trim(), // EN CLAIR
+
       typeMessage,
-      status: 'sent',
+      status: "sent",
       timestamp: new Date(),
-      isGroup: (await Conversation.findById(finalConversationId))?.type === "group"
+
+      isGroup:
+        (await Conversation.findById(finalConversationId))?.type === "group",
     };
   },
 
@@ -810,9 +905,12 @@ export const messageController = {
   // RÉCUPÉRER LES MESSAGES → DÉCHIFFRE À LA VOLÉE
   getConversationMessages: async (conversationId, page = 1, limit = 50) => {
     try {
-      console.log(`📜 Récupération messages conversation ${conversationId}, page ${page}`);
+      console.log(
+        `Récupération messages conversation ${conversationId}, page ${page}`
+      );
+
       if (!mongoose.Types.ObjectId.isValid(conversationId)) {
-        throw new Error('ID conversation invalide');
+        throw new Error("ID conversation invalide");
       }
       const skip = (page - 1) * limit;
       const messages = await Message.find({ conversationId: conversationId })
@@ -822,19 +920,20 @@ export const messageController = {
         .lean();
 
       // DÉCHIFFRE TOUS LES MESSAGES AVANT DE LES RENVOYER
-      const decryptedMessages = messages.map(msg => ({
+      const decryptedMessages = messages.map((msg) => ({
         ...msg,
         _id: msg._id.toString(),
         conversationId: msg.conversationId.toString(),
         Id_sender: msg.Id_sender.toString(),
-        content: decryptContent(msg.content),  // DÉCHIFFRÉ ICI
-        timestamp: msg.time || msg.createdAt
+        content: decryptContent(msg.content), // DÉCHIFFRÉ ICI
+        timestamp: msg.time || msg.createdAt,
       }));
 
-      console.log(`✅ ${decryptedMessages.length} messages trouvés et déchiffrés`);
+      console.log(`${decryptedMessages.length} messages trouvés et déchiffrés`);
       return decryptedMessages;
     } catch (error) {
-      console.error('💥 Erreur:', error);
+      console.error("Erreur:", error);
+
       throw error;
     }
   },
@@ -843,14 +942,20 @@ export const messageController = {
     userPresence = presenceMap;
   },
 
-  sendGroupMessage: async (groupId, senderId, content, typeMessage = 'text', io = null) => {
+  sendGroupMessage: async (
+    groupId,
+    senderId,
+    content,
+    typeMessage = "text",
+    io = null
+  ) => {
     const messageData = {
       conversationId: groupId,
       content: content,
-      typeMessage: typeMessage
+      typeMessage: typeMessage,
     };
     return await messageController.createMessage(messageData, io, senderId);
-  }
+  },
 };
 
 // FONCTIONS ANNEXES

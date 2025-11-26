@@ -1,4 +1,4 @@
-import mongoose from 'mongoose';
+import mongoose from "mongoose";
 
 const { Schema, model } = mongoose;
 
@@ -6,13 +6,13 @@ const messageSchema = new Schema(
   {
     conversationId: {
       type: Schema.Types.ObjectId,
-      ref: 'Conversation',
+      ref: "Conversation",
       required: true,
       index: true, // on peut mettre l'index directement ici aussi
     },
     Id_sender: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
 
@@ -21,7 +21,7 @@ const messageSchema = new Schema(
       {
         userId: {
           type: Schema.Types.ObjectId,
-          ref: 'User',
+          ref: "User",
           required: true,
         },
         readAt: {
@@ -39,14 +39,14 @@ const messageSchema = new Schema(
 
     typeMessage: {
       type: String,
-      enum: ['text', 'image', 'video', 'audio', 'file', 'emojis'],
-      default: 'text',
+      enum: ["text", "image", "video", "audio", "file", "emojis"],
+      default: "text",
     },
 
     status: {
       type: String,
-      enum: ['sent', 'delivered', 'seen'],
-      default: 'sent',
+      enum: ["sent", "delivered", "seen"],
+      default: "sent",
     },
   },
   {
@@ -57,9 +57,9 @@ const messageSchema = new Schema(
 // Indexes pour les performances (les plus utiles pour un chat)
 messageSchema.index({ conversationId: 1, createdAt: -1 }); // pagination + tri chronologique
 messageSchema.index({ Id_sender: 1 });
-messageSchema.index({ 'readBy.userId': 1 });
+messageSchema.index({ "readBy.userId": 1 });
 messageSchema.index({ createdAt: -1 });
 
-const Message = model('Message', messageSchema);
+const Message = model("Message", messageSchema);
 
 export default Message;

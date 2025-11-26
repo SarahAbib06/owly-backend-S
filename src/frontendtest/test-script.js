@@ -20,324 +20,903 @@ let state = {
     typingUsers: new Map(),
     notificationPermission: null,
     isLoadingMessages: false,
-    pendingFiles: []
+    pendingFiles: [],
+    availableReactions: [],
+    currentMessageForReaction: null,
+    
+    // 🎤 ÉTAT ENREGISTREMENT VOCAL AMÉLIORÉ
+    audioRecorder: {
+        mediaRecorder: null,
+        audioChunks: [],
+        audioBlob: null,
+        audioUrl: null,
+        isRecording: false,
+        recordingTimer: null,
+        recordingStartTime: null,
+        audioDuration: 0
+    }
 };
 
 // ===== INITIALISATION =====
-document.addEventListener('DOMContentLoaded', function() {
-    if (document.getElementById('loginForm')) {
-        initLoginPage();
-    } else if (document.getElementById('contactsList')) {
-        initMessagingPage();
-    }
+document.addEventListener("DOMContentLoaded", function () {
+  if (document.getElementById("loginForm")) {
+    initLoginPage();
+  } else if (document.getElementById("contactsList")) {
+    initMessagingPage();
+  }
 });
 
 // ===== PAGE DE CONNEXION =====
 function initLoginPage() {
-    const loginForm = document.getElementById('loginForm');
-    const registerForm = document.getElementById('registerForm');
-    const otpForm = document.getElementById('otpForm');
-    const showRegisterBtn = document.getElementById('showRegister');
-    const showLoginBtn = document.getElementById('showLogin');
-    const forgotPasswordBtn = document.getElementById('forgotPassword');
-    const changeEmailBtn = document.getElementById('changeEmail');
-    const resendOtpBtn = document.getElementById('resendOtp');
+  const loginForm = document.getElementById("loginForm");
+  const registerForm = document.getElementById("registerForm");
+  const otpForm = document.getElementById("otpForm");
+  const showRegisterBtn = document.getElementById("showRegister");
+  const showLoginBtn = document.getElementById("showLogin");
+  const forgotPasswordBtn = document.getElementById("forgotPassword");
+  const changeEmailBtn = document.getElementById("changeEmail");
+  const resendOtpBtn = document.getElementById("resendOtp");
 
-    showRegisterBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        showForm('register');
-    });
+  showRegisterBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showForm("register");
+  });
 
-    showLoginBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        showForm('login');
-    });
+  showLoginBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showForm("login");
+  });
 
-    loginForm?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await handleLogin();
-    });
+  loginForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await handleLogin();
+  });
 
-    registerForm?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await handleRegister();
-    });
+  registerForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await handleRegister();
+  });
 
-    otpForm?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await verifyOtp();
-    });
+  otpForm?.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await verifyOtp();
+  });
 
-    forgotPasswordBtn?.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await handleForgotPassword();
-    });
+  forgotPasswordBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await handleForgotPassword();
+  });
 
-    resendOtpBtn?.addEventListener('click', async (e) => {
-        e.preventDefault();
-        await resendOtp();
-    });
+  resendOtpBtn?.addEventListener("click", async (e) => {
+    e.preventDefault();
+    await resendOtp();
+  });
 
-    changeEmailBtn?.addEventListener('click', (e) => {
-        e.preventDefault();
-        showForm('register');
-    });
+  changeEmailBtn?.addEventListener("click", (e) => {
+    e.preventDefault();
+    showForm("register");
+  });
 
-    checkExistingAuth();
+  checkExistingAuth();
 }
 
 function showForm(formType) {
-    document.getElementById('loginForm').classList.toggle('hidden', formType !== 'login');
-    document.getElementById('registerForm').classList.toggle('hidden', formType !== 'register');
-    document.getElementById('otpForm').classList.toggle('hidden', formType !== 'otp');
+  document
+    .getElementById("loginForm")
+    .classList.toggle("hidden", formType !== "login");
+  document
+    .getElementById("registerForm")
+    .classList.toggle("hidden", formType !== "register");
+  document
+    .getElementById("otpForm")
+    .classList.toggle("hidden", formType !== "otp");
 }
 
 async function handleLogin() {
-    const email = document.getElementById('email').value;
-    const password = document.getElementById('password').value;
-    const loginBtn = document.getElementById('loginBtn');
+  const email = document.getElementById("email").value;
+  const password = document.getElementById("password").value;
+  const loginBtn = document.getElementById("loginBtn");
 
-    if (!email || !password) {
-        showMessage('Veuillez remplir tous les champs', 'error');
-        return;
+  if (!email || !password) {
+    showMessage("Veuillez remplir tous les champs", "error");
+    return;
+  }
+
+  try {
+    setButtonLoading(loginBtn, true);
+
+    const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      if (data.requiresOtp) {
+        state.tempToken = data.debug_token;
+        document.getElementById("otpEmail").textContent = email;
+        showForm("otp");
+        showMessage("Code de vérification envoyé par email", "success");
+      } else {
+        await handleSuccessfulAuth(data);
+      }
+    } else {
+      showMessage(data.message || "Erreur de connexion", "error");
     }
-
-    try {
-        setButtonLoading(loginBtn, true);
-        
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/login`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ email, password })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            if (data.requiresOtp) {
-                state.tempToken = data.debug_token;
-                document.getElementById('otpEmail').textContent = email;
-                showForm('otp');
-                showMessage('Code de vérification envoyé par email', 'success');
-            } else {
-                await handleSuccessfulAuth(data);
-            }
-        } else {
-            showMessage(data.message || 'Erreur de connexion', 'error');
-        }
-    } catch (error) {
-        console.error('Login error:', error);
-        showMessage('Erreur de connexion au serveur', 'error');
-    } finally {
-        setButtonLoading(loginBtn, false);
-    }
+  } catch (error) {
+    console.error("Login error:", error);
+    showMessage("Erreur de connexion au serveur", "error");
+  } finally {
+    setButtonLoading(loginBtn, false);
+  }
 }
 
 async function handleRegister() {
-    const username = document.getElementById('regUsername').value;
-    const email = document.getElementById('regEmail').value;
-    const password = document.getElementById('regPassword').value;
-    const passwordConfirm = document.getElementById('regPasswordConfirm').value;
-    const registerBtn = document.getElementById('registerBtn');
+  const username = document.getElementById("regUsername").value;
+  const email = document.getElementById("regEmail").value;
+  const password = document.getElementById("regPassword").value;
+  const passwordConfirm = document.getElementById("regPasswordConfirm").value;
+  const registerBtn = document.getElementById("registerBtn");
 
-    if (!username || !email || !password || !passwordConfirm) {
-        showMessage('Veuillez remplir tous les champs', 'error');
-        return;
+  if (!username || !email || !password || !passwordConfirm) {
+    showMessage("Veuillez remplir tous les champs", "error");
+    return;
+  }
+
+  if (password !== passwordConfirm) {
+    showMessage("Les mots de passe ne correspondent pas", "error");
+    return;
+  }
+
+  try {
+    setButtonLoading(registerBtn, true);
+
+    const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/register`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, password, passwordConfirm }),
+    });
+
+    const data = await response.json();
+
+    if (response.ok) {
+      document.getElementById("otpEmail").textContent = email;
+      showForm("otp");
+      showMessage("Code de vérification envoyé par email", "success");
+    } else {
+      showMessage(data.message || "Erreur d'inscription", "error");
     }
-
-    if (password !== passwordConfirm) {
-        showMessage('Les mots de passe ne correspondent pas', 'error');
-        return;
-    }
-
-    try {
-        setButtonLoading(registerBtn, true);
-
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/register`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ username, email, password, passwordConfirm })
-        });
-
-        const data = await response.json();
-
-        if (response.ok) {
-            document.getElementById('otpEmail').textContent = email;
-            showForm('otp');
-            showMessage('Code de vérification envoyé par email', 'success');
-        } else {
-            showMessage(data.message || 'Erreur d\'inscription', 'error');
-        }
-    } catch (error) {
-        console.error('Register error:', error);
-        showMessage('Erreur de connexion au serveur', 'error');
-    } finally {
-        setButtonLoading(registerBtn, false);
-    }
+  } catch (error) {
+    console.error("Register error:", error);
+    showMessage("Erreur de connexion au serveur", "error");
+  } finally {
+    setButtonLoading(registerBtn, false);
+  }
 }
 
 async function verifyOtp() {
-    const email = document.getElementById('otpEmail').textContent;
-    const otp = document.getElementById('otpCode').value;
-    const verifyBtn = document.getElementById('verifyOtpBtn');
+  const email = document.getElementById("otpEmail").textContent;
+  const otp = document.getElementById("otpCode").value;
+  const verifyBtn = document.getElementById("verifyOtpBtn");
 
-    if (!otp) {
-        showMessage('Veuillez entrer le code de vérification', 'error');
-        return;
+  if (!otp) {
+    showMessage("Veuillez entrer le code de vérification", "error");
+    return;
+  }
+
+  try {
+    setButtonLoading(verifyBtn, true);
+
+    let response;
+    if (state.tempToken) {
+      response = await fetch(
+        `${CONFIG.BACKEND_URL}/api/auth/verify-inactivity-otp`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ token: state.tempToken, otp }),
+        }
+      );
+    } else {
+      response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/verify-otp`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, otp }),
+      });
     }
 
-    try {
-        setButtonLoading(verifyBtn, true);
+    const data = await response.json();
 
-        let response;
-        if (state.tempToken) {
-            response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/verify-inactivity-otp`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ token: state.tempToken, otp })
-            });
-        } else {
-            response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/verify-otp`, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ email, otp })
-            });
-        }
-
-        const data = await response.json();
-
-        if (response.ok) {
-            await handleSuccessfulAuth(data);
-        } else {
-            showMessage(data.message || 'Code invalide', 'error');
-        }
-    } catch (error) {
-        console.error('OTP verification error:', error);
-        showMessage('Erreur de vérification', 'error');
-    } finally {
-        setButtonLoading(verifyBtn, false);
+    if (response.ok) {
+      await handleSuccessfulAuth(data);
+    } else {
+      showMessage(data.message || "Code invalide", "error");
     }
+  } catch (error) {
+    console.error("OTP verification error:", error);
+    showMessage("Erreur de vérification", "error");
+  } finally {
+    setButtonLoading(verifyBtn, false);
+  }
 }
 
 async function resendOtp() {
-    const email = document.getElementById('otpEmail').textContent;
+  const email = document.getElementById("otpEmail").textContent;
 
-    try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/resend-otp`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ email })
-        });
+  try {
+    const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/resend-otp`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    });
 
-        const data = await response.json();
+    const data = await response.json();
 
-        if (response.ok) {
-            showMessage('Nouveau code envoyé', 'success');
-        } else {
-            showMessage(data.message || 'Erreur d\'envoi', 'error');
-        }
-    } catch (error) {
-        console.error('Resend OTP error:', error);
-        showMessage('Erreur d\'envoi', 'error');
+    if (response.ok) {
+      showMessage("Nouveau code envoyé", "success");
+    } else {
+      showMessage(data.message || "Erreur d'envoi", "error");
     }
+  } catch (error) {
+    console.error("Resend OTP error:", error);
+    showMessage("Erreur d'envoi", "error");
+  }
 }
 
 async function handleForgotPassword() {
-    const email = prompt('Entrez votre email pour réinitialiser le mot de passe:');
-    if (!email) return;
+  const email = prompt(
+    "Entrez votre email pour réinitialiser le mot de passe:"
+  );
+  if (!email) return;
 
-    try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/forgot-password`, {
-            method: 'POST',
-            headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({ email })
-        });
+  try {
+    const response = await fetch(
+      `${CONFIG.BACKEND_URL}/api/auth/forgot-password`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email }),
+      }
+    );
 
-        const data = await response.json();
+    const data = await response.json();
 
-        if (response.ok) {
-            showMessage('Instructions de réinitialisation envoyées par email', 'success');
-        } else {
-            showMessage(data.message || 'Erreur', 'error');
-        }
-    } catch (error) {
-        console.error('Forgot password error:', error);
-        showMessage('Erreur de connexion', 'error');
+    if (response.ok) {
+      showMessage(
+        "Instructions de réinitialisation envoyées par email",
+        "success"
+      );
+    } else {
+      showMessage(data.message || "Erreur", "error");
     }
+  } catch (error) {
+    console.error("Forgot password error:", error);
+    showMessage("Erreur de connexion", "error");
+  }
 }
 
 async function handleSuccessfulAuth(authData) {
-    state.token = authData.data?.token || authData.token;
-    state.user = authData.data?.user || {
-        id: authData.id,
-        username: authData.username,
-        email: authData.email
-    };
+  state.token = authData.data?.token || authData.token;
+  state.user = authData.data?.user || {
+    id: authData.id,
+    username: authData.username,
+    email: authData.email,
+  };
 
-    localStorage.setItem('owly_token', state.token);
-    localStorage.setItem('owly_user', JSON.stringify(state.user));
+  localStorage.setItem("owly_token", state.token);
+  localStorage.setItem("owly_user", JSON.stringify(state.user));
 
-    showMessage('Connexion réussie! Redirection...', 'success');
-    
-    setTimeout(() => {
-        window.location.href = 'conversations.html';
-    }, 1000);
+  showMessage("Connexion réussie! Redirection...", "success");
+
+  setTimeout(() => {
+    window.location.href = "conversations.html";
+  }, 1000);
 }
 
 function checkExistingAuth() {
-    const token = localStorage.getItem('owly_token');
-    const userData = localStorage.getItem('owly_user');
+  const token = localStorage.getItem("owly_token");
+  const userData = localStorage.getItem("owly_user");
 
-    if (token && userData) {
-        state.token = token;
-        state.user = JSON.parse(userData);
-        
-        if (window.location.pathname.includes('login.html')) {
-            window.location.href = 'conversations.html';
-        }
+  if (token && userData) {
+    state.token = token;
+    state.user = JSON.parse(userData);
+
+    if (window.location.pathname.includes("login.html")) {
+      window.location.href = "conversations.html";
     }
+  }
 }
 
 // ===== PAGE DE MESSAGERIE =====
 function initMessagingPage() {
-    if (!checkAuth()) return;
+  if (!checkAuth()) return;
 
-    initUserPanel();
-    initConversations();
-    initMessageInput();
-    initFileUploads();
-    initWebSocket();
-    initTestButtons();
-    initModals();
-    initGroupCreation();
-    
-    loadInitialData();
+  initUserPanel();
+  initConversations();
+  initMessageInput();
+  initFileUploads();
+  initWebSocket();
+  initTestButtons();
+  initModals();
+  initGroupCreation();
+  initReactionsSystem();
+  initUserProfileSystem();
+  initVoiceRecording();
+  
+  loadInitialData();
 }
 
 function checkAuth() {
-    const token = localStorage.getItem('owly_token');
-    const userData = localStorage.getItem('owly_user');
+  const token = localStorage.getItem("owly_token");
+  const userData = localStorage.getItem("owly_user");
 
-    if (!token || !userData) {
-        window.location.href = 'login.html';
-        return false;
-    }
+  if (!token || !userData) {
+    window.location.href = "login.html";
+    return false;
+  }
 
-    state.token = token;
-    state.user = JSON.parse(userData);
-    return true;
+  state.token = token;
+  state.user = JSON.parse(userData);
+  return true;
 }
 
 function initUserPanel() {
-    if (state.user) {
-        document.getElementById('userName').textContent = state.user.username;
-        document.getElementById('userEmail').textContent = state.user.email;
-        document.getElementById('userAvatar').textContent = state.user.username.charAt(0).toUpperCase();
-    }
+  if (state.user) {
+    document.getElementById("userName").textContent = state.user.username;
+    document.getElementById("userEmail").textContent = state.user.email;
+    document.getElementById("userAvatar").textContent = state.user.username
+      .charAt(0)
+      .toUpperCase();
+  }
 }
 
 function initConversations() {
-    console.log('✅ Conversations initialisées');
+  console.log("✅ Conversations initialisées");
+}
+
+function initReactionsSystem() {
+    console.log("🎯 Initialisation du système de réactions...");
+    loadAvailableReactions();
+    
+    document.getElementById('reactionsBtn')?.addEventListener('click', showReactionsForCurrentConversation);
+    document.getElementById('closeReactionsModal')?.addEventListener('click', closeReactionsModal);
+    document.getElementById('testReactionBtn')?.addEventListener('click', testReactionSystem);
+    
+    document.getElementById('reactionsModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'reactionsModal') {
+            closeReactionsModal();
+        }
+    });
+    
+    console.log("✅ Système de réactions initialisé");
+}
+
+async function loadAvailableReactions() {
+    try {
+        console.log("🔄 Chargement des réactions disponibles...");
+        
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/reactions/available`, {
+            headers: { 'Authorization': `Bearer ${state.token}` }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            state.availableReactions = data.reactions || [];
+            console.log("✅ Réactions chargées:", state.availableReactions);
+            updateReactionsModal();
+        } else {
+            console.warn("⚠️ Impossible de charger les réactions, utilisation des valeurs par défaut");
+            state.availableReactions = ["❤️", "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "👏", "💯"];
+        }
+    } catch (error) {
+        console.error("❌ Erreur chargement réactions:", error);
+        state.availableReactions = ["❤️", "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "👏", "💯"];
+    }
+}
+
+function updateReactionsModal() {
+    const reactionsGrid = document.getElementById('reactionsGrid');
+    if (!reactionsGrid) return;
+    
+    reactionsGrid.innerHTML = '';
+    
+    if (state.availableReactions.length === 0) {
+        reactionsGrid.innerHTML = '<div class="no-reactions">Aucune réaction disponible</div>';
+        return;
+    }
+    
+    state.availableReactions.forEach(emoji => {
+        const button = document.createElement('button');
+        button.className = 'reaction-btn';
+        button.textContent = emoji;
+        button.dataset.emoji = emoji;
+        button.title = `Réagir avec ${emoji}`;
+        
+        button.addEventListener('click', () => {
+            addReactionToCurrentMessage(emoji);
+        });
+        
+        reactionsGrid.appendChild(button);
+    });
+}
+
+function showReactionsForCurrentConversation() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez d'abord une conversation", "warning");
+        return;
+    }
+    showReactionsModal();
+}
+
+function showReactionsModal(messageId = null) {
+    state.currentMessageForReaction = messageId;
+    const modal = document.getElementById('reactionsModal');
+    modal.style.display = 'flex';
+    updateReactionsModal();
+}
+
+function closeReactionsModal() {
+    const modal = document.getElementById('reactionsModal');
+    modal.style.display = 'none';
+    state.currentMessageForReaction = null;
+}
+
+async function addReactionToCurrentMessage(emoji) {
+    if (!state.currentMessageForReaction) {
+        showMessage("Aucun message sélectionné pour réagir", "warning");
+        closeReactionsModal();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/reactions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                messageId: state.currentMessageForReaction,
+                emoji: emoji
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            console.log("✅ Réaction ajoutée:", data);
+            showMessage(`Réaction ${emoji} ajoutée!`, "success");
+            
+            if (state.currentConversation) {
+                await loadMessages(state.currentConversation._id, false);
+            }
+        } else {
+            showMessage(data.error || "Erreur lors de l'ajout de la réaction", "error");
+        }
+    } catch (error) {
+        console.error("❌ Erreur ajout réaction:", error);
+        showMessage("Erreur de connexion", "error");
+    }
+    
+    closeReactionsModal();
+}
+
+function testReactionSystem() {
+    if (!state.currentConversation) {
+        showMessage("Ouvrez une conversation pour tester les réactions", "warning");
+        return;
+    }
+    
+    const messages = state.messages.get(state.currentConversation._id) || [];
+    if (messages.length === 0) {
+        showMessage("Envoyez un message pour tester les réactions", "warning");
+        return;
+    }
+    
+    const testMessage = messages[0];
+    showReactionsModal(testMessage._id);
+    showMessage("Cliquez sur une réaction pour tester!", "info");
+}
+
+function initUserProfileSystem() {
+    console.log("🎯 Initialisation du système de profil...");
+    
+    document.getElementById('infoBtn')?.addEventListener('click', showUserProfile);
+    document.getElementById('closeProfileModal')?.addEventListener('click', closeUserProfile);
+    document.getElementById('blockUserBtn')?.addEventListener('click', blockCurrentUser);
+    document.getElementById('unblockUserBtn')?.addEventListener('click', unblockCurrentUser);
+    
+    document.getElementById('userProfileModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'userProfileModal') {
+            closeUserProfile();
+        }
+    });
+    
+    console.log("✅ Système de profil initialisé");
+}
+
+function showUserProfile() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez une conversation pour voir le profil", "warning");
+        return;
+    }
+    
+    const modal = document.getElementById('userProfileModal');
+    const otherUser = getOtherParticipant();
+    
+    if (otherUser) {
+        document.getElementById('profileAvatar').textContent = otherUser.username?.charAt(0)?.toUpperCase() || 'U';
+        document.getElementById('profileUsername').textContent = otherUser.username || 'Utilisateur';
+        document.getElementById('profileEmail').textContent = otherUser.email || 'Email non disponible';
+        document.getElementById('profileStatus').textContent = '🟢 En ligne';
+    }
+    
+    checkBlockStatus().then(isBlocked => {
+        document.getElementById('blockUserBtn').style.display = isBlocked ? 'none' : 'block';
+        document.getElementById('unblockUserBtn').style.display = isBlocked ? 'block' : 'none';
+    });
+    
+    modal.style.display = 'flex';
+}
+
+function closeUserProfile() {
+    const modal = document.getElementById('userProfileModal');
+    modal.style.display = 'none';
+}
+
+async function blockCurrentUser() {
+    const otherUser = getOtherParticipant();
+    if (!otherUser) return;
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/relations/block`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                blockedUserId: otherUser._id
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage("Utilisateur bloqué avec succès", "success");
+            document.getElementById('blockUserBtn').style.display = 'none';
+            document.getElementById('unblockUserBtn').style.display = 'block';
+        } else {
+            showMessage(data.error || "Erreur lors du blocage", "error");
+        }
+    } catch (error) {
+        console.error("❌ Erreur blocage:", error);
+        showMessage("Erreur de connexion", "error");
+    }
+}
+
+async function unblockCurrentUser() {
+    const otherUser = getOtherParticipant();
+    if (!otherUser) return;
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/relations/unblock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                blockedUserId: otherUser._id
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage("Utilisateur débloqué avec succès", "success");
+            document.getElementById('blockUserBtn').style.display = 'block';
+            document.getElementById('unblockUserBtn').style.display = 'none';
+        } else {
+            showMessage(data.error || "Erreur lors du déblocage", "error");
+        }
+    } catch (error) {
+        console.error("❌ Erreur déblocage:", error);
+        showMessage("Erreur de connexion", "error");
+    }
+}
+
+async function checkBlockStatus() {
+    const otherUser = getOtherParticipant();
+    if (!otherUser) return false;
+    
+    try {
+        return false;
+    } catch (error) {
+        console.error("❌ Erreur vérification blocage:", error);
+        return false;
+    }
+}
+
+function getOtherParticipant() {
+    if (!state.currentConversation || !state.currentConversation.participants) return null;
+    
+    return state.currentConversation.participants.find(
+        p => p._id !== state.user.id
+    );
+}
+
+// 🎤 SYSTÈME D'ENREGISTREMENT VOCAL ADAPTÉ AU BACKEND
+function initVoiceRecording() {
+    console.log("🎤 Initialisation enregistrement vocal...");
+    
+    const voiceBtn = document.getElementById('voiceMessageBtn');
+    const startBtn = document.getElementById('startRecordBtn');
+    const stopBtn = document.getElementById('stopRecordBtn');
+    const playBtn = document.getElementById('playRecordBtn');
+    const sendBtn = document.getElementById('sendRecordBtn');
+    const closeBtn = document.getElementById('closeVoiceModal');
+    
+    voiceBtn?.addEventListener('click', showVoiceRecordModal);
+    startBtn?.addEventListener('click', startRecording);
+    stopBtn?.addEventListener('click', stopRecording);
+    playBtn?.addEventListener('click', playRecording);
+    sendBtn?.addEventListener('click', sendVoiceMessage);
+    closeBtn?.addEventListener('click', closeVoiceRecordModal);
+    
+    console.log("✅ Enregistrement vocal initialisé");
+}
+
+// 🎤 AFFICHER LE MODAL D'ENREGISTREMENT
+async function showVoiceRecordModal() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez une conversation d'abord", "warning");
+        return;
+    }
+    
+    try {
+        console.log("🎤 Demande d'accès au microphone...");
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 44100
+            } 
+        });
+        
+        state.audioRecorder.mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus'
+        });
+        state.audioRecorder.audioChunks = [];
+        
+        state.audioRecorder.mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                state.audioRecorder.audioChunks.push(event.data);
+            }
+        };
+        
+        state.audioRecorder.mediaRecorder.onstop = () => {
+            state.audioRecorder.audioBlob = new Blob(state.audioRecorder.audioChunks, { 
+                type: 'audio/webm;codecs=opus'
+            });
+            state.audioRecorder.audioUrl = URL.createObjectURL(state.audioRecorder.audioBlob);
+            
+            document.getElementById('playRecordBtn').disabled = false;
+            document.getElementById('sendRecordBtn').disabled = false;
+            document.getElementById('recordingStatus').textContent = '✅ Enregistrement terminé';
+            document.getElementById('recordingStatus').style.color = '#4caf50';
+            
+            // Calculer la durée réelle
+            const duration = Math.round((Date.now() - state.audioRecorder.recordingStartTime) / 1000);
+            state.audioRecorder.audioDuration = duration;
+            
+            console.log(`🎤 Enregistrement terminé - Durée: ${duration}s - Taille: ${state.audioRecorder.audioBlob.size} bytes`);
+        };
+        
+        document.getElementById('voiceRecordModal').style.display = 'flex';
+        resetRecordingUI();
+        
+        console.log("✅ Microphone accessible, modal ouvert");
+        
+    } catch (error) {
+        console.error('❌ Erreur accès microphone:', error);
+        showMessage('Accès au microphone refusé ou non disponible', 'error');
+    }
+}
+
+// 🎤 DÉMARRER L'ENREGISTREMENT
+function startRecording() {
+    if (!state.audioRecorder.mediaRecorder) return;
+    
+    state.audioRecorder.audioChunks = [];
+    state.audioRecorder.isRecording = true;
+    state.audioRecorder.recordingStartTime = Date.now();
+    state.audioRecorder.audioDuration = 0;
+    
+    state.audioRecorder.mediaRecorder.start(100);
+    
+    document.getElementById('startRecordBtn').disabled = true;
+    document.getElementById('stopRecordBtn').disabled = false;
+    document.getElementById('recordingStatus').textContent = '🔴 Enregistrement en cours...';
+    document.getElementById('recordingStatus').style.color = '#ff4444';
+    
+    startRecordingTimer();
+    
+    console.log("🎤 Enregistrement démarré");
+}
+
+// 🎤 ARRÊTER L'ENREGISTREMENT
+function stopRecording() {
+    if (!state.audioRecorder.mediaRecorder || !state.audioRecorder.isRecording) return;
+    
+    state.audioRecorder.mediaRecorder.stop();
+    state.audioRecorder.isRecording = false;
+    
+    document.getElementById('startRecordBtn').disabled = false;
+    document.getElementById('stopRecordBtn').disabled = true;
+    
+    stopRecordingTimer();
+    
+    console.log("🎤 Enregistrement arrêté");
+}
+
+// 🎤 ÉCOUTER L'ENREGISTREMENT
+function playRecording() {
+    if (!state.audioRecorder.audioUrl) return;
+    
+    const audio = new Audio(state.audioRecorder.audioUrl);
+    
+    document.getElementById('recordingStatus').textContent = '▶️ Lecture en cours...';
+    document.getElementById('recordingStatus').style.color = '#2196f3';
+    
+    audio.play().catch(error => {
+        console.error('❌ Erreur lecture audio:', error);
+        showMessage('Erreur lors de la lecture', 'error');
+    });
+    
+    audio.onended = () => {
+        document.getElementById('recordingStatus').textContent = '✅ Enregistrement terminé';
+        document.getElementById('recordingStatus').style.color = '#4caf50';
+    };
+    
+    console.log("🎤 Lecture de l'enregistrement");
+}
+
+// 🎤 ENVOYER LE MESSAGE VOCAL - ADAPTÉ AU BACKEND
+async function sendVoiceMessage() {
+    if (!state.audioRecorder.audioBlob || !state.currentConversation) {
+        showMessage('Aucun enregistrement à envoyer', 'error');
+        return;
+    }
+    
+    const sendBtn = document.getElementById('sendRecordBtn');
+    
+    try {
+        setButtonLoading(sendBtn, true);
+        console.log("🎤 Envoi du message vocal via API...");
+        
+        // Créer un FormData pour l'envoi multipart
+        const formData = new FormData();
+        
+        // Ajouter le fichier audio
+        const audioFile = new File([state.audioRecorder.audioBlob], 
+            `voice_message_${Date.now()}.webm`, {
+            type: 'audio/webm'
+        });
+        formData.append('audio', audioFile);
+        
+        // Ajouter les métadonnées REQUISES par votre backend
+        formData.append('conversationId', state.currentConversation._id);
+        
+        console.log("📤 Données envoyées:", {
+            conversationId: state.currentConversation._id,
+            duration: state.audioRecorder.audioDuration,
+            fileSize: audioFile.size
+        });
+
+        // ENVOI VIA L'API HTTP
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/audio/send`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log("✅ Message audio envoyé avec succès:", data);
+            showMessage('Message vocal envoyé!', 'success');
+            
+            // Fermer le modal
+            closeVoiceRecordModal();
+            
+            // Recharger les messages pour afficher le nouveau message audio
+            if (state.currentConversation) {
+                await loadMessages(state.currentConversation._id, false);
+            }
+        } else {
+            throw new Error(data.message || data.error || 'Erreur d\'envoi');
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur envoi message vocal:', error);
+        showMessage(`Erreur: ${error.message}`, 'error');
+    } finally {
+        setButtonLoading(sendBtn, false);
+    }
+}
+
+// 🎤 TIMER POUR L'ENREGISTREMENT
+function startRecordingTimer() {
+    state.audioRecorder.recordingTimer = setInterval(() => {
+        const elapsed = Date.now() - state.audioRecorder.recordingStartTime;
+        const seconds = Math.floor(elapsed / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const displaySeconds = seconds % 60;
+        
+        document.getElementById('recordingTime').textContent = 
+            `${minutes.toString().padStart(2, '0')}:${displaySeconds.toString().padStart(2, '0')}`;
+            
+        // Arrêter automatiquement après 5 minutes
+        if (seconds >= 300) {
+            stopRecording();
+            showMessage('Enregistrement automatiquement arrêté après 5 minutes', 'info');
+        }
+    }, 1000);
+}
+
+function stopRecordingTimer() {
+    if (state.audioRecorder.recordingTimer) {
+        clearInterval(state.audioRecorder.recordingTimer);
+    }
+}
+
+// 🎤 RÉINITIALISER L'UI
+function resetRecordingUI() {
+    document.getElementById('recordingTime').textContent = '00:00';
+    document.getElementById('recordingStatus').textContent = 'Prêt à enregistrer';
+    document.getElementById('recordingStatus').style.color = '#f9ee34';
+    
+    document.getElementById('startRecordBtn').disabled = false;
+    document.getElementById('stopRecordBtn').disabled = true;
+    document.getElementById('playRecordBtn').disabled = true;
+    document.getElementById('sendRecordBtn').disabled = true;
+}
+
+// 🎤 FERMER LE MODAL
+function closeVoiceRecordModal() {
+    if (state.audioRecorder.isRecording) {
+        stopRecording();
+    }
+    
+    if (state.audioRecorder.mediaRecorder && state.audioRecorder.mediaRecorder.stream) {
+        state.audioRecorder.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    if (state.audioRecorder.audioUrl) {
+        URL.revokeObjectURL(state.audioRecorder.audioUrl);
+    }
+    
+    state.audioRecorder = {
+        mediaRecorder: null,
+        audioChunks: [],
+        audioBlob: null,
+        audioUrl: null,
+        isRecording: false,
+        recordingTimer: null,
+        recordingStartTime: null,
+        audioDuration: 0
+    };
+    
+    document.getElementById('voiceRecordModal').style.display = 'none';
+    console.log("🎤 Modal enregistrement fermé");
 }
 
 function initFileUploads() {
@@ -407,6 +986,22 @@ function showPreviewModal(fileData) {
         case 'video':
             content = `<video controls><source src="${fileData.previewUrl}" type="${fileData.file.type}"></video>`;
             break;
+        case 'audio':
+            content = `
+                <div class="audio-preview-large">
+                    <div class="audio-icon">🎵</div>
+                    <div class="audio-info">
+                        <div class="audio-name">${fileData.file.name}</div>
+                        <div class="audio-size">${formatFileSize(fileData.file.size)}</div>
+                        <div class="audio-type">Fichier audio</div>
+                    </div>
+                    <audio controls class="audio-player">
+                        <source src="${fileData.previewUrl}" type="${fileData.file.type}">
+                        Votre navigateur ne supporte pas la lecture audio.
+                    </audio>
+                </div>
+            `;
+            break;
         case 'file':
             content = `
                 <div class="file-preview-large">
@@ -452,10 +1047,8 @@ async function sendFileMessage() {
         setButtonLoading(sendBtn, true);
         sendStatus.textContent = 'Envoi en cours...';
 
-        // Convertir le fichier en base64
         const base64 = await fileToBase64(fileData.file);
 
-        // Préparer les données POUR TON BACKEND
         const messageData = {
             conversationId: state.currentConversation._id,
             Id_receiver: getOtherParticipantId(),
@@ -466,30 +1059,28 @@ async function sendFileMessage() {
             originalName: fileData.file.name
         };
 
-        // UTILISER UNIQUEMENT WEBSOCKET (comme ton backend est configuré)
-        if (state.socket && state.isConnected) {
-            let eventName;
-            switch (fileData.type) {
-                case 'image':
-                    eventName = 'send_image_message';
-                    break;
-                case 'video':
-                    eventName = 'send_video_message';
-                    break;
-                case 'file':
-                    eventName = 'send_file_message';
-                    break;
-            }
+        let eventName;
+        switch (fileData.type) {
+            case 'image':
+                eventName = 'send_image_message';
+                break;
+            case 'video':
+                eventName = 'send_video_message';
+                break;
+            case 'audio':
+                eventName = 'send_audio_message';
+                break;
+            case 'file':
+                eventName = 'send_file_message';
+                break;
+        }
 
+        if (state.socket && state.isConnected) {
             state.socket.emit(eventName, messageData);
             sendStatus.textContent = 'Envoi...';
-            
-            // Fermer le modal immédiatement
             closePreviewModal();
             showMessage('Fichier en cours d\'envoi...', 'success');
-            
         } else {
-            // 🆕 SOLUTION SIMPLE : DEMANDER À L'UTILISATEUR
             closePreviewModal();
             showMessage('WebSocket déconnecté - Recharge la page et réessaye', 'error');
         }
@@ -531,109 +1122,118 @@ function getOtherParticipantId() {
 }
 
 async function loadInitialData() {
-    showLoading(true);
-    
-    try {
-        await Promise.all([
-            loadConversations(),
-            loadUnreadCounts()
-        ]);
-    } catch (error) {
-        console.error('Error loading initial data:', error);
-        showMessage('Erreur de chargement des données', 'error');
-    } finally {
-        showLoading(false);
-    }
+  showLoading(true);
+
+  try {
+    await Promise.all([loadConversations(), loadUnreadCounts()]);
+    await loadAvailableReactions();
+  } catch (error) {
+    console.error("Error loading initial data:", error);
+    showMessage("Erreur de chargement des données", "error");
+  } finally {
+    showLoading(false);
+  }
 }
 
 async function loadConversations() {
-    try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/conversations`, {
-            headers: {'Authorization': `Bearer ${state.token}`}
-        });
+  try {
+    const response = await fetch(`${CONFIG.BACKEND_URL}/api/conversations`, {
+      headers: { Authorization: `Bearer ${state.token}` },
+    });
 
-        const data = await response.json();
+    const data = await response.json();
 
-        if (response.ok && data.success) {
-            state.conversations = data.conversations || [];
-            renderConversations();
-        } else {
-            throw new Error(data.error || 'Erreur de chargement des conversations');
-        }
-    } catch (error) {
-        console.error('Load conversations error:', error);
-        throw error;
+    if (response.ok && data.success) {
+      state.conversations = data.conversations || [];
+      renderConversations();
+    } else {
+      throw new Error(data.error || "Erreur de chargement des conversations");
     }
+  } catch (error) {
+    console.error("Load conversations error:", error);
+    throw error;
+  }
 }
 
 function renderConversations() {
-    const contactsList = document.getElementById('contactsList');
-    const conversationsContainer = contactsList.querySelector('.contacts-list') || contactsList;
-    
-    const existingHeader = conversationsContainer.querySelector('.contacts-header');
-    conversationsContainer.innerHTML = '';
-    
-    if (existingHeader) {
-        conversationsContainer.appendChild(existingHeader);
-    } else {
-        const header = document.createElement('div');
-        header.className = 'contacts-header';
-        header.innerHTML = '<h3>Conversations</h3><span class="unread-count" id="totalUnread">0</span>';
-        conversationsContainer.appendChild(header);
-    }
+  const contactsList = document.getElementById("contactsList");
+  const conversationsContainer =
+    contactsList.querySelector(".contacts-list") || contactsList;
 
-    if (state.conversations.length === 0) {
-        const emptyState = document.createElement('div');
-        emptyState.className = 'empty-state';
-        emptyState.innerHTML = `
+  const existingHeader =
+    conversationsContainer.querySelector(".contacts-header");
+  conversationsContainer.innerHTML = "";
+
+  if (existingHeader) {
+    conversationsContainer.appendChild(existingHeader);
+  } else {
+    const header = document.createElement("div");
+    header.className = "contacts-header";
+    header.innerHTML =
+      '<h3>Conversations</h3><span class="unread-count" id="totalUnread">0</span>';
+    conversationsContainer.appendChild(header);
+  }
+
+  if (state.conversations.length === 0) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state";
+    emptyState.innerHTML = `
             <div style="text-align: center; padding: 40px 20px; color: #666;">
                 <p>Aucune conversation</p>
                 <p style="font-size: 12px; margin-top: 10px;">Commencez une nouvelle discussion</p>
             </div>
         `;
-        conversationsContainer.appendChild(emptyState);
-        return;
-    }
+    conversationsContainer.appendChild(emptyState);
+    return;
+  }
 
-    const sortedConversations = state.conversations.sort((a, b) => {
-        const dateA = new Date(a.lastMessageAt || a.createdAt);
-        const dateB = new Date(b.lastMessageAt || b.createdAt);
-        return dateB - dateA;
-    });
+  const sortedConversations = state.conversations.sort((a, b) => {
+    const dateA = new Date(a.lastMessageAt || a.createdAt);
+    const dateB = new Date(b.lastMessageAt || b.createdAt);
+    return dateB - dateA;
+  });
 
-    sortedConversations.forEach(conversation => {
-        const contactElement = createConversationElement(conversation);
-        conversationsContainer.appendChild(contactElement);
-    });
+  sortedConversations.forEach((conversation) => {
+    const contactElement = createConversationElement(conversation);
+    conversationsContainer.appendChild(contactElement);
+  });
 }
 
 function createConversationElement(conversation) {
-    const element = document.createElement('div');
-    element.className = 'contact';
-    element.dataset.conversationId = conversation._id;
-    
-    const isGroup = conversation.type === 'group';
-    const displayName = conversation.name || 'Conversation';
-    const lastMessage = getLastMessagePreview(conversation);
-    const unreadCount = conversation.unreadCount || 0;
-    
-    const avatarText = isGroup ? '👥' : displayName.charAt(0).toUpperCase();
-    
-    element.innerHTML = `
+  const element = document.createElement("div");
+  element.className = "contact";
+  element.dataset.conversationId = conversation._id;
+
+  const isGroup = conversation.type === "group";
+  const displayName = conversation.name || "Conversation";
+  const lastMessage = getLastMessagePreview(conversation);
+  const unreadCount = conversation.unreadCount || 0;
+
+  const avatarText = isGroup ? "👥" : displayName.charAt(0).toUpperCase();
+
+  element.innerHTML = `
         <div class="contact-avatar online">${avatarText}</div>
         <div class="contact-info">
-            <h3>${displayName} ${isGroup ? '<span class="group-badge">G</span>' : ''}</h3>
+            <h3>${displayName} ${
+    isGroup ? '<span class="group-badge">G</span>' : ""
+  }</h3>
             <p class="last-message">${lastMessage}</p>
         </div>
         <div class="conversation-meta">
-            <div class="conversation-time">${formatTime(conversation.lastMessageAt)}</div>
-            ${unreadCount > 0 ? `<div class="conversation-badge">${unreadCount}</div>` : ''}
+            <div class="conversation-time">${formatTime(
+              conversation.lastMessageAt
+            )}</div>
+            ${
+              unreadCount > 0
+                ? `<div class="conversation-badge">${unreadCount}</div>`
+                : ""
+            }
         </div>
     `;
 
-    element.addEventListener('click', () => selectConversation(conversation));
-    
-    return element;
+  element.addEventListener("click", () => selectConversation(conversation));
+
+  return element;
 }
 
 function getLastMessagePreview(conversation) {
@@ -641,6 +1241,13 @@ function getLastMessagePreview(conversation) {
         return 'Aucun message';
     }
     
+    // 🎤 ADAPTÉ AU BACKEND : Détection améliorée des messages audio
+    if (conversation.lastMessageType === 'audio' || 
+        conversation.lastMessage.includes('Message audio') ||
+        (conversation.lastMessage.includes('res.cloudinary.com') && 
+         (conversation.lastMessage.includes('/audio_messages/') || conversation.lastMessage.includes('.mp3')))) {
+        return '🎤 Message audio';
+    }
     if (conversation.lastMessageType === 'image') {
         return '📷 Image';
     }
@@ -650,9 +1257,6 @@ function getLastMessagePreview(conversation) {
     if (conversation.lastMessageType === 'file') {
         return '📁 Fichier';
     }
-    if (conversation.lastMessage.includes('Message audio')) {
-        return '🎤 Message audio';
-    }
     
     return conversation.lastMessage.length > 30 ? 
         conversation.lastMessage.substring(0, 30) + '...' : 
@@ -660,84 +1264,116 @@ function getLastMessagePreview(conversation) {
 }
 
 async function selectConversation(conversation) {
-    if (state.isLoadingMessages) return;
-    
-    document.querySelectorAll('.contact').forEach(c => c.classList.remove('active'));
-    document.querySelector(`[data-conversation-id="${conversation._id}"]`).classList.add('active');
-    
-    state.currentConversation = conversation;
-    
-    updateChatHeader(conversation);
-    
-    document.getElementById('messageInputContainer').style.display = 'flex';
-    document.getElementById('welcomeMessage').style.display = 'none';
-    document.getElementById('messagesList').style.display = 'block';
-    
-    await loadMessages(conversation._id);
-    
-    await markAsRead(conversation._id);
-    
-    if (state.socket) {
-        state.socket.emit('join_conversation', conversation._id);
-    }
+  if (state.isLoadingMessages) return;
+
+  document
+    .querySelectorAll(".contact")
+    .forEach((c) => c.classList.remove("active"));
+  document
+    .querySelector(`[data-conversation-id="${conversation._id}"]`)
+    .classList.add("active");
+
+  state.currentConversation = conversation;
+
+  updateChatHeader(conversation);
+
+  document.getElementById("messageInputContainer").style.display = "flex";
+  document.getElementById("welcomeMessage").style.display = "none";
+  document.getElementById("messagesList").style.display = "block";
+
+  await loadMessages(conversation._id);
+
+  await markAsRead(conversation._id);
+
+  if (state.socket) {
+    state.socket.emit("join_conversation", conversation._id);
+  }
 }
 
 function updateChatHeader(conversation) {
-    const isGroup = conversation.type === 'group';
-    const displayName = conversation.name || 'Conversation';
-    
-    document.getElementById('chatHeader').style.display = 'flex';
-    document.getElementById('chatContactName').textContent = displayName;
-    document.getElementById('chatAvatar').textContent = isGroup ? '👥' : displayName.charAt(0).toUpperCase();
-    document.getElementById('chatAvatar').className = `chat-contact-avatar online`;
-    document.getElementById('chatContactStatus').textContent = isGroup ? 
-        `Groupe • ${conversation.participantCount || 0} membres` : 
-        '🟢 En ligne';
+  const isGroup = conversation.type === "group";
+  const displayName = conversation.name || "Conversation";
+
+  document.getElementById("chatHeader").style.display = "flex";
+  document.getElementById("chatContactName").textContent = displayName;
+  document.getElementById("chatAvatar").textContent = isGroup
+    ? "👥"
+    : displayName.charAt(0).toUpperCase();
+  document.getElementById(
+    "chatAvatar"
+  ).className = `chat-contact-avatar online`;
+  document.getElementById("chatContactStatus").textContent = isGroup
+    ? `Groupe • ${conversation.participantCount || 0} membres`
+    : "🟢 En ligne";
 }
 
 async function loadMessages(conversationId, showLoader = true) {
-    if (state.isLoadingMessages) return;
-    
-    state.isLoadingMessages = true;
-    
+  if (state.isLoadingMessages) return;
+
+  state.isLoadingMessages = true;
+
+  if (showLoader) {
+    showMessageLoading(true);
+  }
+
+  try {
+    console.log(
+      "📨 Chargement des messages pour la conversation:",
+      conversationId
+    );
+
+    const response = await fetch(
+      `${CONFIG.BACKEND_URL}/api/messages/${conversationId}?limit=100`,
+      {
+        headers: { Authorization: `Bearer ${state.token}` },
+      }
+    );
+
+    const data = await response.json();
+
+    if (response.ok && data.success) {
+      console.log("✅ Messages reçus de l'API:", data.messages.length);
+
+      // 🎤 ADAPTATION : Vérifier la structure des messages audio
+      const processedMessages = data.messages.map(message => {
+        // Si c'est un message audio mais que content est du texte, utiliser audioUrl
+        if (message.typeMessage === 'audio' && message.audioUrl && message.content.includes('Message audio')) {
+          return {
+            ...message,
+            content: message.audioUrl // Remplacer par l'URL audio réelle
+          };
+        }
+        return message;
+      });
+
+      const sortedMessages = processedMessages.sort((a, b) => {
+        const dateA = new Date(a.createdAt || a.timestamp || a.date);
+        const dateB = new Date(b.createdAt || b.timestamp || b.date);
+        return dateA - dateB;
+      });
+
+      state.messages.set(conversationId, sortedMessages);
+      renderMessages(conversationId);
+    } else {
+      throw new Error(data.error || "Erreur de chargement des messages");
+    }
+  } catch (error) {
+    console.error("Load messages error:", error);
+    showMessage("Erreur de chargement des messages", "error");
+  } finally {
+    state.isLoadingMessages = false;
     if (showLoader) {
-        showMessageLoading(true);
+      showMessageLoading(false);
     }
-    
-    try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/${conversationId}?limit=100`, {
-            headers: {'Authorization': `Bearer ${state.token}`}
-        });
-
-        const data = await response.json();
-
-        if (response.ok && data.success) {
-            const sortedMessages = data.messages.sort((a, b) => {
-                const dateA = new Date(a.createdAt || a.timestamp || a.date);
-                const dateB = new Date(b.createdAt || b.timestamp || b.date);
-                return dateA - dateB;
-            });
-            
-            state.messages.set(conversationId, sortedMessages);
-            renderMessages(conversationId);
-        } else {
-            throw new Error(data.error || 'Erreur de chargement des messages');
-        }
-    } catch (error) {
-        console.error('Load messages error:', error);
-        showMessage('Erreur de chargement des messages', 'error');
-    } finally {
-        state.isLoadingMessages = false;
-        if (showLoader) {
-            showMessageLoading(false);
-        }
-    }
+  }
 }
 
 function renderMessages(conversationId) {
     const messagesList = document.getElementById('messagesList');
     const messages = state.messages.get(conversationId) || [];
     
+    console.log("🔍 Affichage de", messages.length, "messages dans l'ordre chronologique");
+
     messagesList.innerHTML = '';
     
     if (messages.length === 0) {
@@ -760,9 +1396,10 @@ function renderMessages(conversationId) {
 
 function createMessageElement(message) {
     const element = document.createElement('div');
-    
     const isSent = isMyMessage(message);
     
+    console.log(`🎯 Création message: "${message.content?.substring(0, 50)}..." - type: ${message.typeMessage} - estDeMoi: ${isSent}`, message);
+
     element.className = `message ${isSent ? 'sent' : 'received'} ${message.typeMessage}-message`;
     element.dataset.messageId = message._id;
     
@@ -771,49 +1408,112 @@ function createMessageElement(message) {
     
     let contentHtml = '';
     
-    switch (message.typeMessage) {
-        case 'image':
+    // 🎤 ADAPTÉ AU BACKEND : Gestion des messages audio
+    if (message.typeMessage === 'audio' || 
+        (message.content && message.content.includes('res.cloudinary.com') && message.content.includes('/audio_messages/')) ||
+        message.audioUrl) {
+        
+        console.log("🎵 Message audio détecté - Structure:", message);
+        
+        // 🎯 DÉTERMINER LA BONNE URL AUDIO
+        let audioUrl = message.audioUrl || message.content;
+        let audioDuration = message.audioDuration || message.fileInfo?.audioDuration || '0:09';
+        
+        // 🎯 CORRECTION CLOUDINARY : S'assurer que c'est une URL valide
+        if (audioUrl && audioUrl.includes('res.cloudinary.com')) {
+            // Vérifier que c'est bien une URL raw/upload pour les fichiers audio
+            if (audioUrl.includes('/image/upload/')) {
+                audioUrl = audioUrl.replace('/image/upload/', '/raw/upload/');
+            }
+            // Ajouter des paramètres pour forcer le téléchargement si nécessaire
+            if (!audioUrl.includes('fl_attachment')) {
+                audioUrl += (audioUrl.includes('?') ? '&' : '?') + 'fl_attachment';
+            }
+        }
+        
+        console.log("🔊 URL audio finale:", audioUrl);
+        
+        if (audioUrl && audioUrl.includes('http')) {
             contentHtml = `
                 <div class="message-content">
-                    <img src="${message.content}" alt="Image partagée" onclick="openImageModal('${message.content}')">
-                </div>
-            `;
-            break;
-            
-        case 'video':
-            contentHtml = `
-                <div class="message-content">
-                    <video controls onclick="this.paused ? this.play() : this.pause()">
-                        <source src="${message.content}" type="video/mp4">
-                        Votre navigateur ne supporte pas la lecture vidéo.
-                    </video>
-                </div>
-            `;
-            break;
-            
-        case 'file':
-            const fileName = message.fileInfo?.fileName || message.content.split('/').pop() || 'Fichier';
-            const fileSize = message.fileInfo?.fileSize ? formatFileSize(message.fileInfo.fileSize) : '';
-            contentHtml = `
-                <div class="message-content">
-                    <div class="file-message">
-                        <div class="file-icon">📄</div>
-                        <div class="file-info">
-                            <div class="file-name">${fileName}</div>
-                            ${fileSize ? `<div class="file-size">${fileSize}</div>` : ''}
+                    <div class="audio-message">
+                        <div class="audio-icon">${isSent ? '🎤' : '🎵'}</div>
+                        <div class="audio-info">
+                            <div class="audio-name">${isSent ? 'Votre message audio' : 'Message audio'}</div>
+                            <div class="audio-duration">${formatAudioDuration(audioDuration)}</div>
                         </div>
-                        <a href="${message.content}" download="${fileName}" class="download-btn">
-                            Télécharger
-                        </a>
+                        <audio controls class="audio-player" preload="metadata">
+                            <source src="${audioUrl}" type="audio/webm">
+                            <source src="${audioUrl}" type="audio/mpeg">
+                            <source src="${audioUrl}" type="audio/wav">
+                            Votre navigateur ne supporte pas la lecture audio.
+                        </audio>
                     </div>
                 </div>
             `;
-            break;
-            
-        default:
+        } else {
+            // Fallback si pas d'URL valide
             contentHtml = `
-                <div class="message-content">${escapeHtml(message.content)}</div>
+                <div class="message-content">
+                    <div class="audio-message">
+                        <div class="audio-icon">🔇</div>
+                        <div class="audio-info">
+                            <div class="audio-name">Message audio</div>
+                            <div class="audio-duration">${formatAudioDuration(audioDuration)}</div>
+                            <div class="audio-error" style="font-size: 11px; color: #ff4444;">
+                                ${audioUrl ? 'Fichier en cours de traitement...' : 'Fichier non disponible'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
             `;
+        }
+    } else {
+        // Gestion des autres types de messages
+        switch (message.typeMessage) {
+            case 'image':
+                contentHtml = `
+                    <div class="message-content">
+                        <img src="${message.content}" alt="Image partagée" onclick="openImageModal('${message.content}')">
+                    </div>
+                `;
+                break;
+                
+            case 'video':
+                contentHtml = `
+                    <div class="message-content">
+                        <video controls onclick="this.paused ? this.play() : this.pause()">
+                            <source src="${message.content}" type="video/mp4">
+                            Votre navigateur ne supporte pas la lecture vidéo.
+                        </video>
+                    </div>
+                `;
+                break;
+                
+            case 'file':
+                const fileName = message.fileInfo?.fileName || message.content.split('/').pop() || 'Fichier';
+                const fileSize = message.fileInfo?.fileSize ? formatFileSize(message.fileInfo.fileSize) : '';
+                contentHtml = `
+                    <div class="message-content">
+                        <div class="file-message">
+                            <div class="file-icon">📄</div>
+                            <div class="file-info">
+                                <div class="file-name">${fileName}</div>
+                                ${fileSize ? `<div class="file-size">${fileSize}</div>` : ''}
+                            </div>
+                            <a href="${message.content}" download="${fileName}" class="download-btn">
+                                Télécharger
+                            </a>
+                        </div>
+                    </div>
+                `;
+                break;
+                
+            default:
+                contentHtml = `
+                    <div class="message-content">${escapeHtml(message.content)}</div>
+                `;
+        }
     }
     
     element.innerHTML = `
@@ -821,12 +1521,35 @@ function createMessageElement(message) {
         <div class="message-time">${time} ${statusIcon}</div>
     `;
     
-    element.style.alignSelf = isSent ? 'flex-end' : 'flex-start';
-    element.style.marginLeft = isSent ? 'auto' : '0';
-    element.style.marginRight = isSent ? '0' : 'auto';
-    element.style.maxWidth = message.typeMessage === 'text' ? '70%' : '85%';
-    
     return element;
+}
+
+// 🎤 FORMATER LA DURÉE AUDIO
+function formatAudioDuration(duration) {
+    if (!duration) return '0:00';
+    
+    if (typeof duration === 'number') {
+        const minutes = Math.floor(duration / 60);
+        const seconds = duration % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
+    if (typeof duration === 'string') {
+        // Si c'est déjà au format "X:XX"
+        if (duration.match(/^\d+:\d{2}$/)) {
+            return duration;
+        }
+        
+        // Si c'est en secondes
+        const seconds = parseInt(duration);
+        if (!isNaN(seconds)) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+    }
+    
+    return '0:00';
 }
 
 function openImageModal(imageUrl) {
@@ -855,27 +1578,29 @@ function openImageModal(imageUrl) {
 
 function isMyMessage(message) {
     if (!message || !state.user) {
+        console.log("❌ Message ou user manquant");
         return false;
     }
-    
+
     let senderId;
-    
-    if (typeof message.Id_sender === 'string') {
+
+    if (typeof message.Id_sender === "string") {
         senderId = message.Id_sender;
     } else if (message.Id_sender && message.Id_sender._id) {
         senderId = message.Id_sender._id.toString();
-    } else if (message.Id_sender && typeof message.Id_sender === 'object') {
+    } else if (message.Id_sender && typeof message.Id_sender === "object") {
         senderId = message.Id_sender.toString();
     } else {
         senderId = message.senderId || null;
     }
-    
+
     const myId = state.user.id || state.user._id;
-    
+
     if (!senderId || !myId) {
+        console.log("❌ ID manquant - senderId:", senderId, "myId:", myId);
         return false;
     }
-    
+
     return senderId === myId;
 }
 
@@ -883,6 +1608,7 @@ function formatMessageTimeRobuste(message) {
     const dateString = message.createdAt || message.timestamp || message.date || message.created_at;
     
     if (!dateString) {
+        console.log("❌ Aucune date trouvée pour le message:", message._id);
         return '--:--';
     }
     
@@ -890,6 +1616,7 @@ function formatMessageTimeRobuste(message) {
         const date = new Date(dateString);
         
         if (isNaN(date.getTime())) {
+            console.log("❌ Date invalide:", dateString);
             return '--:--';
         }
         
@@ -902,217 +1629,260 @@ function formatMessageTimeRobuste(message) {
         return timeString;
         
     } catch (error) {
+        console.error("❌ Erreur formatage date:", error, "Date:", dateString);
         return '--:--';
     }
 }
 
 function initMessageInput() {
-    const messageInput = document.getElementById('messageInput');
-    const sendButton = document.getElementById('sendButton');
-    let typingTimer;
+  const messageInput = document.getElementById("messageInput");
+  const sendButton = document.getElementById("sendButton");
+  let typingTimer;
 
-    messageInput.addEventListener('input', () => {
-        if (state.currentConversation && state.socket) {
-            state.socket.emit('user_typing', {
-                conversationId: state.currentConversation._id,
-                isTyping: true
-            });
-            
-            clearTimeout(typingTimer);
-            typingTimer = setTimeout(() => {
-                if (state.socket) {
-                    state.socket.emit('user_typing', {
-                        conversationId: state.currentConversation._id,
-                        isTyping: false
-                    });
-                }
-            }, 1000);
+  messageInput.addEventListener("input", () => {
+    if (state.currentConversation && state.socket) {
+      state.socket.emit("user_typing", {
+        conversationId: state.currentConversation._id,
+        isTyping: true,
+      });
+
+      clearTimeout(typingTimer);
+      typingTimer = setTimeout(() => {
+        if (state.socket) {
+          state.socket.emit("user_typing", {
+            conversationId: state.currentConversation._id,
+            isTyping: false,
+          });
         }
-    });
+      }, 1000);
+    }
+  });
 
-    messageInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            sendMessage();
-        }
-    });
+  messageInput.addEventListener("keypress", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  });
 
-    sendButton.addEventListener('click', sendMessage);
+  sendButton.addEventListener("click", sendMessage);
 }
 
 async function sendMessage() {
-    const messageInput = document.getElementById('messageInput');
-    const content = messageInput.value.trim();
-    
-    if (!content || !state.currentConversation) return;
+  const messageInput = document.getElementById("messageInput");
+  const content = messageInput.value.trim();
 
-    const sendButton = document.getElementById('sendButton');
-    const sendStatus = document.getElementById('sendStatus');
+  if (!content || !state.currentConversation) return;
 
-    try {
-        setButtonLoading(sendButton, true);
-        sendStatus.textContent = 'Envoi...';
+  const sendButton = document.getElementById("sendButton");
+  const sendStatus = document.getElementById("sendStatus");
 
-        messageInput.value = '';
+  try {
+    setButtonLoading(sendButton, true);
+    sendStatus.textContent = "Envoi...";
 
-        if (state.socket && state.isConnected) {
-            state.socket.emit('send_message', {
-                conversationId: state.currentConversation._id,
-                content: content,
-                typeMessage: 'text'
-            });
-            
-            sendStatus.textContent = 'Envoi...';
-        } else {
-            const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/send`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${state.token}`
-                },
-                body: JSON.stringify({
-                    conversationId: state.currentConversation._id,
-                    content: content,
-                    typeMessage: 'text'
-                })
-            });
+    messageInput.value = "";
 
-            const data = await response.json();
+    if (state.socket && state.isConnected) {
+      state.socket.emit("send_message", {
+        conversationId: state.currentConversation._id,
+        content: content,
+        typeMessage: "text",
+      });
+      
+      sendStatus.textContent = "Envoi...";
+    } else {
+      const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${state.token}`,
+        },
+        body: JSON.stringify({
+          conversationId: state.currentConversation._id,
+          content: content,
+          typeMessage: "text",
+        }),
+      });
 
-            if (!response.ok) {
-                throw new Error(data.error || 'Erreur d\'envoi');
-            }
-            
-            await loadMessages(state.currentConversation._id, false);
-            sendStatus.textContent = '✓ Envoyé';
-        }
+      const data = await response.json();
 
-        setTimeout(() => {
-            sendStatus.textContent = '';
-        }, 2000);
-
-    } catch (error) {
-        console.error('Send message error:', error);
-        sendStatus.textContent = '❌ Erreur';
-        showMessage('Erreur d\'envoi du message', 'error');
-        messageInput.value = content;
-    } finally {
-        setButtonLoading(sendButton, false);
+      if (!response.ok) {
+        throw new Error(data.error || "Erreur d'envoi");
+      }
+      
+      await loadMessages(state.currentConversation._id, false);
+      sendStatus.textContent = "✓ Envoyé";
     }
+
+    setTimeout(() => {
+      sendStatus.textContent = "";
+    }, 2000);
+  } catch (error) {
+    console.error("Send message error:", error);
+    sendStatus.textContent = "❌ Erreur";
+    showMessage("Erreur d'envoi du message", "error");
+    messageInput.value = content;
+  } finally {
+    setButtonLoading(sendButton, false);
+  }
 }
 
 function scrollToBottom() {
-    const messagesContainer = document.getElementById('messagesContainer');
-    setTimeout(() => {
-        messagesContainer.scrollTop = messagesContainer.scrollHeight;
-    }, 100);
+  const messagesContainer = document.getElementById("messagesContainer");
+  setTimeout(() => {
+    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+  }, 100);
 }
 
 // ===== WEBSOCKET =====
 function initWebSocket() {
-    if (!state.token) return;
+  if (!state.token) return;
 
-    try {
-        if (typeof io !== 'undefined') {
-            connectSocketIO();
-        } else {
-            console.warn('Socket.IO not available, using fallback');
-        }
-    } catch (error) {
-        console.error('WebSocket initialization error:', error);
+  try {
+    if (typeof io !== "undefined") {
+      connectSocketIO();
+    } else {
+      console.warn("Socket.IO not available, using fallback");
     }
+  } catch (error) {
+    console.error("WebSocket initialization error:", error);
+  }
 }
 
 function connectSocketIO() {
-    state.socket = io(CONFIG.SOCKET_URL, {
-        auth: { token: state.token },
-        transports: ['websocket', 'polling']
-    });
+  state.socket = io(CONFIG.SOCKET_URL, {
+    auth: { token: state.token },
+    transports: ["websocket", "polling"],
+  });
 
-    state.socket.on('connect', () => {
-        console.log('🔗 WebSocket connected');
-        state.isConnected = true;
-        state.reconnectAttempts = 0;
-        updateConnectionStatus('🟢 Connecté');
-        
-        state.socket.emit('join_notifications');
-        if (state.currentConversation) {
-            state.socket.emit('join_conversation', state.currentConversation._id);
-        }
-    });
+  state.socket.on("connect", () => {
+    console.log("🔗 WebSocket connected");
+    state.isConnected = true;
+    state.reconnectAttempts = 0;
+    updateConnectionStatus("🟢 Connecté");
 
-    state.socket.on('disconnect', (reason) => {
-        console.log('🔴 WebSocket disconnected:', reason);
-        state.isConnected = false;
-        updateConnectionStatus('🔴 Déconnecté');
-        
-        if (reason === 'io server disconnect') {
-            setTimeout(() => {
-                state.socket.connect();
-            }, CONFIG.RECONNECT_DELAY);
-        }
-    });
+    state.socket.emit("join_notifications");
+    if (state.currentConversation) {
+      state.socket.emit("join_conversation", state.currentConversation._id);
+    }
+  });
 
-    state.socket.on('connect_error', (error) => {
-        console.error('WebSocket connection error:', error);
-        updateConnectionStatus('🔴 Erreur connexion');
-        
-        state.reconnectAttempts++;
-        if (state.reconnectAttempts < CONFIG.MAX_RECONNECT_ATTEMPTS) {
-            setTimeout(() => {
-                state.socket.connect();
-            }, CONFIG.RECONNECT_DELAY * state.reconnectAttempts);
-        }
-    });
+  state.socket.on("disconnect", (reason) => {
+    console.log("🔴 WebSocket disconnected:", reason);
+    state.isConnected = false;
+    updateConnectionStatus("🔴 Déconnecté");
 
-    state.socket.on('new_message', (message) => {
-        console.log('📨 New message received:', message);
-        handleNewMessage(message);
-    });
+    if (reason === "io server disconnect") {
+      setTimeout(() => {
+        state.socket.connect();
+      }, CONFIG.RECONNECT_DELAY);
+    }
+  });
 
-    state.socket.on('image_message_sent', (data) => {
-        console.log('✅ Image sent confirmation:', data);
-        handleFileMessageSent(data);
-    });
+  state.socket.on("connect_error", (error) => {
+    console.error("WebSocket connection error:", error);
+    updateConnectionStatus("🔴 Erreur connexion");
 
-    state.socket.on('file_message_sent', (data) => {
-        console.log('✅ File sent confirmation:', data);
-        handleFileMessageSent(data);
-    });
+    state.reconnectAttempts++;
+    if (state.reconnectAttempts < CONFIG.MAX_RECONNECT_ATTEMPTS) {
+      setTimeout(() => {
+        state.socket.connect();
+      }, CONFIG.RECONNECT_DELAY * state.reconnectAttempts);
+    }
+  });
 
-    state.socket.on('video_message_sent', (data) => {
-        console.log('✅ Video sent confirmation:', data);
-        handleFileMessageSent(data);
-    });
+  state.socket.on("new_message", (message) => {
+    console.log("📨 New message received:", message);
+    handleNewMessage(message);
+  });
 
-    state.socket.on('image_message_error', (data) => {
-        console.error('❌ Image send error:', data);
-        showMessage('Erreur d\'envoi de l\'image: ' + data.error, 'error');
-    });
+  // 🎤 ÉVÉNEMENTS AUDIO ADAPTÉS
+  state.socket.on("audio_message_sent", (data) => {
+    console.log('✅ Audio sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
 
-    state.socket.on('file_message_error', (data) => {
-        console.error('❌ File send error:', data);
-        showMessage('Erreur d\'envoi du fichier: ' + data.error, 'error');
-    });
+  state.socket.on("audio_message_error", (data) => {
+    console.error('❌ Audio send error:', data);
+    showMessage('Erreur d\'envoi de l\'audio: ' + data.error, 'error');
+  });
 
-    state.socket.on('video_message_error', (data) => {
-        console.error('❌ Video send error:', data);
-        showMessage('Erreur d\'envoi de la vidéo: ' + data.error, 'error');
-    });
+  state.socket.on("new_audio_message", (data) => {
+    console.log('🔊 Nouveau message audio en temps réel:', data);
+    handleNewMessage(data.message);
+  });
 
-    state.socket.on('user_typing', (data) => {
-        handleTypingIndicator(data);
-    });
+  state.socket.on("reaction_added", (data) => {
+    console.log("❤️ Réaction ajoutée:", data);
+    handleReactionAdded(data);
+  });
 
-    state.socket.on('message_sent', (data) => {
-        console.log('✅ Message sent confirmation:', data);
-        updateMessageStatus(data.data._id, 'sent');
-    });
+  state.socket.on("reaction_removed", (data) => {
+    console.log("🗑️ Réaction supprimée:", data);
+    handleReactionRemoved(data);
+  });
 
-    state.socket.on('message_error', (data) => {
-        console.error('❌ Message error:', data);
-        showMessage('Erreur d\'envoi du message', 'error');
-    });
+  state.socket.on("reaction_error", (data) => {
+    console.error("❌ Erreur réaction:", data);
+    showMessage(data.error || "Erreur avec la réaction", "error");
+  });
+
+  state.socket.on("image_message_sent", (data) => {
+    console.log('✅ Image sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("file_message_sent", (data) => {
+    console.log('✅ File sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("video_message_sent", (data) => {
+    console.log('✅ Video sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("image_message_error", (data) => {
+    console.error('❌ Image send error:', data);
+    showMessage('Erreur d\'envoi de l\'image: ' + data.error, 'error');
+  });
+
+  state.socket.on("file_message_error", (data) => {
+    console.error('❌ File send error:', data);
+    showMessage('Erreur d\'envoi du fichier: ' + data.error, 'error');
+  });
+
+  state.socket.on("video_message_error", (data) => {
+    console.error('❌ Video send error:', data);
+    showMessage('Erreur d\'envoi de la vidéo: ' + data.error, 'error');
+  });
+
+  state.socket.on("user_typing", (data) => {
+    handleTypingIndicator(data);
+  });
+
+  state.socket.on("message_sent", (data) => {
+    console.log("✅ Message sent confirmation:", data);
+    updateMessageStatus(data.data._id, "sent");
+  });
+
+  state.socket.on("message_error", (data) => {
+    console.error("❌ Message error:", data);
+    showMessage("Erreur d'envoi du message", "error");
+  });
+}
+
+function handleReactionAdded(data) {
+    if (state.currentConversation && data.messageId) {
+        loadMessages(state.currentConversation._id, false);
+    }
+}
+
+function handleReactionRemoved(data) {
+    if (state.currentConversation && data.messageId) {
+        loadMessages(state.currentConversation._id, false);
+    }
 }
 
 function handleFileMessageSent(data) {
@@ -1149,6 +1919,7 @@ function handleNewMessage(message) {
         if (message.typeMessage === 'image') preview = '📷 Image';
         if (message.typeMessage === 'video') preview = '🎥 Vidéo';
         if (message.typeMessage === 'file') preview = '📁 Fichier';
+        if (message.typeMessage === 'audio') preview = '🎤 Message audio';
         
         showNotification({
             type: 'new_message',
@@ -1157,80 +1928,93 @@ function handleNewMessage(message) {
             messagePreview: preview
         });
     }
-    
+
     updateConversationLastMessage(message.conversationId, message);
 }
 
 function handleTypingIndicator(data) {
-    const typingIndicator = document.getElementById('typingIndicator');
-    const typingText = document.getElementById('typingText');
-    
-    if (data.isTyping) {
-        state.typingUsers.set(data.userId, {
-            userName: data.userName,
-            timestamp: Date.now()
-        });
-        
-        const typingUsers = Array.from(state.typingUsers.values()).map(u => u.userName);
-        typingText.textContent = `${typingUsers.join(', ')} ${typingUsers.length === 1 ? 'est' : 'sont'} en train d'écrire...`;
-        typingIndicator.style.display = 'flex';
-    } else {
-        state.typingUsers.delete(data.userId);
-        
-        if (state.typingUsers.size === 0) {
-            typingIndicator.style.display = 'none';
-        } else {
-            const typingUsers = Array.from(state.typingUsers.values()).map(u => u.userName);
-            typingText.textContent = `${typingUsers.join(', ')} ${typingUsers.length === 1 ? 'est' : 'sont'} en train d'écrire...`;
-        }
-    }
-    
-    const now = Date.now();
-    state.typingUsers.forEach((value, key) => {
-        if (now - value.timestamp > 5000) {
-            state.typingUsers.delete(key);
-        }
+  const typingIndicator = document.getElementById("typingIndicator");
+  const typingText = document.getElementById("typingText");
+
+  if (data.isTyping) {
+    state.typingUsers.set(data.userId, {
+      userName: data.userName,
+      timestamp: Date.now(),
     });
+
+    const typingUsers = Array.from(state.typingUsers.values()).map(
+      (u) => u.userName
+    );
+    typingText.textContent = `${typingUsers.join(", ")} ${
+      typingUsers.length === 1 ? "est" : "sont"
+    } en train d'écrire...`;
+    typingIndicator.style.display = "flex";
+  } else {
+    state.typingUsers.delete(data.userId);
+
+    if (state.typingUsers.size === 0) {
+      typingIndicator.style.display = "none";
+    } else {
+      const typingUsers = Array.from(state.typingUsers.values()).map(
+        (u) => u.userName
+      );
+      typingText.textContent = `${typingUsers.join(", ")} ${
+        typingUsers.length === 1 ? "est" : "sont"
+      } en train d'écrire...`;
+    }
+  }
+
+  const now = Date.now();
+  state.typingUsers.forEach((value, key) => {
+    if (now - value.timestamp > 5000) {
+      state.typingUsers.delete(key);
+    }
+  });
 }
 
 // ===== FONCTIONNALITÉS AVANCÉES =====
 function initTestButtons() {
-    document.getElementById('testNotifBtn')?.addEventListener('click', () => {
-        showTestNotification();
+  document.getElementById("testNotifBtn")?.addEventListener("click", () => {
+    showTestNotification();
+  });
+
+  document
+    .getElementById("notifPermissionBtn")
+    ?.addEventListener("click", () => {
+      requestNotificationPermission();
     });
 
-    document.getElementById('notifPermissionBtn')?.addEventListener('click', () => {
-        requestNotificationPermission();
+  document
+    .getElementById("newConversationBtn")
+    ?.addEventListener("click", () => {
+      showNewConversationModal();
     });
 
-    document.getElementById('newConversationBtn')?.addEventListener('click', () => {
-        showNewConversationModal();
-    });
-
-    document.getElementById('createGroupBtn')?.addEventListener('click', () => {
-        showCreateGroupModal();
-    });
+  document.getElementById("createGroupBtn")?.addEventListener("click", () => {
+    showCreateGroupModal();
+  });
 }
 
 function initModals() {
-    document.getElementById('closeConversationModal')?.addEventListener('click', () => {
-        document.getElementById('newConversationModal').style.display = 'none';
+  document
+    .getElementById("closeConversationModal")
+    ?.addEventListener("click", () => {
+      document.getElementById("newConversationModal").style.display = "none";
     });
 
-    document.getElementById('closeGroupModal')?.addEventListener('click', () => {
-        document.getElementById('createGroupModal').style.display = 'none';
-    });
+  document.getElementById("closeGroupModal")?.addEventListener("click", () => {
+    document.getElementById("createGroupModal").style.display = "none";
+  });
 
-    document.querySelectorAll('.modal-overlay').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.style.display = 'none';
-            }
-        });
+  document.querySelectorAll(".modal-overlay").forEach((modal) => {
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) {
+        modal.style.display = "none";
+      }
     });
+  });
 }
 
-// ===== SYSTÈME DE CRÉATION DE GROUPE =====
 function initGroupCreation() {
     const searchInput = document.getElementById('searchMemberInput');
     const createBtn = document.getElementById('createGroupConfirmBtn');
@@ -1425,87 +2209,96 @@ async function createGroup() {
 }
 
 function showNewConversationModal() {
-    document.getElementById('newConversationModal').style.display = 'flex';
+  document.getElementById("newConversationModal").style.display = "flex";
 }
 
 function showCreateGroupModal() {
-    document.getElementById('createGroupModal').style.display = 'flex';
+  document.getElementById("createGroupModal").style.display = "flex";
 }
 
 async function markAsRead(conversationId) {
-    try {
-        await fetch(`${CONFIG.BACKEND_URL}/api/conversations/mark-as-read/${conversationId}`, {
-            method: 'POST',
-            headers: {'Authorization': `Bearer ${state.token}`}
-        });
+  try {
+    await fetch(
+      `${CONFIG.BACKEND_URL}/api/conversations/mark-as-read/${conversationId}`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${state.token}` },
+      }
+    );
 
-        updateConversationBadge(conversationId, 0);
-    } catch (error) {
-        console.error('Mark as read error:', error);
-    }
+    updateConversationBadge(conversationId, 0);
+  } catch (error) {
+    console.error("Mark as read error:", error);
+  }
 }
 
 async function loadUnreadCounts() {
-    try {
-        const response = await fetch(`${CONFIG.BACKEND_URL}/api/conversations/unread-counts/${state.user.id}`, {
-            headers: {'Authorization': `Bearer ${state.token}`}
-        });
+  try {
+    const response = await fetch(
+      `${CONFIG.BACKEND_URL}/api/conversations/unread-counts/${state.user.id}`,
+      {
+        headers: { Authorization: `Bearer ${state.token}` },
+      }
+    );
 
-        const data = await response.json();
+    const data = await response.json();
 
-        if (response.ok && data.success) {
-            data.conversationCounts.forEach(item => {
-                updateConversationBadge(item.conversationId, item.unreadCount);
-            });
+    if (response.ok && data.success) {
+      data.conversationCounts.forEach((item) => {
+        updateConversationBadge(item.conversationId, item.unreadCount);
+      });
 
-            document.getElementById('totalUnread').textContent = data.totalUnread;
-        }
-    } catch (error) {
-        console.error('Load unread counts error:', error);
+      document.getElementById("totalUnread").textContent = data.totalUnread;
     }
+  } catch (error) {
+    console.error("Load unread counts error:", error);
+  }
 }
 
 function updateConversationBadge(conversationId, count = null) {
-    const conversationElement = document.querySelector(`[data-conversation-id="${conversationId}"]`);
-    if (conversationElement) {
-        const badge = conversationElement.querySelector('.conversation-badge');
-        const meta = conversationElement.querySelector('.conversation-meta');
-        
-        if (count === null || count > 0) {
-            if (badge) {
-                const currentCount = parseInt(badge.textContent) || 0;
-                count = currentCount + 1;
-                badge.textContent = count;
-            } else {
-                count = count || 1;
-                if (!badge && meta) {
-                    const newBadge = document.createElement('div');
-                    newBadge.className = 'conversation-badge';
-                    newBadge.textContent = count;
-                    meta.appendChild(newBadge);
-                }
-            }
-        } else if (badge) {
-            badge.remove();
-        }
+  const conversationElement = document.querySelector(
+    `[data-conversation-id="${conversationId}"]`
+  );
+  if (conversationElement) {
+    const badge = conversationElement.querySelector(".conversation-badge");
+    const meta = conversationElement.querySelector(".conversation-meta");
 
-        updateTotalUnreadCount();
+    if (count === null || count > 0) {
+      if (badge) {
+        const currentCount = parseInt(badge.textContent) || 0;
+        count = currentCount + 1;
+        badge.textContent = count;
+      } else {
+        count = count || 1;
+        if (!badge && meta) {
+          const newBadge = document.createElement("div");
+          newBadge.className = "conversation-badge";
+          newBadge.textContent = count;
+          meta.appendChild(newBadge);
+        }
+      }
+    } else if (badge) {
+      badge.remove();
     }
+
+    updateTotalUnreadCount();
+  }
 }
 
 function updateTotalUnreadCount() {
-    const total = Array.from(document.querySelectorAll('.conversation-badge'))
-        .reduce((sum, badge) => sum + parseInt(badge.textContent), 0);
-    
-    document.getElementById('totalUnread').textContent = total;
-    
-    const notificationBadge = document.getElementById('notificationBadge');
-    if (total > 0) {
-        notificationBadge.textContent = total;
-        notificationBadge.style.display = 'flex';
-    } else {
-        notificationBadge.style.display = 'none';
-    }
+  const total = Array.from(
+    document.querySelectorAll(".conversation-badge")
+  ).reduce((sum, badge) => sum + parseInt(badge.textContent), 0);
+
+  document.getElementById("totalUnread").textContent = total;
+
+  const notificationBadge = document.getElementById("notificationBadge");
+  if (total > 0) {
+    notificationBadge.textContent = total;
+    notificationBadge.style.display = "flex";
+  } else {
+    notificationBadge.style.display = "none";
+  }
 }
 
 function updateConversationLastMessage(conversationId, message) {
@@ -1519,6 +2312,7 @@ function updateConversationLastMessage(conversationId, message) {
             if (message.typeMessage === 'image') preview = '📷 Image';
             if (message.typeMessage === 'video') preview = '🎥 Vidéo';
             if (message.typeMessage === 'file') preview = '📁 Fichier';
+            if (message.typeMessage === 'audio') preview = '🎤 Message audio';
             
             lastMessageElement.textContent = preview.length > 30 ? 
                 preview.substring(0, 30) + '...' : preview;
@@ -1539,177 +2333,184 @@ function updateConversationLastMessage(conversationId, message) {
 
 // ===== NOTIFICATIONS =====
 function showTestNotification() {
-    showNotification({
-        type: 'test',
-        title: 'Test de notification',
-        content: 'Ceci est une notification de test depuis Owly!',
-        senderName: 'Système'
-    });
+  showNotification({
+    type: "test",
+    title: "Test de notification",
+    content: "Ceci est une notification de test depuis Owly!",
+    senderName: "Système",
+  });
 }
 
 function showNotification(data) {
-    const notificationPopup = document.getElementById('notificationPopup');
-    const notificationTitle = document.getElementById('notificationTitle');
-    const notificationContent = document.getElementById('notificationContent');
-    
-    if (data.type === 'new_message') {
-        notificationTitle.textContent = 'Nouveau message';
-        notificationContent.innerHTML = `<strong>${data.senderName}</strong>: ${data.messagePreview}`;
-    } else {
-        notificationTitle.textContent = data.title || 'Notification';
-        notificationContent.textContent = data.content || 'Nouvelle notification';
+  const notificationPopup = document.getElementById("notificationPopup");
+  const notificationTitle = document.getElementById("notificationTitle");
+  const notificationContent = document.getElementById("notificationContent");
+
+  if (data.type === "new_message") {
+    notificationTitle.textContent = "Nouveau message";
+    notificationContent.innerHTML = `<strong>${data.senderName}</strong>: ${data.messagePreview}`;
+  } else {
+    notificationTitle.textContent = data.title || "Notification";
+    notificationContent.textContent = data.content || "Nouvelle notification";
+  }
+
+  notificationPopup.style.display = "block";
+
+  const replyBtn = document.getElementById("notificationReplyBtn");
+  const openBtn = document.getElementById("notificationOpenBtn");
+
+  replyBtn.onclick = () => {
+    if (data.conversationId) {
+      const conversation = state.conversations.find(
+        (c) => c._id === data.conversationId
+      );
+      if (conversation) {
+        selectConversation(conversation);
+      }
+      notificationPopup.style.display = "none";
     }
-    
-    notificationPopup.style.display = 'block';
-    
-    const replyBtn = document.getElementById('notificationReplyBtn');
-    const openBtn = document.getElementById('notificationOpenBtn');
-    
-    replyBtn.onclick = () => {
-        if (data.conversationId) {
-            const conversation = state.conversations.find(c => c._id === data.conversationId);
-            if (conversation) {
-                selectConversation(conversation);
-            }
-            notificationPopup.style.display = 'none';
-        }
-    };
-    
-    openBtn.onclick = () => {
-        if (data.conversationId) {
-            const conversation = state.conversations.find(c => c._id === data.conversationId);
-            if (conversation) {
-                selectConversation(conversation);
-            }
-        }
-        notificationPopup.style.display = 'none';
-    };
-    
-    document.getElementById('closeNotification').onclick = () => {
-        notificationPopup.style.display = 'none';
-    };
-    
-    setTimeout(() => {
-        if (notificationPopup.style.display !== 'none') {
-            notificationPopup.style.display = 'none';
-        }
-    }, 5000);
+  };
+
+  openBtn.onclick = () => {
+    if (data.conversationId) {
+      const conversation = state.conversations.find(
+        (c) => c._id === data.conversationId
+      );
+      if (conversation) {
+        selectConversation(conversation);
+      }
+    }
+    notificationPopup.style.display = "none";
+  };
+
+  document.getElementById("closeNotification").onclick = () => {
+    notificationPopup.style.display = "none";
+  };
+
+  setTimeout(() => {
+    if (notificationPopup.style.display !== "none") {
+      notificationPopup.style.display = "none";
+    }
+  }, 5000);
 }
 
 async function requestNotificationPermission() {
-    if (!('Notification' in window)) {
-        alert('Votre navigateur ne supporte pas les notifications');
-        return;
+  if (!("Notification" in window)) {
+    alert("Votre navigateur ne supporte pas les notifications");
+    return;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    state.notificationPermission = permission;
+
+    if (permission === "granted") {
+      showMessage("Notifications activées!", "success");
+      document.getElementById("notifPermissionBtn").classList.add("hidden");
+    } else {
+      showMessage("Notifications bloquées", "error");
     }
-    
-    try {
-        const permission = await Notification.requestPermission();
-        state.notificationPermission = permission;
-        
-        if (permission === 'granted') {
-            showMessage('Notifications activées!', 'success');
-            document.getElementById('notifPermissionBtn').classList.add('hidden');
-        } else {
-            showMessage('Notifications bloquées', 'error');
-        }
-    } catch (error) {
-        console.error('Notification permission error:', error);
-        showMessage('Erreur d\'activation des notifications', 'error');
-    }
+  } catch (error) {
+    console.error("Notification permission error:", error);
+    showMessage("Erreur d'activation des notifications", "error");
+  }
 }
 
 // ===== UTILITAIRES =====
 function setButtonLoading(button, isLoading) {
-    const btnText = button.querySelector('.btn-text');
-    const btnLoading = button.querySelector('.btn-loading');
-    
-    if (btnText && btnLoading) {
-        btnText.classList.toggle('hidden', isLoading);
-        btnLoading.classList.toggle('hidden', !isLoading);
-    }
-    
-    button.disabled = isLoading;
+  const btnText = button.querySelector(".btn-text");
+  const btnLoading = button.querySelector(".btn-loading");
+
+  if (btnText && btnLoading) {
+    btnText.classList.toggle("hidden", isLoading);
+    btnLoading.classList.toggle("hidden", !isLoading);
+  }
+
+  button.disabled = isLoading;
 }
 
 function showLoading(show) {
-    const overlay = document.getElementById('loadingOverlay');
-    if (overlay) {
-        overlay.style.display = show ? 'flex' : 'none';
-    }
+  const overlay = document.getElementById("loadingOverlay");
+  if (overlay) {
+    overlay.style.display = show ? "flex" : "none";
+  }
 }
 
 function showMessageLoading(show) {
-    const messagesList = document.getElementById('messagesList');
-    if (!messagesList) return;
-    
-    if (show) {
-        const loader = document.createElement('div');
-        loader.className = 'message-loader';
-        loader.innerHTML = '<div class="loading-spinner"></div><span>Chargement des messages...</span>';
-        loader.id = 'messageLoader';
-        messagesList.appendChild(loader);
-    } else {
-        const loader = document.getElementById('messageLoader');
-        if (loader) {
-            loader.remove();
-        }
+  const messagesList = document.getElementById("messagesList");
+  if (!messagesList) return;
+
+  if (show) {
+    const loader = document.createElement("div");
+    loader.className = "message-loader";
+    loader.innerHTML =
+      '<div class="loading-spinner"></div><span>Chargement des messages...</span>';
+    loader.id = "messageLoader";
+    messagesList.appendChild(loader);
+  } else {
+    const loader = document.getElementById("messageLoader");
+    if (loader) {
+      loader.remove();
     }
+  }
 }
 
-function showMessage(message, type = 'info') {
-    const container = document.getElementById('messageContainer');
-    if (!container) return;
-    
-    container.className = `message-container ${type}`;
-    container.textContent = message;
-    container.style.display = 'block';
-    
-    setTimeout(() => {
-        container.style.display = 'none';
-    }, 5000);
+function showMessage(message, type = "info") {
+  const container = document.getElementById("messageContainer");
+  if (!container) return;
+
+  container.className = `message-container ${type}`;
+  container.textContent = message;
+  container.style.display = "block";
+
+  setTimeout(() => {
+    container.style.display = "none";
+  }, 5000);
 }
 
 function updateConnectionStatus(status) {
-    const statusElement = document.getElementById('wsStatus');
-    if (statusElement) {
-        statusElement.textContent = status;
-    }
+  const statusElement = document.getElementById("wsStatus");
+  if (statusElement) {
+    statusElement.textContent = status;
+  }
 }
 
 function formatTime(dateString) {
-    if (!dateString) return '';
-    
-    const date = new Date(dateString);
-    const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    const diffDays = Math.floor(diffMs / 86400000);
-    
-    if (diffMins < 1) return 'Maintenant';
-    if (diffMins < 60) return `Il y a ${diffMins} min`;
-    if (diffHours < 24) return `Il y a ${diffHours} h`;
-    if (diffDays < 7) return `Il y a ${diffDays} j`;
-    
-    return date.toLocaleDateString('fr-FR');
+  if (!dateString) return "";
+
+  const date = new Date(dateString);
+  const now = new Date();
+  const diffMs = now - date;
+  const diffMins = Math.floor(diffMs / 60000);
+  const diffHours = Math.floor(diffMs / 3600000);
+  const diffDays = Math.floor(diffMs / 86400000);
+
+  if (diffMins < 1) return "Maintenant";
+  if (diffMins < 60) return `Il y a ${diffMins} min`;
+  if (diffHours < 24) return `Il y a ${diffHours} h`;
+  if (diffDays < 7) return `Il y a ${diffDays} j`;
+
+  return date.toLocaleDateString("fr-FR");
 }
 
 function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function updateMessageStatus(messageId, status) {
-    const messageElement = document.querySelector(`[data-message-id="${messageId}"]`);
-    if (messageElement) {
-        messageElement.classList.remove('pending');
-        const timeElement = messageElement.querySelector('.message-time');
-        if (timeElement) {
-            const timeText = timeElement.textContent.replace(/[✓✓✓]/g, '').trim();
-            timeElement.textContent = `${timeText} ${status === 'seen' ? '✓✓' : '✓'}`;
-        }
+  const messageElement = document.querySelector(
+    `[data-message-id="${messageId}"]`
+  );
+  if (messageElement) {
+    messageElement.classList.remove("pending");
+    const timeElement = messageElement.querySelector(".message-time");
+    if (timeElement) {
+      const timeText = timeElement.textContent.replace(/[✓✓✓]/g, "").trim();
+      timeElement.textContent = `${timeText} ${status === "seen" ? "✓✓" : "✓"}`;
     }
+  }
 }
 
 // Gestion de la déconnexion
@@ -1728,3 +2529,5 @@ window.addEventListener('beforeunload', () => {
 // Export pour debug
 window.owlyState = state;
 window.openImageModal = openImageModal;
+window.showReactionsModal = showReactionsModal;
+window.showVoiceRecordModal = showVoiceRecordModal;
