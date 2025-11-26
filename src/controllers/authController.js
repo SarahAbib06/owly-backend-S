@@ -66,6 +66,29 @@ const sendLoginAlertEmail = async (user, req, email) => {
 export const register = async (req, res) => {
   try {
     const { username, email, password, passwordConfirm } = req.body;
+    // Username : autorise uniquement lettres, chiffres, ".", "-", "_"
+// Et interdit tout espace ou caractères bizarres
+const usernameRegex = /^[a-zA-Z0-9_.-]+$/;
+
+if (!usernameRegex.test(username)) {
+  return res.status(400).json({
+    message: "Le nom d'utilisateur ne doit contenir que des lettres, chiffres, '.', '-' ou '_' et aucun espace."
+  });
+}
+
+    // Normalisation du username
+let cleanUsername = username
+  .normalize("NFKD")      // retire accents + normalise unicode
+  .replace(/\p{Diacritic}/gu, "") // enlève les accents restants
+  .trim()
+  .toLowerCase()
+  .replace(/[\s\u00A0]/g, ""); // retire TOUT type d'espace
+  
+if (cleanUsername.length < 3 || cleanUsername.length > 30) {
+  return res.status(400).json({ message: "Le nom d'utilisateur doit contenir entre 3 et 30 caractères." });
+}
+
+
     if (!username || !email || !password || !passwordConfirm) {
       return res.status(400).json({ message: 'Tous les champs sont requis.' });
     }
@@ -82,7 +105,8 @@ export const register = async (req, res) => {
     if (!emailRegex.test(email)) {
       return res.status(400).json({ message: 'Adresse email invalide.' });
     }
-    const existingUsername = await User.findOne({ username });
+    const existingUsername = await User.findOne({ username: cleanUsername });
+
     if (existingUsername) {
       return res.status(400).json({ message: "Ce nom d'utilisateur existe déjà" });
     }
@@ -96,19 +120,30 @@ export const register = async (req, res) => {
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await PendingUser.findOneAndUpdate(
       { email },
-      { username, email, passwordHash, otp, otpExpires },
+      {  username: cleanUsername, email, passwordHash, otp, otpExpires },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
 
     const html = `
-      <div style="font-family:Arial;text-align:center;padding:30px;background:#e3f2fd;border-radius:12px;">
-        <h2 style="color:#007bff;">Vérifiez votre inscription</h2>
-        <p>Voici votre code de vérification :</p>
-        <h1 style="font-size:38px;letter-spacing:10px;color:#007bff;background:#bbdefb;padding:15px;border-radius:10px;display:inline-block;">
-          ${otp}
-        </h1>
-        <p style="color:#555;">Valable 10 minutes</p>
-      </div>
+     <div style="font-family:Arial;text-align:center;padding:30px;background:#f9ee34;border-radius:12px;">
+  <h2 style="color:#000;">Vérifiez votre inscription</h2>
+  <p style="color:#000;">Voici votre code de vérification :</p>
+
+  <h1 style="
+    font-size:38px;
+    letter-spacing:10px;
+    color:#fff;                 /* CODE EN BLANC */
+    background:#000;            /* Optionnel : fond noir pour plus de contraste */
+    padding:15px;
+    border-radius:10px;
+    display:inline-block;
+  ">
+    ${otp}
+  </h1>
+
+  <p style="color:#555;">Valable 10 minutes</p>
+</div>
+
     `;
     await sendEmail(email, 'Vérification - Owly', `Code: ${otp}`, html);
 
@@ -169,14 +204,26 @@ export const resendOtp = async (req, res) => {
     await pending.save();
 
     const html = `
-      <div style="font-family:Arial;text-align:center;padding:30px;background:#e3f2fd;border-radius:12px;">
-        <h2 style="color:#007bff;">Nouveau code OTP</h2>
-        <p>Voici votre nouveau code de vérification :</p>
-        <h1 style="font-size:38px;letter-spacing:10px;color:#007bff;background:#bbdefb;padding:15px;border-radius:10px;display:inline-block;">
-          ${otp}
-        </h1>
-        <p style="color:#555;">Valable 10 minutes</p>
-      </div>
+    <div style="font-family:Arial;text-align:center;padding:30px;background:#f9ee34;border-radius:12px;">
+  <h2 style="color:#000;">Nouveau code OTP</h2>
+  
+  <p style="color:#000;">Voici votre nouveau code de vérification :</p>
+
+  <h1 style="
+    font-size:38px;
+    letter-spacing:10px;
+    color:#fff;               /* CODE EN BLANC */
+    background:#000;          /* FOND NOIR POUR CONTRASTE */
+    padding:15px;
+    border-radius:10px;
+    display:inline-block;
+  ">
+    ${otp}
+  </h1>
+
+  <p style="color:#555;">Valable 10 minutes</p>
+</div>
+
     `;
     await sendEmail(email, 'Nouveau code - Owly', `Code: ${otp}`, html);
 
@@ -308,9 +355,27 @@ export const verifyInactivityOtp = async (req, res) => {
 // ========================================
 // 6. GET CURRENT USER
 // ========================================
-export const getMe = (req, res) => {
-  return res.json(req.user);
+export const getMe = async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ message: "Utilisateur introuvable" });
+    }
+
+    res.json({
+      user: {
+        id: user._id,
+        email: user.email,
+        profilePicture: user.profilePicture || null,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ message: "Erreur serveur" });
+  }
 };
+
 
 // ========================================
 // 7. FORGOT PASSWORD
@@ -325,16 +390,38 @@ export const forgotPassword = async (req, res) => {
     const token = generateToken({ userId: user._id, otp, type: 'reset' }, '10m');
     const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${token}`;
     const html = `
-      <div style="font-family:Arial;text-align:center;padding:30px;background:#e3f2fd;border-radius:12px;">
-        <h2 style="color:#007bff;">Réinitialisez votre mot de passe</h2>
-        <h1 style="font-size:38px;letter-spacing:10px;color:#007bff;background:#bbdefb;padding:15px;border-radius:10px;display:inline-block;">
-          ${otp}
-        </h1>
-        <p style="color:#555;margin:20px 0;">Valable 10 minutes</p>
-        <a href="${resetUrl}" style="background:#007bff;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;">
-          Réinitialiser
-        </a>
-      </div>
+      <div style="font-family:Arial;text-align:center;padding:30px;background:#f9ee34;border-radius:12px;">
+
+  <h2 style="color:#000;">Réinitialisez votre mot de passe</h2>
+
+  <h1 style="
+    font-size:38px;
+    letter-spacing:10px;
+    color:#fff;             /* CODE EN BLANC */
+    background:#000;        /* FOND NOIR POUR CONTRASTE */
+    padding:15px;
+    border-radius:10px;
+    display:inline-block;
+  ">
+    ${otp}
+  </h1>
+
+  <p style="color:#555;margin:20px 0;">Valable 10 minutes</p>
+
+  <a href="${resetUrl}" style="
+    background:#000;        /* BOUTON NOIR */
+    color:#fff;             /* TEXTE BLANC */
+    padding:12px 24px;
+    text-decoration:none;
+    border-radius:8px;
+    font-weight:bold;
+    display:inline-block;
+  ">
+    Réinitialiser
+  </a>
+
+</div>
+
     `;
     await sendEmail(email, 'Réinitialisation - Owly', `Code: ${otp}`, html);
     return res.json({ message: 'OTP envoyé', token });

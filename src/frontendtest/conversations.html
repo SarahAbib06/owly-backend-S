@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Owly - Messagerie</title>
+    <link rel="stylesheet" href="test-style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Overlay de chargement -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-logo">🦉 Owly</div>
+            <div class="loading-text">Chargement de vos conversations...</div>
+            <div class="loading-bar-container">
+                <div class="loading-bar" id="loadingBar"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Badge de notifications -->
+    <div id="notificationBadge" class="notification-badge">0</div>
+
+    <!-- Container principal -->
+    <div class="app-container">
+        <!-- Sidebar des conversations -->
+        <div class="contacts-sidebar">
+            <!-- En-tête utilisateur -->
+            <div class="sidebar-header">
+                <div class="user-profile">
+                    <div class="user-avatar" id="userAvatar">U</div>
+                    <div class="user-info">
+                        <h2 id="userName">Utilisateur</h2>
+                        <div class="status">
+                            <span id="userStatus">🟢 En ligne</span>
+                            <span id="userEmail"></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions rapides -->
+            <div class="sidebar-actions">
+                <button class="action-btn" id="newConversationBtn">
+                    <span>💬 Nouvelle discussion</span>
+                </button>
+                <button class="action-btn" id="createGroupBtn">
+                    <span>👥 Créer un groupe</span>
+                </button>
+            </div>
+
+            <!-- Liste des conversations -->
+            <div class="contacts-list" id="contactsList">
+                <div class="contacts-header">
+                    <h3>Conversations</h3>
+                    <span class="unread-count" id="totalUnread">0</span>
+                </div>
+                <!-- Les conversations seront injectées ici par JavaScript -->
+            </div>
+
+            <!-- Statut système -->
+            <div class="system-status">
+                <h4>Statut système</h4>
+                <div class="status-items">
+                    <div>🌐 WebSocket: <span id="wsStatus">🔴 Déconnecté</span></div>
+                    <div>🔔 Notifications: <span id="notifStatus">🔴 Inactives</span></div>
+                    <div>📱 Connexion: <span id="connStatus">🔴 Hors ligne</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Zone de chat principale -->
+        <div class="chat-area">
+            <!-- En-tête de chat (vide au début) -->
+            <div class="chat-header" id="chatHeader" style="display: none;">
+                <div class="chat-contact-avatar" id="chatAvatar">C</div>
+                <div class="chat-contact-info">
+                    <h2 id="chatContactName">Sélectionnez une conversation</h2>
+                    <p id="chatContactStatus">Chargement...</p>
+                </div>
+                <div class="chat-actions">
+                    <button class="action-btn" id="callBtn">📞</button>
+                    <button class="action-btn" id="videoBtn">🎥</button>
+                    <button class="action-btn" id="infoBtn">ℹ️</button>
+                    <!-- 🆕 BOUTON RÉACTIONS -->
+                    <button class="action-btn" id="reactionsBtn" title="Réactions">❤️</button>
+                </div>
+            </div>
+
+            <!-- Zone des messages -->
+            <div class="messages-container" id="messagesContainer">
+                <!-- Écran d'accueil -->
+                <div class="welcome-message" id="welcomeMessage">
+                    <div class="welcome-icon">🦉</div>
+                    <p>Bienvenue sur Owly</p>
+                    <p class="welcome-subtitle">Sélectionnez une conversation pour commencer à discuter</p>
+                    
+                    <div class="test-instructions">
+                        <h4>Fonctionnalités disponibles :</h4>
+                        <ul>
+                            <li>💬 Messages en temps réel</li>
+                            <li>👥 Conversations de groupe</li>
+                            <li>🔔 Notifications push</li>
+                            <li>⌨️ Indicateurs de frappe</li>
+                            <li>📖 Marquer comme lu</li>
+                            <li>🌐 Présence en ligne</li>
+                            <li>📷 Envoi d'images</li>
+                            <li>📁 Envoi de fichiers</li>
+                            <li>🎥 Envoi de vidéos</li>
+                            <li>🎤 Messages vocaux</li>
+                            <li>❤️ Réactions aux messages</li>
+                            <li>🚫 Blocage utilisateurs</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Messages seront injectés ici -->
+                <div id="messagesList" style="display: none;"></div>
+
+                <!-- Indicateur de frappe -->
+                <div class="typing-indicator" id="typingIndicator" style="display: none;">
+                    <div class="typing-dots">
+                        <span></span>
+                        <span></span>
+                        <span></span>
+                    </div>
+                    <span id="typingText">est en train d'écrire...</span>
+                </div>
+            </div>
+
+            <!-- Input d'envoi de messages -->
+            <div class="message-input-container" id="messageInputContainer" style="display: none;">
+                <!-- Boutons d'envoi de fichiers -->
+                <div class="file-actions">
+                    <button class="file-action-btn" id="imageBtn" title="Envoyer une image">
+                        📷
+                    </button>
+                    <button class="file-action-btn" id="fileBtn" title="Envoyer un fichier">
+                        📁
+                    </button>
+                    <button class="file-action-btn" id="videoBtn" title="Envoyer une vidéo">
+                        🎥
+                    </button>
+                    <!-- 🆕 BOUTON MESSAGE VOCAL -->
+                    <button class="file-action-btn" id="voiceMessageBtn" title="Message vocal">
+                        🎤
+                    </button>
+                </div>
+
+                <div class="message-input">
+                    <input type="text" id="messageInput" placeholder="Tapez votre message..." maxlength="1000">
+                    <button class="send-button" id="sendButton">
+                        <span>Envoyer</span>
+                    </button>
+                </div>
+                <div class="send-status" id="sendStatus"></div>
+
+                <!-- Prévisualisation des fichiers -->
+                <div id="filePreview" class="file-preview" style="display: none;"></div>
+            </div>
+
+            <!-- Inputs fichiers cachés -->
+            <input type="file" id="imageInput" accept="image/*" style="display: none;">
+            <input type="file" id="fileInput" accept="*/*" style="display: none;">
+            <input type="file" id="videoInput" accept="video/*" style="display: none;">
+        </div>
+    </div>
+
+    <!-- Boutons de test -->
+    <div class="test-buttons-container">
+        <button class="test-notification-btn" id="testNotifBtn">
+            🔔 Test Notification
+        </button>
+        <button class="notification-permission-btn" id="notifPermissionBtn">
+            📱 Activer Notifications
+        </button>
+        <!-- 🆕 BOUTON TEST RÉACTIONS -->
+        <button class="test-reaction-btn" id="testReactionBtn">
+            ❤️ Test Réactions
+        </button>
+    </div>
+
+    <!-- Modals -->
+    <div id="newConversationModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Nouvelle conversation</h3>
+                <button class="modal-close" id="closeConversationModal">×</button>
+            </div>
+            <div class="modal-body">
+                <input type="text" id="searchUserInput" placeholder="Rechercher un utilisateur...">
+                <div id="searchResults" class="search-results"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="createGroupModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Créer un groupe</h3>
+                <button class="modal-close" id="closeGroupModal">×</button>
+            </div>
+            <div class="modal-body">
+                <!-- NOM DU GROUPE -->
+                <div class="form-group">
+                    <label for="groupNameInput">Nom du groupe</label>
+                    <input type="text" id="groupNameInput" placeholder="Ex: Mes amis, Famille, Colocs...">
+                </div>
+                
+                <!-- RECHERCHE DES MEMBRES -->
+                <div class="form-group">
+                    <label for="searchMemberInput">Rechercher des utilisateurs</label>
+                    <input type="text" id="searchMemberInput" placeholder="Tapez un nom d'utilisateur...">
+                </div>
+                
+                <!-- RÉSULTATS DE RECHERCHE -->
+                <div id="searchMemberResults" class="search-results" style="max-height: 150px; overflow-y: auto; margin: 10px 0; border: 1px solid #333; border-radius: 8px; padding: 10px; display: none;">
+                    <!-- Les résultats apparaîtront ici -->
+                </div>
+                
+                <!-- MEMBRES SÉLECTIONNÉS -->
+                <div class="form-group">
+                    <label>Membres sélectionnés (<span id="selectedCount">0</span>)</label>
+                    <div id="selectedMembersList" class="members-list" style="min-height: 50px; border: 1px dashed #f9ee34; border-radius: 8px; padding: 10px; margin: 10px 0;">
+                        <div style="color: #666; text-align: center; font-size: 12px;">
+                            Aucun membre sélectionné
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- BOUTON CRÉATION -->
+                <button class="create-group-btn" id="createGroupConfirmBtn" style="width: 100%; margin-top: 20px;">
+                    👥 Créer le groupe
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🆕 MODAL RÉACTIONS (DYNAMIQUE) -->
+    <div id="reactionsModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Réagir au message</h3>
+                <button class="modal-close" id="closeReactionsModal">×</button>
+            </div>
+            <div class="modal-body">
+                <!-- LES RÉACTIONS SERONT GÉNÉRÉES DYNAMIQUEMENT DEPUIS LE BACKEND -->
+                <div class="reactions-grid" id="reactionsGrid">
+                    <!-- Les boutons de réaction seront injectés ici par JavaScript -->
+                    <div class="loading-reactions">Chargement des réactions...</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🆕 MODAL PROFIL UTILISATEUR -->
+    <div id="userProfileModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Profil utilisateur</h3>
+                <button class="modal-close" id="closeProfileModal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="profile-info">
+                    <div class="profile-avatar" id="profileAvatar">U</div>
+                    <h4 id="profileUsername">Utilisateur</h4>
+                    <p id="profileEmail">email@exemple.com</p>
+                    <p id="profileStatus">🟢 En ligne</p>
+                </div>
+                <div class="profile-actions">
+                    <button class="action-btn danger" id="blockUserBtn">
+                        🚫 Bloquer cet utilisateur
+                    </button>
+                    <button class="action-btn" id="unblockUserBtn" style="display: none;">
+                        ✅ Débloquer cet utilisateur
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🆕 MODAL ENREGISTREMENT VOCAL -->
+    <div id="voiceRecordModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Enregistrement vocal</h3>
+                <button class="modal-close" id="closeVoiceModal">×</button>
+            </div>
+            <div class="modal-body">
+                <div class="voice-recorder">
+                    <div class="recording-status" id="recordingStatus">
+                        Prêt à enregistrer
+                    </div>
+                    <div class="recording-time" id="recordingTime">00:00</div>
+                    <div class="recording-controls">
+                        <button class="record-btn" id="startRecordBtn">
+                            ⏺️ Démarrer
+                        </button>
+                        <button class="record-btn stop" id="stopRecordBtn" disabled>
+                            ⏹️ Arrêter
+                        </button>
+                        <button class="record-btn play" id="playRecordBtn" disabled>
+                            ▶️ Écouter
+                        </button>
+                        <button class="record-btn send" id="sendRecordBtn" disabled>
+                            📤 Envoyer
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Popup de notification -->
+    <div id="notificationPopup" class="notification-popup" style="display: none;">
+        <div class="notification-header">
+            <span class="notification-icon">🔔</span>
+            <span class="notification-title" id="notificationTitle">Nouveau message</span>
+            <button class="notification-close" id="closeNotification">×</button>
+        </div>
+        <div class="notification-content" id="notificationContent">
+            <strong>John</strong>: Salut, comment vas-tu ?
+        </div>
+        <div class="notification-actions">
+            <button class="notification-action-btn" id="notificationReplyBtn">Répondre</button>
+            <button class="notification-action-btn primary" id="notificationOpenBtn">Ouvrir</button>
+        </div>
+    </div>
+
+    <!-- Modal de prévisualisation -->
+    <div id="previewModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content preview-modal">
+            <div class="modal-header">
+                <h3>Prévisualisation</h3>
+                <button class="modal-close" id="closePreviewModal">×</button>
+            </div>
+            <div class="modal-body">
+                <div id="previewContent"></div>
+                <div class="preview-actions">
+                    <button class="action-btn" id="cancelPreviewBtn">Annuler</button>
+                    <button class="action-btn primary" id="sendPreviewBtn">Envoyer</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script src="http://localhost:5000/socket.io/socket.io.js"></script>
+    <script src="test-script.js"></script>
+</body>
+</html>

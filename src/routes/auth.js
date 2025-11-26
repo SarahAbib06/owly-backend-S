@@ -1,5 +1,5 @@
+// routes/authRoutes.js
 import express from "express";
-
 import {
   register,
   verifyOtp,
@@ -14,10 +14,20 @@ import {
 import {
   uploadProfilePicture,
   uploadMiddleware,
+  deleteProfilePicture,
 } from "../controllers/uploadController.js";
 
-// authMiddleware from '../middleware/auth.js';
-import authMiddleware from "../middleware/auth.js";
+import {
+  updateUsername,
+  getProfile
+} from '../controllers/profileController.js';
+
+import authMiddleware from '../middleware/auth.js';
+import { deleteAccount, getBlockedUsers, unblockUser,
+  changePassword } from "../controllers/accountController.js";
+
+
+
 const router = express.Router();
 
 // ========================================
@@ -44,8 +54,27 @@ router.post(
   uploadProfilePicture
 );
 
-router.get("/messagerie", authMiddleware, (req, res) => {
+router.put(
+  '/profile/upload',
+  authMiddleware,
+  uploadMiddleware,
+  uploadProfilePicture
+);
+
+router.delete(
+  '/profile/picture',
+  authMiddleware,
+  deleteProfilePicture
+);
+
+// Routes pour les paramètres du profil
+router.put('/profile/username', authMiddleware, updateUsername);
+router.get('/profile', authMiddleware, getProfile);
+
+// Route de test
+router.get('/messagerie', authMiddleware, (req, res) => {
   res.send(`Salut ${req.user.email}, tu es connecté !`);
 });
+router.post("/delete-account", authMiddleware, deleteAccount);
 
 export default router;
