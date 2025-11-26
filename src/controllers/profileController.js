@@ -1,7 +1,7 @@
 // controllers/profileController.js
 import User from "../models/User.js";
 
-// Mettre à jour le username (avec les mêmes contrôles que l'inscription)
+// Mettre à jour le username 
 export const updateUsername = async (req, res) => {
   try {
     const { username } = req.body;
@@ -13,9 +13,9 @@ export const updateUsername = async (req, res) => {
       });
     }
 
-    // ---------------------------
-    // 1️⃣ Vérification REGEX
-    // ---------------------------
+    
+    //  Vérification REGEX
+    
     const usernameRegex = /^[a-zA-Z0-9_.-]+$/;
 
     if (!usernameRegex.test(username)) {
@@ -25,9 +25,9 @@ export const updateUsername = async (req, res) => {
       });
     }
 
-    // ---------------------------
-    // 2️⃣ Normalisation du username
-    // ---------------------------
+    
+    //  Normalisation du username
+    
     let cleanUsername = username
       .normalize("NFKD")                    // normalise et retire accents
       .replace(/\p{Diacritic}/gu, "")       // supprime accents restants
@@ -35,19 +35,19 @@ export const updateUsername = async (req, res) => {
       .toLowerCase()                        // casse uniforme
       .replace(/[\s\u00A0]/g, "");          // supprime TOUT type d'espace
 
-    // ---------------------------
-    // 3️⃣ Vérification longueur
-    // ---------------------------
+    
+    //  Vérification longueur
+   
     if (cleanUsername.length < 3 || cleanUsername.length > 30) {
       return res.status(400).json({
         message: "Le nom d'utilisateur doit contenir entre 3 et 30 caractères."
       });
     }
 
-    // ---------------------------
-    // 4️⃣ Vérification unicité
+    
+    //  Vérification unicité
     // (exclut l'utilisateur actuel)
-    // ---------------------------
+    
     const existingUser = await User.findOne({
       username: cleanUsername,
       _id: { $ne: userId }
@@ -59,9 +59,9 @@ export const updateUsername = async (req, res) => {
       });
     }
 
-    // ---------------------------
-    // 5️⃣ Mise à jour en base
-    // ---------------------------
+   
+    //  Mise à jour en base
+  
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       { username: cleanUsername },
@@ -83,9 +83,9 @@ export const updateUsername = async (req, res) => {
 
 
 
-// ---------------------------
+
 // Récupérer les infos du profil
-// ---------------------------
+
 export const getProfile = async (req, res) => {
   try {
     const userId = req.user.id;

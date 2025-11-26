@@ -30,9 +30,9 @@ import { deleteAccount, getBlockedUsers, unblockUser,
 
 const router = express.Router();
 
-// ========================================
+
 // ROUTES PUBLIQUES
-// ========================================
+
 router.post('/register', register);
 router.post('/verify-otp', verifyOtp);
 router.post('/resend-otp', resendOtp);
@@ -41,7 +41,7 @@ router.post('/verify-inactivity-otp', verifyInactivityOtp);
 router.post('/forgot-password', forgotPassword);
 router.post('/verify-otp-reset', verifyOtpReset);
 
-// ========================================
+
 // ROUTES PROTÉGÉES
 // ========================================
 router.get('/me', authMiddleware, getMe);

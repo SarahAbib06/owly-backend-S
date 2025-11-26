@@ -7,23 +7,23 @@ import User from '../models/User.js';
 import PendingUser from '../models/PendingUser.js';
 import sendEmail from '../utils/sendEmail.js';
 
-// ========================================
+
 // FONCTION UNIQUE DE GÉNÉRATION D'OTP
-// ========================================
+
 const generateOtp = () => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
 
-// ========================================
+
 // FONCTION UNIVERSELLE JWT — UNE SEULE POUR TOUTES LES FONCTIONNALITÉS
-// ========================================
+
 const generateToken = (payload, expiresIn = '7d') => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };
 
-// ========================================
+
 // ENVOIE EMAIL À CHAQUE CONNEXION
-// ========================================
+
 const sendLoginAlertEmail = async (user, req, email) => {
   console.log('\nENVOI ALERTE CONNEXION POUR:', email);
   const userAgent = req.headers['user-agent'] || 'Inconnu';
@@ -61,9 +61,9 @@ const sendLoginAlertEmail = async (user, req, email) => {
   console.log('EMAIL ALERTE CONNEXION ENVOYÉ !\n');
 };
 
-// ========================================
+
 // 1. REGISTER
-// ========================================
+
 export const register = async (req, res) => {
   try {
     const { username, email, password, passwordConfirm } = req.body;
@@ -73,7 +73,7 @@ const usernameRegex = /^[a-zA-Z0-9_.-]+$/;
 
 if (!usernameRegex.test(username)) {
   return res.status(400).json({
-    message: "Le nom d'utilisateur ne doit contenir que des lettres, chiffres, '.', '-' ou '_' et aucun espace."
+    message: "Le nom d'utilisateur est invalide"
   });
 }
 
@@ -155,9 +155,9 @@ if (cleanUsername.length < 3 || cleanUsername.length > 30) {
   }
 };
 
-// ========================================
+
 // 2. VERIFY OTP (INSCRIPTION)
-// ========================================
+
 export const verifyOtp = async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -189,9 +189,9 @@ export const verifyOtp = async (req, res) => {
   }
 };
 
-// ========================================
+
 // 3. RESEND OTP
-// ========================================
+
 export const resendOtp = async (req, res) => {
   try {
     const { email } = req.body;
@@ -235,9 +235,9 @@ export const resendOtp = async (req, res) => {
   }
 };
 
-// ========================================
+
 // 4. LOGIN
-// ========================================
+
 export const login = async (req, res) => {
   const { email, password } = req.body;
 
@@ -324,9 +324,9 @@ export const login = async (req, res) => {
   }
 };
 
-// ========================================
+
 // 5. VÉRIFIER OTP INACTIVITÉ
-// ========================================
+
 export const verifyInactivityOtp = async (req, res) => {
   const { token, otp } = req.body;
   if (!token || !otp) return res.status(400).json({ message: 'Token et OTP requis' });
@@ -353,9 +353,9 @@ export const verifyInactivityOtp = async (req, res) => {
   }
 };
 
-// ========================================
+
 // 6. GET CURRENT USER
-// ========================================
+
 export const getMe = async (req, res) => {
   try {
     const user = await User.findById(req.user.id).select("-password");
@@ -378,9 +378,9 @@ export const getMe = async (req, res) => {
 };
 
 
-// ========================================
+
 // 7. FORGOT PASSWORD
-// ========================================
+
 export const forgotPassword = async (req, res) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ message: 'Email requis' });
@@ -432,9 +432,9 @@ export const forgotPassword = async (req, res) => {
   }
 };
 
-// ========================================
+
 // 8. VÉRIFIER OTP RESET
-// ========================================
+
 export const verifyOtpReset = async (req, res) => {
   const { token, otp, newPassword } = req.body;
   if (!token || !otp || !newPassword || newPassword.length !== 8) {
