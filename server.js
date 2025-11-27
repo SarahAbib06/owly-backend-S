@@ -74,7 +74,10 @@ const io = new Server(server, {
 
 // ✅ 1. Connexion à la base de données
 connectDB();
+app.set('io', io); 
 
+// ✅ Configuration des sockets
+configureChatSockets(io);
 // 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
 const cleanupOrphans = async () => {
   try {
@@ -102,8 +105,6 @@ app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
 
-// ✅ 4. Configuration Socket.io
-configureChatSockets(io);
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;

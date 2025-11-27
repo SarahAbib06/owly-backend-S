@@ -3,7 +3,7 @@ import { conversationController } from "../controllers/conversationController.js
 import Participants from "../models/Participants.js";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
-import Reaction from "../models/Reaction.js"; // 🆕 IMPORT AJOUTÉ
+import Reaction from "../models/Reaction.js";
 import jwt from "jsonwebtoken";
 
 export const configureChatSockets = (io) => {
@@ -386,7 +386,7 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ
+    // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ - CORRIGÉ SANS DOUBLON
     socket.on("send_message", async (data) => {
       console.log("📨 Message reçu:", data);
 
@@ -419,7 +419,7 @@ export const configureChatSockets = (io) => {
           Id_sender: socket.userId, // ← SÉCURISÉ DU TOKEN
         };
 
-        // SAUVEGARDE DU MESSAGE
+        // SAUVEGARDE DU MESSAGE (l'émission se fait dans handleMessageCreation)
         const savedMessage = await messageController.createMessage(
           finalMessageData,
           io,
@@ -429,14 +429,14 @@ export const configureChatSockets = (io) => {
         // METTRE À JOUR L'ACTIVITÉ
         await updateUserActivity(socket.userId, socket.id);
 
-        // Réponse à l'émetteur
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
         socket.emit("message_sent", {
           success: true,
           data: savedMessage,
           timestamp: new Date(),
         });
 
-        console.log("🎉 Message diffusé - ID:", savedMessage._id);
+        console.log("🎉 Message traité - ID:", savedMessage._id);
       } catch (error) {
         console.error("💥 Erreur traitement message:", error.message);
 
@@ -448,7 +448,7 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ
+    // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ SANS DOUBLON
     socket.on('send_image_message', async (data) => {
       console.log('🖼️ Image message reçu:', data);
       
@@ -461,7 +461,6 @@ export const configureChatSockets = (io) => {
           );
         }
 
-        // 🆕 CORRECTION : Supprimer Id_sender de messageData
         const messageData = {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
@@ -486,32 +485,25 @@ export const configureChatSockets = (io) => {
           mimetype: data.fileType || 'image/jpeg'
         };
 
-        // 🆕 CORRECTION : Passer socket.userId comme 4ème paramètre
+        // 🆕 L'émission se fait dans uploadImageMessage via handleMessageCreation
         const savedMessage = await messageController.uploadImageMessage(
           file, 
           messageData, 
           io, 
-          socket.userId // ← AJOUTÉ ICI
+          socket.userId
         );
 
         // METTRE À JOUR L'ACTIVITÉ
         await updateUserActivity(socket.userId, socket.id);
 
-        // 🆕 CORRECTION : Utiliser socket.to() au lieu de io.to()
-        socket.to(savedMessage.conversationId.toString()).emit('new_message', {
-          event: 'new_message',
-          data: savedMessage,
-          timestamp: new Date()
-        });
-
-        // Confirmation à l'envoyeur
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
         socket.emit('image_message_sent', {
           success: true,
           data: savedMessage,
           timestamp: new Date()
         });
 
-        console.log('🖼️ Message image diffusé - ID:', savedMessage._id);
+        console.log('🖼️ Message image traité - ID:', savedMessage._id);
 
       } catch (error) {
         console.error('💥 Erreur traitement image message:', error.message);
@@ -523,7 +515,7 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI FICHIER - CORRIGÉ
+    // 🆕 ÉVÉNEMENT ENVOI FICHIER - CORRIGÉ SANS DOUBLON
     socket.on('send_file_message', async (data) => {
       console.log('📎 File message reçu:', data);
       
@@ -536,7 +528,6 @@ export const configureChatSockets = (io) => {
           );
         }
 
-        // 🆕 CORRECTION : Supprimer Id_sender de messageData
         const messageData = {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
@@ -566,12 +557,12 @@ export const configureChatSockets = (io) => {
           size: data.fileSize
         };
 
-        // 🆕 CORRECTION : Passer socket.userId comme 4ème paramètre
+        // 🆕 L'émission se fait dans uploadFileMessage via handleMessageCreation
         const savedMessage = await messageController.uploadFileMessage(
           file,
           messageData,
           io,
-          socket.userId // ← AJOUTÉ ICI
+          socket.userId
         );
 
         // METTRE À JOUR L'ACTIVITÉ
@@ -595,21 +586,14 @@ export const configureChatSockets = (io) => {
           timestamp: new Date()
         };
 
-        // 🆕 CORRECTION : Utiliser socket.to() au lieu de io.to()
-        socket.to(savedMessage.conversationId.toString()).emit('new_message', {
-          event: 'new_message',
-          data: formattedMessage,
-          timestamp: new Date()
-        });
-
-        // Confirmation à l'envoyeur
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
         socket.emit('file_message_sent', {
           success: true,
           data: formattedMessage,
           timestamp: new Date()
         });
 
-        console.log('📎 Message fichier diffusé - ID:', savedMessage._id);
+        console.log('📎 Message fichier traité - ID:', savedMessage._id);
 
       } catch (error) {
         console.error('💥 Erreur traitement fichier message:', error.message);
@@ -621,7 +605,7 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI VIDÉO - CORRIGÉ
+    // 🆕 ÉVÉNEMENT ENVOI VIDÉO - CORRIGÉ SANS DOUBLON
     socket.on('send_video_message', async (data) => {
       console.log('🎥 Video message reçu:', data);
       
@@ -638,7 +622,6 @@ export const configureChatSockets = (io) => {
           );
         }
 
-        // 🆕 CORRECTION : Supprimer Id_sender de messageData
         const messageData = {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
@@ -659,12 +642,12 @@ export const configureChatSockets = (io) => {
           size: data.fileSize
         };
 
-        // 🆕 CORRECTION : Passer socket.userId comme 4ème paramètre
+        // 🆕 L'émission se fait dans uploadVideoMessage via handleMessageCreation
         const savedMessage = await messageController.uploadVideoMessage(
           file,
           messageData, 
           io,
-          socket.userId // ← AJOUTÉ ICI
+          socket.userId
         );
 
         // METTRE À JOUR L'ACTIVITÉ
@@ -687,21 +670,14 @@ export const configureChatSockets = (io) => {
           timestamp: new Date()
         };
 
-        // 🆕 CORRECTION : Utiliser socket.to() au lieu de io.to()
-        socket.to(savedMessage.conversationId.toString()).emit('new_message', {
-          event: 'new_message',
-          data: formattedMessage,
-          timestamp: new Date()
-        });
-
-        // Confirmation à l'envoyeur
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
         socket.emit('video_message_sent', {
           success: true,
           data: formattedMessage,
           timestamp: new Date()
         });
 
-        console.log('🎥 Message vidéo diffusé - ID:', savedMessage._id);
+        console.log('🎥 Message vidéo traité - ID:', savedMessage._id);
 
       } catch (error) {
         console.error('💥 Erreur traitement vidéo message:', error.message);

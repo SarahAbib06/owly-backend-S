@@ -59,8 +59,7 @@ export const sendAudioMessage = async (req, res) => {
     fs.unlinkSync(req.file.path);
 
     // ⏱️ CALCULER LA DURÉE AUDIO
-    const audioDuration = Math.round(cloudinaryResult.duration) || 30;
-
+const audioDuration = cloudinaryResult.duration ? Math.round(cloudinaryResult.duration) : 30;
     // 💾 CRÉATION DU MESSAGE AUDIO
     console.log("💾 Création du message en base...");
     const newMessage = new Message({
@@ -137,6 +136,7 @@ export const sendAudioMessage = async (req, res) => {
         publicId: cloudinaryResult.public_id,
         format: cloudinaryResult.format,
         duration: cloudinaryResult.duration,
+        durationFormatted: formatDuration(audioDuration),
       },
     });
   } catch (error) {

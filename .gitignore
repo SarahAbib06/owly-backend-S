@@ -1,13 +1,12 @@
 
 
-# src/frontendtest/
 
 
 
 .env
 
 node_modules/
-
-
-# src/frontendtest/
+package.json
+package-lock.json
+src/frontendtest/
 

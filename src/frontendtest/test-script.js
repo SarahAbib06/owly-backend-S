@@ -23,6 +23,7 @@ let state = {
     pendingFiles: [],
     availableReactions: [],
     currentMessageForReaction: null,
+    isSendingMessage: false,
     
     // 🎤 ÉTAT ENREGISTREMENT VOCAL AMÉLIORÉ
     audioRecorder: {
@@ -1308,7 +1309,9 @@ function updateChatHeader(conversation) {
 }
 
 async function loadMessages(conversationId, showLoader = true) {
-  if (state.isLoadingMessages) return;
+    if (state.isLoadingMessages && !showLoader) {
+        return;
+    }
 
   state.isLoadingMessages = true;
 
@@ -1674,6 +1677,14 @@ async function sendMessage() {
 
   if (!content || !state.currentConversation) return;
 
+  // 🆕 PROTECTION ANTI-DOUBLE CLIC
+  if (state.isSendingMessage) {
+    console.log('🚫 Message déjà en cours d\'envoi - bloqué');
+    return;
+  }
+
+  state.isSendingMessage = true;
+
   const sendButton = document.getElementById("sendButton");
   const sendStatus = document.getElementById("sendStatus");
 
@@ -1681,50 +1692,58 @@ async function sendMessage() {
     setButtonLoading(sendButton, true);
     sendStatus.textContent = "Envoi...";
 
-    messageInput.value = "";
+    console.log('🎯 ENVOI TEMPS RÉEL WebSocket');
 
-    if (state.socket && state.isConnected) {
-      state.socket.emit("send_message", {
-        conversationId: state.currentConversation._id,
-        content: content,
-        typeMessage: "text",
-      });
-      
-      sendStatus.textContent = "Envoi...";
-    } else {
-      const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${state.token}`,
-        },
-        body: JSON.stringify({
-          conversationId: state.currentConversation._id,
-          content: content,
-          typeMessage: "text",
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Erreur d'envoi");
-      }
-      
-      await loadMessages(state.currentConversation._id, false);
-      sendStatus.textContent = "✓ Envoyé";
+    // 🆕 VÉRIFICATION RENFORCÉE WEBSOCKET
+    if (!state.socket) {
+      throw new Error('WebSocket non initialisé');
     }
 
+    if (!state.isConnected) {
+      // 🆕 TENTATIVE DE RECONNEXION AUTOMATIQUE
+      console.log('🔄 Tentative de reconnexion WebSocket...');
+      state.socket.connect();
+      
+      // Attendre un peu pour la reconnexion
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      if (!state.socket.connected) {
+        throw new Error('WebSocket toujours déconnecté après reconnexion');
+      }
+    }
+
+    // 🎯 ENVOI PAR WEBSOCKET UNIQUEMENT
+    console.log('📤 Émission WebSocket:', {
+      conversationId: state.currentConversation._id,
+      content: content.substring(0, 50) + '...'
+    });
+
+    state.socket.emit("send_message", {
+      conversationId: state.currentConversation._id,
+      content: content,
+      typeMessage: "text",
+    });
+
+    // Vide immédiatement le champ
+    messageInput.value = "";
+    sendStatus.textContent = "Envoi en cours...";
+
+    // 🆕 TIMEOUT DE SÉCURITÉ
     setTimeout(() => {
-      sendStatus.textContent = "";
+      if (sendStatus.textContent === "Envoi en cours...") {
+        sendStatus.textContent = "✓ Envoyé (temps réel)";
+      }
     }, 2000);
+
   } catch (error) {
-    console.error("Send message error:", error);
-    sendStatus.textContent = "❌ Erreur";
-    showMessage("Erreur d'envoi du message", "error");
+    console.error("❌ Erreur envoi WebSocket:", error);
+    sendStatus.textContent = "❌ Erreur WebSocket";
+    showMessage("WebSocket déconnecté - Rechargez la page", "error");
+    // Remet le contenu pour réessayer
     messageInput.value = content;
   } finally {
     setButtonLoading(sendButton, false);
+    state.isSendingMessage = false;
   }
 }
 
@@ -1792,11 +1811,31 @@ function connectSocketIO() {
     }
   });
 
-  state.socket.on("new_message", (message) => {
-    console.log("📨 New message received:", message);
-    handleNewMessage(message);
-  });
-
+// ==== APRES - CORRIGÉ ====
+state.socket.on("new_message", (data) => {
+  console.log("🔔 [STRUCTURE BACKEND] Message reçu:", data);
+  
+  // 🎯 ADAPTATION À LA STRUCTURE BACKEND
+  const message = {
+    _id: data._id || data.messageId,
+    conversationId: data.conversationId,
+    Id_sender: data.Id_sender,  // ✅ Structure backend
+    senderId: data.Id_sender,   // ✅ Compatibilité frontend
+    content: data.content,
+    typeMessage: data.typeMessage,
+    status: data.status || "sent",
+    timestamp: data.timestamp || new Date(),
+    createdAt: data.createdAt || data.timestamp || new Date(),
+    
+    // 🎯 Support des fichiers multimédias
+    ...(data.imageInfo && { imageInfo: data.imageInfo }),
+    ...(data.fileInfo && { fileInfo: data.fileInfo }),
+    ...(data.videoInfo && { videoInfo: data.videoInfo })
+  };
+  
+  console.log("🔄 Message adapté pour le frontend:", message);
+  handleNewMessage(message);
+});
   // 🎤 ÉVÉNEMENTS AUDIO ADAPTÉS
   state.socket.on("audio_message_sent", (data) => {
     console.log('✅ Audio sent confirmation:', data);
@@ -1895,24 +1934,11 @@ function handleFileMessageSent(data) {
 function handleNewMessage(message) {
     console.log('📨 Nouveau message reçu:', message);
     
-    if (state.currentConversation && message.conversationId === state.currentConversation._id) {
-        const existingMessages = state.messages.get(state.currentConversation._id) || [];
-        const messageExists = existingMessages.some(m => m._id === message._id);
-        
-        if (!messageExists) {
-            existingMessages.push(message);
-            const sortedMessages = existingMessages.sort((a, b) => {
-                const dateA = new Date(a.createdAt || a.timestamp || a.date);
-                const dateB = new Date(b.createdAt || b.timestamp || b.date);
-                return dateA - dateB;
-            });
-            
-            state.messages.set(state.currentConversation._id, sortedMessages);
-            renderMessages(state.currentConversation._id);
-        }
-        
-        markAsRead(state.currentConversation._id);
-    } else {
+    // 🎯 Mettre à jour la dernière conversation
+    updateConversationLastMessage(message.conversationId, message);
+    
+    // 🎯 Mettre à jour les badges de notification
+    if (!state.currentConversation || message.conversationId !== state.currentConversation._id) {
         updateConversationBadge(message.conversationId);
         
         let preview = message.content;
@@ -1928,8 +1954,18 @@ function handleNewMessage(message) {
             messagePreview: preview
         });
     }
-
-    updateConversationLastMessage(message.conversationId, message);
+    
+    // 🎯 SI c'est la conversation active, recharger les messages UNE FOIS
+    if (state.currentConversation && message.conversationId === state.currentConversation._id) {
+        // ⛔ NE PAS ajouter manuellement le message
+        // ✅ Laisser le rechargement naturel se faire
+        markAsRead(state.currentConversation._id);
+        
+        // Optionnel : recharger les messages après un court délai
+        setTimeout(() => {
+            loadMessages(state.currentConversation._id, false);
+        }, 100);
+    }
 }
 
 function handleTypingIndicator(data) {
