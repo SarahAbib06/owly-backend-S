@@ -6,7 +6,9 @@ const pendingUserSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   otp: { type: String, required: true },           // ← Doit exister
   otpExpires: { type: Date, required: true },      // ← Doit exister
-  createdAt: { type: Date, default: Date.now }
+  createdAt: { type: Date, default: Date.now },
+  profilePicture: { type: String,
+       default: "https://res.cloudinary.com/dv9oqjulh/image/upload/v1764324539/photo_de_profil_par_defaut_j3qm1p.png" },
 });
 
 // Remplacez module.exports par :

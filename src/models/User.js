@@ -8,7 +8,8 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, unique: true },
     email: { type: String, required: true, unique: true },
     passwordHash: { type: String, required: true }, // OBLIGATOIRE
-    profilePicture: { type: String, default: null },
+    profilePicture: { type: String,
+       default: "https://res.cloudinary.com/dv9oqjulh/image/upload/v1764324539/photo_de_profil_par_defaut_j3qm1p.png" },
     qrCode: { type: String },
     status: { type: String, enum: ['online', 'offline', 'away'], default: 'offline' },
     createdAt: { type: Date, default: Date.now },

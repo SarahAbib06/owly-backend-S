@@ -3,6 +3,7 @@ import express from 'express';
 import cors from 'cors';
 import connectDB from './src/config/db.js';
 import authRoutes from './src/routes/auth.js';
+import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
 
 
 
@@ -20,11 +21,12 @@ app.use(cors({
 
 //  2. Activer la lecture du JSON
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+app.use("/public", express.static("public"));
 
 
 //  3. Les routes après
 app.use('/api/auth', authRoutes);
+app.use('/api', searchRelationsRoutes);
 
 
 const PORT = process.env.PORT || 5000;

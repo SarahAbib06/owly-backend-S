@@ -19,7 +19,7 @@ export const uploadMiddleware = multer({
   },
 }).single("profile");
 
-// Upload vers Cloudinary
+
 // Upload vers Cloudinary
 export const uploadProfilePicture = async (req, res) => {
   try {
@@ -109,7 +109,7 @@ export const deleteProfilePicture = async (req, res) => {
     const updatedUser = await User.findByIdAndUpdate(
       userId,
       {
-        profilePicture: null,
+        profilePicture: "https://res.cloudinary.com/dv9oqjulh/image/upload/v1764324539/photo_de_profil_par_defaut_j3qm1p.png",
         profilePictureId: null,
       },
       { new: true }
