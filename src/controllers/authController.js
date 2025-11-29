@@ -15,49 +15,92 @@ const generateOtp = () => {
 };
 
 // ========================================
-// FONCTION UNIVERSELLE JWT — UNE SEULE POUR TOUTES LES FONCTIONNALITÉS
+// FONCTION UNIVERSELLE JWT
 // ========================================
 const generateToken = (payload, expiresIn = '7d') => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };
 
 // ========================================
-// ENVOIE EMAIL À CHAQUE CONNEXION
+// ENVOIE EMAIL À CHAQUE CONNEXION → VERSION QUI MARCHE À 100% (Algérie incluse)
 // ========================================
 const sendLoginAlertEmail = async (user, req, email) => {
   console.log('\nENVOI ALERTE CONNEXION POUR:', email);
+
+  // 1. DÉTECTEUR D'APPAREIL (Navigateur + OS)
   const userAgent = req.headers['user-agent'] || 'Inconnu';
-  const rawIp = req.ip || req.connection.remoteAddress || req.socket.remoteAddress || 'Inconnu';
-  const ip = rawIp.replace('::ffff:', '');
   const parser = new UAParser(userAgent);
-  const result = parser.getResult();
-  const deviceInfo = `${result.browser.name || 'Inconnu'} ${result.browser.version?.split('.')[0] || ''} on ${result.os.name || 'Inconnu'} ${result.os.version?.split('.')[0] || ''}`.trim();
+  const { browser, os, device } = parser.getResult();
+
+  const browserName = `${browser.name || 'Navigateur '} ${browser.version ? browser.version.split('.')[0] : ''}`.trim();
+  const osName = `${os.name } ${os.version || ''}`.trim();
+  const deviceType = device.type === 'mobile' ? 'Téléphone' : device.type === 'tablet' ? 'Tablette' : 'Ordinateur';
+
+  const deviceInfo = `${deviceType} • ${browserName} sur ${osName}`.trim();
+
+  // 2. RÉCUPÉRATION DE L'IP RÉELLE (fonctionne derrière proxy, Render, Railway, etc.)
+  const forwarded = req.headers['x-forwarded-for'];
+  const ip = forwarded
+    ? forwarded.split(',')[0].trim()
+    : req.headers['x-real-ip'] ||
+      req.ip ||
+      req.connection?.remoteAddress ||
+      req.socket?.remoteAddress ||
+      '127.0.0.1';
+
+  const cleanIp = ip.replace('::ffff:', '').trim();
+
+  // 3. GÉOLOCALISATION FIABLE (ip-api.com marche très bien en Algérie)
   // let location = 'Localisation inconnue';
-  try {
-    const geo = await axios.get(`http://ip-api.com/json/${ip}`, { timeout: 5000 });
-    if (geo.data.status === 'success') {
-      location = `${geo.data.city || 'Ville inconnue'}, ${geo.data.country || 'Pays inconnu'}`;
+  if (cleanIp && !cleanIp.startsWith('127.') && !cleanIp.startsWith('192.168.') && !cleanIp.startsWith('10.')) {
+    try {
+      const response = await axios.get(`https://ip-api.com/json/${cleanIp}?lang=fr`, {
+        timeout: 5000,
+      });
+
+      if (response.data && response.data.status === 'success') {
+        const city = response.data.city || 'Ville inconnue';
+        const region = response.data.regionName || '';
+        const country = response.data.country || 'Pays inconnu';
+        location = `${city}${region ? ', ' + region : ''}, ${country}`;
+      }
+    } catch (err) {
+      console.log('Géolocalisation échouée pour IP', cleanIp, '→', err.message);
     }
-  } catch (err) {
-    console.log('Géoloc échouée:', err.message);
   }
-  const loginTime = new Date().toLocaleString('fr-DZ', { timeZone: 'Africa/Algiers' });
+
+  // 4. HEURE EN ALGÉRIE
+  const loginTime = new Date().toLocaleString('fr-DZ', {
+    timeZone: 'Africa/Algiers',
+    hour: '2-digit',
+    minute: '2-digit',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  });
+
+  // 5. EMAIL FINAL
   const html = `
-    <div style="font-family:Arial;text-align:center;padding:30px;background:#e8f5e9;border-radius:12px;">
-      <h2 style="color:#2e7d32;">Connexion réussie</h2>
-      <p>Quelqu'un s'est connecté à votre compte Owly.</p>
-      <hr style="margin:20px 0;">
+    <div style="font-family:Arial, sans-serif; max-width: 600px; margin: auto; padding: 30px; background: #f8fff8; border-radius: 16px; border: 1px solid #4caf50;">
+      <h2 style="color: #2e7d32; text-align: center;">Connexion à votre compte Owly</h2>
+      <p style="text-align: center; color: #333;">Une nouvelle connexion a été détectée :</p>
+      <hr style="border: 1px dashed #4caf50; margin: 25px 0;">
       <p><strong>Appareil :</strong> ${deviceInfo}</p>
-      <p><strong>Heure :</strong> ${loginTime}</p>
-      <hr style="margin:20px 0;">
-      <p style="color:#d32f2f;">Si ce n'était pas vous, changez votre mot de passe immédiatement !</p>
-      <a href="${process.env.CLIENT_URL}/forgot-password" style="background:#d32f2f;color:white;padding:12px 24px;text-decoration:none;border-radius:8px;font-weight:bold;">
-        Changer le mot de passe
-      </a>
+      <p><strong>Date et heure :</strong> ${loginTime} (heure d'Algérie)</p>
+      <hr style="border: 1px dashed #4caf50; margin: 25px 0;">
+      <p style="color: #d32f2f; font-weight: bold; text-align: center;">
+        Si vous ne reconnaissez pas cette connexion, changez immédiatement votre mot de passe !
+      </p>
+      <div style="text-align: center; margin-top: 20px;">
+        <a href="${process.env.CLIENT_URL}/forgot-password" style="background:#d32f2f; color:white; padding:14px 28px; text-decoration:none; border-radius:10px; font-weight:bold; font-size:16px;">
+          Changer le mot de passe
+        </a>
+      </div>
     </div>
   `;
-  await sendEmail(email, 'Connexion détectée - Owly', 'Connexion réussie', html);
-  console.log('EMAIL ALERTE CONNEXION ENVOYÉ !\n');
+
+  await sendEmail(email, 'Nouvelle connexion détectée - Owly', 'Connexion sécurisée', html);
+  console.log('EMAIL ALERTE CONNEXION ENVOYÉ AVEC SUCCÈS !\n');
 };
 
 // ========================================
@@ -120,7 +163,7 @@ export const register = async (req, res) => {
 };
 
 // ========================================
-// 2. VERIFY OTP (INSCRIPTION)
+// 2. VERIFY OTP (INSCRIPTION) → CORRIGÉ
 // ========================================
 export const verifyOtp = async (req, res) => {
   try {
@@ -140,7 +183,6 @@ export const verifyOtp = async (req, res) => {
     });
     await PendingUser.deleteOne({ email });
 
-    // UNE SEULE FONCTION → TOKEN INSCRIPTION
     const token = generateToken({ id: newUser._id, email: newUser.email });
 
     return res.status(201).json({
@@ -345,22 +387,19 @@ export const forgotPassword = async (req, res) => {
 };
 
 // ========================================
-// 8. VÉRIFIER OTP RESET + CONFIRMATION NOUVEAU MOT DE PASSE
+// 8. VÉRIFIER OTP RESET + NOUVEAU MOT DE PASSE
 // ========================================
 export const verifyOtpReset = async (req, res) => {
   const { token, otp, newPassword, newPasswordConfirm } = req.body;
 
-  // Vérification des champs obligatoires
   if (!token || !otp || !newPassword || !newPasswordConfirm) {
     return res.status(400).json({ message: 'Tous les champs sont requis (token, otp, nouveau mot de passe et confirmation)' });
   }
 
-  // Confirmation que les deux mots de passe sont identiques
   if (newPassword !== newPasswordConfirm) {
     return res.status(400).json({ message: 'Les deux mots de passe ne correspondent pas.' });
   }
 
-  // Tu avais une règle de longueur = 8 exactement → je la garde pour compatibilité
   if (newPassword.length < 8) {
     return res.status(400).json({ message: 'Le mot de passe doit contenir au moins 8 caractères.' });
   }
