@@ -77,6 +77,12 @@ export const addReaction = async (req, res) => {
     });
 
     await reaction.save();
+    
+    // 🆕 AJOUT : METTRE À JOUR LE MESSAGE AVEC LA RÉACTION
+    await Message.findByIdAndUpdate(messageId, {
+      $push: { reactions: reaction._id }
+    });
+    
     await reaction.populate("id_user", "username avatar");
 
     // 🆕 DIFFUSION TEMPS RÉEL
@@ -140,6 +146,11 @@ export const removeReaction = async (req, res) => {
     if (!reaction) {
       return res.status(404).json({ error: "Réaction non trouvée" });
     }
+
+    // 🆕 AJOUT : RETIRER LA RÉACTION DU MESSAGE
+    await Message.findByIdAndUpdate(messageId, {
+      $pull: { reactions: reaction._id }
+    });
 
     // 🆕 DIFFUSION TEMPS RÉEL
     const io = req.app.get("io");

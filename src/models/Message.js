@@ -8,7 +8,7 @@ const messageSchema = new Schema(
       type: Schema.Types.ObjectId,
       ref: "Conversation",
       required: true,
-      index: true, // on peut mettre l'index directement ici aussi
+      index: true,
     },
     Id_sender: {
       type: Schema.Types.ObjectId,
@@ -28,7 +28,7 @@ const messageSchema = new Schema(
           type: Date,
           default: Date.now,
         },
-        _id: false, // pas besoin d'_id sur chaque entrée du tableau
+        _id: false,
       },
     ],
 
@@ -48,17 +48,25 @@ const messageSchema = new Schema(
       enum: ["sent", "delivered", "seen"],
       default: "sent",
     },
+
+    // 🆕 AJOUT : CHAMP RÉACTIONS
+    reactions: [{
+      type: Schema.Types.ObjectId,
+      ref: "Reaction"
+    }]
   },
   {
-    timestamps: true, // createdAt & updatedAt automatiques
+    timestamps: true,
   }
 );
 
-// Indexes pour les performances (les plus utiles pour un chat)
-messageSchema.index({ conversationId: 1, createdAt: -1 }); // pagination + tri chronologique
+// Indexes pour les performances
+messageSchema.index({ conversationId: 1, createdAt: -1 });
 messageSchema.index({ Id_sender: 1 });
 messageSchema.index({ "readBy.userId": 1 });
 messageSchema.index({ createdAt: -1 });
+// 🆕 AJOUT : Index pour les réactions
+messageSchema.index({ "reactions": 1 });
 
 const Message = model("Message", messageSchema);
 

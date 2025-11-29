@@ -580,11 +580,18 @@ export const messageController = {
         throw new Error("ID conversation invalide");
       }
       const skip = (page - 1) * limit;
-      const messages = await Message.find({ conversationId: conversationId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .lean();
+const messages = await Message.find({ conversationId: conversationId })
+  .sort({ createdAt: -1 })
+  .skip(skip)
+  .limit(limit)
+  .populate({
+    path: 'reactions',
+    populate: {
+      path: 'id_user',
+      select: 'username'
+    }
+  })
+  .lean();
 
       // DÉCHIFFRE TOUS LES MESSAGES AVANT DE LES RENVOYER
       const decryptedMessages = messages.map((msg) => ({
