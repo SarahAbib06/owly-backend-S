@@ -1,3 +1,4 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -17,6 +18,7 @@ import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
+import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
@@ -90,12 +92,13 @@ const cleanupOrphans = async () => {
 cleanupOrphans();
 
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+app.use("/public", express.static("public"));
 
 // ✅ 3. Routes
 app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
+
 
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
@@ -104,6 +107,9 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api', searchRelationsRoutes);
+
 
 
 // ✅ 5. Démarrer le serveur
