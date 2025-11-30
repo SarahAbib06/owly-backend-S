@@ -15,6 +15,7 @@ import authRoutes from "./src/routes/auth.js";
 import { configureChatSockets } from "./src/socket/chatSocket.js";
 import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
+import archiveRoutes from "./src/routes/archiveRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
@@ -104,6 +105,7 @@ app.get("/", (req, res) => {
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
 app.use("/api/conversations", conversationRoutes);
+app.use("/api/archive", archiveRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);

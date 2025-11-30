@@ -59,7 +59,7 @@ function initLoginPage() {
         showForm("register");
     });
 
-    checkExistingAuth();
+    
 }
 
 function showForm(formType) {
@@ -253,36 +253,31 @@ async function handleSuccessfulAuth(authData) {
 }
 
 async function checkExistingAuth() {
-    const token = localStorage.getItem("owly_token");
-    const userData = localStorage.getItem("owly_user");
-
-    // Si pas de token ou pas d'user → on reste sur login
-    if (!token || !userData) {
+    // NOUVELLE LIGNE MAGIQUE → si tu as ?noredirect ou ?login dans l'URL → ON NE REDIRIGE JAMAIS
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.has("noredirect") || urlParams.has("login") || urlParams.has("forceLogin")) {
+        console.log("Redirection désactivée par paramètre URL");
         return;
     }
 
+    const token = localStorage.getItem("owly_token");
+    if (!token) return;
+
     try {
-        // On teste si le token est VALIDE en appelant une route protégée
         const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/me`, {
             method: "GET",
             headers: {
-                "Authorization": `Bearer ${token}`,
-                "Content-Type": "application/json"
+                "Authorization": `Bearer ${token}`
             }
         });
 
         if (response.ok) {
-            const data = await response.json();
-            // Token valide → on garde la session
-            console.log("Session valide, redirection vers messagerie...");
+            // SEULEMENT si pas de paramètre → on redirige
             window.location.href = "conversations.html";
         } else {
-            // Token invalide ou expiré → on nettoie tout
-            console.log("Token invalide ou expiré → déconnexion forcée");
             forceLogout();
         }
-    } catch (error) {
-        console.error("Erreur vérification session:", error);
+    } catch (err) {
         forceLogout();
     }
 }
@@ -318,3 +313,5 @@ function showMessage(message, type = "info") {
         container.style.display = "none";
     }, 5000);
 }
+
+
