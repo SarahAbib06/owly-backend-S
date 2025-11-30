@@ -125,6 +125,10 @@
                     <button class="action-btn" id="infoBtn" title="Informations">
                         <i class="fas fa-info-circle"></i>
                     </button>
+                    <!-- BOUTON GALERIE MÉDIAS & FICHIERS -->
+                    <button class="action-btn" id="mediaGalleryBtn" title="Médias, vidéos & fichiers">
+                        <i class="fas fa-images"></i>
+                    </button>
                     <button class="action-btn menu-btn" id="chatMenuBtn">
                         <i class="fas fa-ellipsis-v"></i>
                     </button>
@@ -556,6 +560,75 @@
 
     <!-- Message Container pour alertes -->
     <div id="messageContainer" class="message-container" style="display: none;"></div>
+
+    <!-- ==================== MODAL GALERIE MÉDIAS & FICHIERS ==================== -->
+<div id="mediaGalleryModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content" style="width: 95%; max-width: 1100px; height: 92vh; background: #1c1c1c; border: 2px solid #f9ee34; border-radius: 16px; overflow: hidden;">
+        <div class="modal-header" style="background: linear-gradient(135deg, #f9ee34, #facc15); color: #1c1c1c; padding: 16px 20px; font-weight: bold;">
+            <h3><i class="fas fa-images"></i> Médias & Fichiers</h3>
+            <button class="modal-close" style="background: rgba(0,0,0,0.2); color: #1c1c1c;" onclick="document.getElementById('mediaGalleryModal').style.display='none'">
+                <i class="fas fa-times"></i>
+            </button>
+        </div>
+        <div style="display: flex; height: calc(100% - 70px); background: #141414;">
+            <!-- Onglets gauche -->
+            <div style="width: 220px; background: #1f1f1f; padding: 20px; border-right: 1px solid #333;">
+                <button id="tabMedia" class="tab-btn active">
+                    <i class="fas fa-photo-video"></i> Médias (<span id="mediaCount">0</span>)
+                </button>
+                <button id="tabFiles" class="tab-btn">
+                    <i class="fas fa-file-alt"></i> Fichiers (<span id="filesCount">0</span>)
+                </button>
+            </div>
+            <!-- Contenu -->
+            <div style="flex: 1; overflow: hidden; display: flex; flex-direction: column;">
+                <div id="mediaGrid" style="flex: 1; padding: 20px; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; background: #141414;"></div>
+                <div id="filesList" style="flex: 1; padding: 20px; overflow-y: auto; display: none; background: #141414;">
+                    <div id="filesContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+#mediaGalleryBtn {
+    background: rgba(249, 238, 52, 0.15);
+    border: 1px solid #f9ee34;
+    border-radius: 50%;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+#mediaGalleryBtn:hover {
+    background: #f9ee34;
+    color: #1c1c1c !important;
+}
+.tab-btn {
+    width: 100%;
+    padding: 14px 16px;
+    margin: 8px 0;
+    background: #2a2a2a;
+    color: #ddd;
+    border: none;
+    border-radius: 12px;
+    text-align: left;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.3s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.tab-btn.active, .tab-btn:hover {
+    background: #f9ee34;
+    color: #1c1c1c;
+    font-weight: bold;
+}
+.tab-btn i { font-size: 18px; }
+</style>
 
     <!-- 🔄 Socket.IO pour temps réel -->
     <script src="http://localhost:5000/socket.io/socket.io.js"></script>

@@ -373,6 +373,138 @@ function initUserPanel() {
   }
 }
 
+// ==================== GALERIE MÉDIAS & FICHIERS — VERSION FINALE AVEC API ====================
+
+document.addEventListener('DOMContentLoaded', () => {
+    const btn = document.getElementById('mediaGalleryBtn');
+    if (btn) btn.addEventListener('click', openMediaGallery);
+});
+
+async function openMediaGallery() {
+    if (!state.currentConversation?._id) {
+        showMessage("Ouvre une conversation d'abord !", "warning");
+        return;
+    }
+
+    const modal = document.getElementById('mediaGalleryModal');
+    modal.style.display = 'flex';
+
+    // Onglet Médias par défaut
+    document.getElementById('tabMedia').classList.add('active');
+    document.getElementById('tabFiles').classList.remove('active');
+    document.getElementById('mediaGrid').style.display = 'grid';
+    document.getElementById('filesList').style.display = 'none';
+
+    await loadMediaFromAPI();
+}
+
+async function loadMediaFromAPI() {
+    const convId = state.currentConversation._id;
+    const token = state.token;
+
+    try {
+        const res = await fetch(`${CONFIG.BACKEND_URL}/api/messages/${convId}/media`, {
+            headers: { Authorization: `Bearer ${token}` }
+        });
+        const data = await res.json();
+
+        if (!data.success) throw new Error("Erreur serveur");
+
+        renderMediaGrid(data.media.items || []);
+        renderFilesList(data.files.items || []);
+
+        document.getElementById('mediaCount').textContent = data.media.items?.length || 0;
+        document.getElementById('filesCount').textContent = data.files.items?.length || 0;
+
+    } catch (err) {
+        console.error("Erreur chargement galerie:", err);
+        showMessage("Impossible de charger la galerie", "error");
+        document.getElementById('mediaGrid').innerHTML = '<p style="grid-column:1/-1; text-align:center; color:#f9ee34; padding:50px;">Erreur de chargement</p>';
+    }
+}
+
+function renderMediaGrid(items) {
+    const grid = document.getElementById('mediaGrid');
+    if (!items || items.length === 0) {
+        grid.innerHTML = `
+            <div style="grid-column:1/-1; text-align:center; padding:80px 20px; color:#999;">
+                <i class="fas fa-images" style="font-size:70px; color:#555; margin-bottom:20px;"></i>
+                <p style="font-size:18px;">Aucun média partagé</p>
+            </div>`;
+        return;
+    }
+
+    grid.innerHTML = items.map(m => {
+        const isVideo = m.type === 'video';
+        return `
+            <div style="cursor:pointer; border-radius:16px; overflow:hidden; position:relative; box-shadow:0 8px 30px rgba(0,0,0,0.8); transition:0.3s;"
+                 onclick="openImageModal('${m.url}')">
+                ${isVideo 
+                    ? `<video src="${m.url}" loading="lazy" style="width:100%; height:180px; object-fit:cover; background:#000;">
+                         <div style="position:absolute; inset:0; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,0.6);">
+                             <i class="fas fa-play-circle" style="font-size:70px; color:#f9ee34;"></i>
+                         </div>
+                       </video>`
+                    : `<img src="${m.url}" loading="lazy" style="width:100%; height:180px; object-fit:cover;">`
+                }
+                <div style="position:absolute; bottom:8px; left:8px; background:rgba(0,0,0,0.7); color:#f9ee34; padding:4px 10px; border-radius:8px; font-size:12px; font-weight:bold;">
+                    ${m.senderName}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function renderFilesList(items) {
+    const container = document.getElementById('filesContainer');
+    if (!items || items.length === 0) {
+        container.innerHTML = `
+            <div style="text-align:center; padding:100px 20px; color:#999;">
+                <i class="fas fa-file-alt" style="font-size:70px; color:#555; margin-bottom:20px;"></i>
+                <p style="font-size:18px;">Aucun fichier partagé</p>
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = items.map(f => {
+        const size = f.size ? formatFileSize(f.size) : '';
+        const name = f.fileName || 'Fichier';
+        return `
+            <div style="background:#1f1f1f; padding:22px; border-radius:16px; margin-bottom:16px; border:2px solid #333; display:flex; justify-content:space-between; align-items:center; transition:0.3s;"
+                 onmouseover="this.style.borderColor='#f9ee34'"
+                 onmouseout="this.style.borderColor='#333'">
+                <div>
+                    <div style="font-weight:bold; color:#f9ee34; font-size:17px;">${name}</div>
+                    <div style="color:#aaa; font-size:13px; margin-top:5px;">
+                        ${size} • ${f.senderName} • ${formatTime(f.timestamp)}
+                    </div>
+                </div>
+                <a href="${f.url}" download="${name}" 
+                   style="background:#f9ee34; color:black; padding:14px 30px; border-radius:12px; text-decoration:none; font-weight:bold;">
+                   Télécharger
+                </a>
+            </div>
+        `;
+    }).join('');
+}
+
+// Onglets
+document.getElementById('tabMedia')?.addEventListener('click', () => {
+    document.getElementById('tabMedia').classList.add('active');
+    document.getElementById('tabFiles').classList.remove('active');
+    document.getElementById('mediaGrid').style.display = 'grid';
+    document.getElementById('filesList').style.display = 'none';
+});
+
+document.getElementById('tabFiles')?.addEventListener('click', () => {
+    document.getElementById('tabFiles').classList.add('active');
+    document.getElementById('tabMedia').classList.remove('active');
+    document.getElementById('mediaGrid').style.display = 'none';
+    document.getElementById('filesList').style.display = 'block';
+});
+
+// ====================== FIN GALERIE ======================
+
 function initConversations() {
   console.log("✅ Conversations initialisées");
 }

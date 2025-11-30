@@ -87,6 +87,10 @@ router.get("/audio/:conversationId", protact, getAudioMessages);
 // NOUVELLES ROUTES ÉPINGLER / DÉSÉPINGLER (ajoutées sans toucher au reste)
 router.post("/:messageId/pin", protact, messageController.pinMessage);
 router.post("/:messageId/unpin", protact, messageController.unpinMessage);
+// Route pour la galerie médias/fichiers (comme Messenger)
+router.get('/:conversationId/media', protact, messageController.getConversationMedia);
+
+
 
 // Bonus : récupérer les messages épinglés d'une conversation (super utile pour l'affichage en haut)
 router.get("/:conversationId/pinned", protact, messageController.getPinnedMessages);

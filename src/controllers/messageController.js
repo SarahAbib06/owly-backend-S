@@ -137,13 +137,11 @@ const validateAndConvertUserId = (userId, fieldName = 'ID utilisateur') => {
     throw new Error(`${fieldName} manquant`);
   }
 
-  // Convertir en string si c'est un ObjectId
   let userIdString = userId;
   if (typeof userId === 'object' && userId.toString) {
     userIdString = userId.toString();
   }
 
-  // Nettoyer et valider le format
   userIdString = userIdString.trim();
   
   if (!mongoose.Types.ObjectId.isValid(userIdString)) {
@@ -155,7 +153,6 @@ const validateAndConvertUserId = (userId, fieldName = 'ID utilisateur') => {
 
 // 🆕 FONCTION UNIFIÉE POUR LA GESTION DES MESSAGES
 const handleMessageCreation = async (messageData, io = null, userIdFromToken = null, additionalData = {}) => {
-  // RÉCUPÉRATION Id_sender SÉCURISÉ
   const Id_sender = userIdFromToken;
 
   const {
@@ -165,7 +162,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     typeMessage = "text",
   } = messageData;
 
-  // VÉRIFICATIONS
   if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
     throw new Error('ID expéditeur invalide');
   }
@@ -187,7 +183,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
   const allowedTypes = ['text', 'image', 'video', 'file', 'emojis'];
   if (!allowedTypes.includes(typeMessage)) throw new Error(`Type non supporté: ${typeMessage}`);
 
-  // DÉTERMINER LE DESTINATAIRE
   let receiverId = Id_receiver ? Id_receiver.toString() : null;
   if (!receiverId && conversationId) {
     const participants = await Participants.find({ Id_Conversation: conversationId })
@@ -206,7 +201,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     throw new Error('Destinataire introuvable – Id_receiver ou conversationId requis');
   }
 
-  // VÉRIFICATION BLOCAGE
   const blockExists = await Relation.findOne({
     status: "blocked",
     $or: [
@@ -220,7 +214,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     );
   }
 
-  // CONVERSATION
   let finalConversationId = conversationId;
   if (!conversationId) {
     const conv = await conversationController.getOrCreateConversation(
@@ -230,9 +223,9 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     finalConversationId = conv._id;
   }
 
-  // CHIFFREMENT UNIQUEMENT POUR LES MESSAGES TEXTES
   const encryptedContent = typeMessage === 'text' ? encryptContent(content.trim()) : content;
 
+    // CORRIGÉ : On sauvegarde aussi les métadonnées image/video/file dans la BDD
   const message = new Message({
     conversationId: finalConversationId,
     Id_sender,
@@ -241,11 +234,14 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     status: "sent",
     time: new Date(),
     readBy: [],
-    unreadFor: []
+    unreadFor: [],
+    // AJOUT CRUCIAL : sauvegarde des infos multimédia dans MongoDB
+    ...(typeMessage === 'image' && additionalData.imageInfo && { imageInfo: additionalData.imageInfo }),
+    ...(typeMessage === 'video' && additionalData.videoInfo && { videoInfo: additionalData.videoInfo }),
+    ...(typeMessage === 'file' && additionalData.fileInfo && { fileInfo: additionalData.fileInfo })
   });
   const savedMessage = await message.save();
 
-  // UN SEUL BLOC POUR LES COMPTEURS NON LUS
   try {
     const participants = await Participants.find({
       Id_Conversation: finalConversationId,
@@ -294,7 +290,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     console.error("Erreur mise à jour compteurs:", error.message);
   }
 
-  // NOTIFICATIONS INTELLIGENTES
   try {
     console.log("Gestion intelligente des notifications...");
 
@@ -313,7 +308,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     const sender = await User.findById(Id_sender);
     const senderName = sender?.username || "Quelqu'un";
 
-    // Préparer le contenu de notification selon le type
     let notificationBody = "";
     if (typeMessage === 'text') {
       notificationBody = content.length > 30 ? content.substring(0, 30) + "..." : content;
@@ -379,29 +373,27 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     console.log("Erreur notifications:", error.message);
   }
 
-  // DIFFUSION WEBSOCKET
   if (io) {
     const messageToEmit = {
       _id: savedMessage._id,
       conversationId: finalConversationId,
       Id_sender: Id_sender,
-      content: typeMessage === 'text' ? content.trim() : content, // EN CLAIR
+      content: typeMessage === 'text' ? content.trim() : content,
       typeMessage: typeMessage,
       status: "sent",
       timestamp: new Date(),
       isGroup: (await Conversation.findById(finalConversationId))?.type === "group",
-      ...additionalData // Inclure les données supplémentaires (infos image, fichier, etc.)
+      ...additionalData
     };
     
     io.to(finalConversationId.toString()).emit('new_message', messageToEmit);
   }
 
-  // RETURN
   return {
     _id: savedMessage._id,
     conversationId: finalConversationId,
     Id_sender,
-    content: typeMessage === 'text' ? content.trim() : content, // EN CLAIR
+    content: typeMessage === 'text' ? content.trim() : content,
     typeMessage,
     status: "sent",
     timestamp: new Date(),
@@ -411,39 +403,21 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
 };
 
 export const messageController = {
-  // 🆕 CREATE MESSAGE UNIFIÉ
   createMessage: async (messageData, io = null, userIdFromToken = null) => {
     return await handleMessageCreation(messageData, io, userIdFromToken);
   },
 
-  // 🆕 UPLOAD IMAGE MESSAGE - SIMPLIFIÉ
+  // IMAGE
   uploadImageMessage: async (file, messageData, io = null, userIdFromToken = null) => {
     try {
-      console.log('🖼️ Début upload image - DEBUG:', {
-        userIdFromToken,
-        hasFile: !!file,
-        messageData
-      });
-
-      // VALIDATION DE L'ID UTILISATEUR
-      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      
-      const { conversationId, Id_receiver } = messageData;
-
-      // VALIDATION DU FICHIER
+      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
       validateFile(file, FILE_CONFIG.image.allowedTypes, FILE_CONFIG.image.maxSize);
 
-      console.log('✅ ID expéditeur validé:', senderObjectId);
-
-      // UPLOAD IMAGE VERS CLOUDINARY
       const uploadResult = await uploadToCloudinary(file, 'image', FILE_CONFIG.image.folder);
 
-      console.log('✅ Image uploadée sur Cloudinary:', uploadResult.secure_url);
-
-      // 🆕 UTILISER LA FONCTION UNIFIÉE
       const messageDataForCreate = {
-        conversationId,
-        Id_receiver,
+        conversationId: messageData.conversationId,
+        Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
         typeMessage: 'image'
       };
@@ -452,101 +426,29 @@ export const messageController = {
         imageInfo: {
           url: uploadResult.secure_url,
           publicId: uploadResult.public_id,
-          width: uploadResult.width,
-          height: uploadResult.height
+          width: uploadResult.width || 0,
+          height: uploadResult.height || 0
         }
       };
 
       return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-
     } catch (error) {
-      console.error('💥 Erreur upload image:', error);
+      console.error('Erreur upload image:', error);
       throw new Error(`Échec upload image: ${error.message}`);
     }
   },
 
-  // 🆕 UPLOAD FILE MESSAGE - SIMPLIFIÉ
-  uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
-    try {
-      console.log('📎 Début upload fichier - DEBUG:', {
-        userIdFromToken,
-        hasFile: !!file,
-        messageData
-      });
-
-      // VALIDATION DE L'ID UTILISATEUR
-      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      
-      const { conversationId, Id_receiver, fileName, fileType, fileSize, originalName } = messageData;
-
-      // VALIDATION DU FICHIER
-      validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
-
-      console.log('✅ ID expéditeur validé:', senderObjectId);
-
-      // UPLOAD FICHIER VERS CLOUDINARY
-      const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
-
-      console.log('✅ Fichier uploadé sur Cloudinary:', uploadResult.secure_url);
-
-      // 🆕 UTILISER LA FONCTION UNIFIÉE
-      const messageDataForCreate = {
-        conversationId,
-        Id_receiver,
-        content: uploadResult.secure_url,
-        typeMessage: 'file'
-      };
-
-      const additionalData = {
-        fileInfo: {
-          url: uploadResult.secure_url,
-          publicId: uploadResult.public_id,
-          originalFilename: uploadResult.original_filename,
-          format: uploadResult.format,
-          bytes: uploadResult.bytes,
-          fileName: fileName,
-          fileType: fileType,
-          fileSize: fileSize,
-          originalName: originalName
-        }
-      };
-
-      return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-
-    } catch (error) {
-      console.error('💥 Erreur upload fichier:', error);
-      throw new Error(`Échec upload fichier: ${error.message}`);
-    }
-  },
-
-  // 🆕 UPLOAD VIDEO MESSAGE - SIMPLIFIÉ
+  // VIDÉO
   uploadVideoMessage: async (file, messageData, io = null, userIdFromToken = null) => {
     try {
-      console.log('🎥 Début upload vidéo - DEBUG:', {
-        userIdFromToken,
-        hasFile: !!file,
-        messageData
-      });
-
-      // VALIDATION DE L'ID UTILISATEUR
-      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      
-      const { conversationId, Id_receiver, fileName, fileType, fileSize } = messageData;
-
-      // VALIDATION DU FICHIER
+      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
       validateFile(file, FILE_CONFIG.video.allowedTypes, FILE_CONFIG.video.maxSize);
 
-      console.log('✅ ID expéditeur validé:', senderObjectId);
-
-      // UPLOAD VIDÉO VERS CLOUDINARY
       const uploadResult = await uploadToCloudinary(file, 'video', FILE_CONFIG.video.folder);
 
-      console.log('✅ Vidéo uploadée sur Cloudinary:', uploadResult.secure_url);
-
-      // 🆕 UTILISER LA FONCTION UNIFIÉE
       const messageDataForCreate = {
-        conversationId,
-        Id_receiver,
+        conversationId: messageData.conversationId,
+        Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
         typeMessage: 'video'
       };
@@ -555,19 +457,121 @@ export const messageController = {
         videoInfo: {
           url: uploadResult.secure_url,
           publicId: uploadResult.public_id,
-          format: uploadResult.format,
-          bytes: uploadResult.bytes,
-          fileName: fileName,
-          fileType: fileType,
-          fileSize: fileSize
+          duration: uploadResult.duration || 0,
+          width: uploadResult.width || 0,
+          height: uploadResult.height || 0,
+          bytes: uploadResult.bytes
         }
       };
 
       return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-
     } catch (error) {
-      console.error('💥 Erreur upload vidéo:', error);
+      console.error('Erreur upload vidéo:', error);
       throw new Error(`Échec upload vidéo: ${error.message}`);
+    }
+  },
+
+  // FICHIER
+  uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+    try {
+      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+      validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
+
+      const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
+
+      const messageDataForCreate = {
+        conversationId: messageData.conversationId,
+        Id_receiver: messageData.Id_receiver,
+        content: uploadResult.secure_url,
+        typeMessage: 'file'
+      };
+
+      const additionalData = {
+        fileInfo: {
+          url: uploadResult.secure_url,
+          publicId: uploadResult.public_id,
+          originalFilename: uploadResult.original_filename || messageData.originalName || 'fichier',
+          bytes: uploadResult.bytes
+        }
+      };
+
+      return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
+    } catch (error) {
+      console.error('Erreur upload fichier:', error);
+      throw new Error(`Échec upload fichier: ${error.message}`);
+    }
+  },
+
+  // 🆕 NOUVELLE FONCTION DEMANDÉE : CONTENU MULTIMÉDIA COMME MESSENGER
+  getConversationMedia: async (req, res) => {
+    try {
+      const { conversationId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 50;
+
+      if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+        return res.status(400).json({ success: false, error: "ID conversation invalide" });
+      }
+
+      const skip = (page - 1) * limit;
+
+      // Récupère TOUS les messages médias (image + vidéo + fichier)
+      const messages = await Message.find({
+        conversationId,
+        typeMessage: { $in: ['image', 'video', 'file'] }
+      })
+        .sort({ time: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      // Sépare images/vidéos et fichiers
+      const media = [];
+      const files = [];
+
+      for (const msg of messages) {
+        const sender = await User.findById(msg.Id_sender).select('username').lean();
+        const senderName = sender?.username || "Inconnu";
+
+        const base = {
+          messageId: msg._id.toString(),
+          senderId: msg.Id_sender.toString(),
+          senderName,
+          timestamp: msg.time || msg.createdAt,
+          url: msg.content
+        };
+
+        if (msg.typeMessage === 'image') {
+          media.push({ ...base, type: 'image', width: msg.imageInfo?.width, height: msg.imageInfo?.height });
+        } else if (msg.typeMessage === 'video') {
+          media.push({ ...base, type: 'video', duration: msg.videoInfo?.duration });
+        } else if (msg.typeMessage === 'file') {
+          files.push({
+            ...base,
+            type: 'file',
+            fileName: msg.fileInfo?.originalFilename || msg.fileInfo?.fileName || 'Fichier',
+            size: msg.fileInfo?.bytes || msg.fileInfo?.fileSize || 0,
+            format: msg.fileInfo?.format || ''
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        media: { // Onglet "Médias" (images + vidéos)
+          items: media,
+          hasMore: media.length === limit
+        },
+        files: { // Onglet "Fichiers"
+          items: files,
+          hasMore: files.length === limit
+        },
+        page,
+        limit
+      });
+    } catch (error) {
+      console.error("Erreur getConversationMedia:", error);
+      res.status(500).json({ success: false, error: error.message });
     }
   },
 
@@ -580,20 +584,19 @@ export const messageController = {
         throw new Error("ID conversation invalide");
       }
       const skip = (page - 1) * limit;
-const messages = await Message.find({ conversationId: conversationId })
-  .sort({ createdAt: -1 })
-  .skip(skip)
-  .limit(limit)
-  .populate({
-    path: 'reactions',
-    populate: {
-      path: 'id_user',
-      select: 'username'
-    }
-  })
-  .lean();
+      const messages = await Message.find({ conversationId: conversationId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: 'reactions',
+          populate: {
+            path: 'id_user',
+            select: 'username'
+          }
+        })
+        .lean();
 
-      // DÉCHIFFRE TOUS LES MESSAGES AVANT DE LES RENVOYER
       const decryptedMessages = messages.map((msg) => ({
         ...msg,
         _id: msg._id.toString(),
@@ -624,7 +627,6 @@ const messages = await Message.find({ conversationId: conversationId })
     return await handleMessageCreation(messageData, io, senderId);
   },
 
-  // ÉPINGLER UN MESSAGE (TEMPS RÉEL)
   pinMessage: async (req, res) => {
     try {
       const { messageId } = req.params;
@@ -661,7 +663,6 @@ const messages = await Message.find({ conversationId: conversationId })
     }
   },
 
-  // DÉSÉPINGLER UN MESSAGE (TEMPS RÉEL)
   unpinMessage: async (req, res) => {
     try {
       const { messageId } = req.params;
@@ -686,7 +687,6 @@ const messages = await Message.find({ conversationId: conversationId })
     }
   },
 
-  // RÉCUPÉRER LES MESSAGES ÉPINGLÉS
   getPinnedMessages: async (req, res) => {
     try {
       const { conversationId } = req.params;
@@ -705,10 +705,6 @@ const messages = await Message.find({ conversationId: conversationId })
     }
   }
 };
-
-  
-
-
 
 // FONCTIONS ANNEXES
 async function isUserOnlineAdvanced(io, userId) {
@@ -746,8 +742,6 @@ async function areNotificationsEnabled(userId) {
   }
 }
 
-
-
 async function shouldSendPushNotification(userId) {
   try {
     const user = await User.findById(userId);
@@ -777,4 +771,3 @@ async function shouldSendPushNotification(userId) {
     return true;
   }
 }
-

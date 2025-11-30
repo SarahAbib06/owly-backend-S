@@ -57,7 +57,29 @@ const messageSchema = new Schema(
     reactions: [{
       type: Schema.Types.ObjectId,
       ref: "Reaction"
-    }]
+    }],
+
+    // Ajoute ça dans ton messageSchema, juste avant timestamps
+imageInfo: {
+  url: String,
+  publicId: String,
+  width: Number,
+  height: Number
+},
+videoInfo: {
+  url: String,
+  publicId: String,
+  duration: Number,
+  width: Number,
+  height: Number
+},
+fileInfo: {
+  url: String,
+  publicId: String,
+  originalFilename: String,
+  bytes: Number
+},
+    
   },
   {
     timestamps: true,
