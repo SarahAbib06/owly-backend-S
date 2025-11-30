@@ -1,24 +1,41 @@
 // ===== CONFIGURATION =====
 const CONFIG = {
-  BACKEND_URL: "http://localhost:5000",
-  SOCKET_URL: "http://localhost:5000",
-  RECONNECT_DELAY: 3000,
-  MAX_RECONNECT_ATTEMPTS: 5,
+    BACKEND_URL: 'http://localhost:5000',
+    SOCKET_URL: 'http://localhost:5000',
+    RECONNECT_DELAY: 3000,
+    MAX_RECONNECT_ATTEMPTS: 5,
+    MAX_FILE_SIZE: 50 * 1024 * 1024 // 50MB
 };
 
 // ===== ÉTAT GLOBAL =====
 let state = {
-  user: null,
-  token: null,
-  conversations: [],
-  currentConversation: null,
-  messages: new Map(),
-  socket: null,
-  isConnected: false,
-  reconnectAttempts: 0,
-  typingUsers: new Map(),
-  notificationPermission: null,
-  isLoadingMessages: false,
+    user: null,
+    token: null,
+    conversations: [],
+    currentConversation: null,
+    messages: new Map(),
+    socket: null,
+    isConnected: false,
+    reconnectAttempts: 0,
+    typingUsers: new Map(),
+    notificationPermission: null,
+    isLoadingMessages: false,
+    pendingFiles: [],
+    availableReactions: [],
+    currentMessageForReaction: null,
+    isSendingMessage: false,
+    
+    // 🎤 ÉTAT ENREGISTREMENT VOCAL AMÉLIORÉ
+    audioRecorder: {
+        mediaRecorder: null,
+        audioChunks: [],
+        audioBlob: null,
+        audioUrl: null,
+        isRecording: false,
+        recordingTimer: null,
+        recordingStartTime: null,
+        audioDuration: 0
+    }
 };
 
 // ===== INITIALISATION =====
@@ -320,10 +337,15 @@ function initMessagingPage() {
   initUserPanel();
   initConversations();
   initMessageInput();
+  initFileUploads();
   initWebSocket();
   initTestButtons();
   initModals();
-
+  initGroupCreation();
+  initReactionsSystem();
+  initUserProfileSystem();
+  initVoiceRecording();
+  
   loadInitialData();
 }
 
@@ -355,11 +377,757 @@ function initConversations() {
   console.log("✅ Conversations initialisées");
 }
 
+function initReactionsSystem() {
+    console.log("🎯 Initialisation du système de réactions...");
+    loadAvailableReactions();
+    
+    document.getElementById('reactionsBtn')?.addEventListener('click', showReactionsForCurrentConversation);
+    document.getElementById('closeReactionsModal')?.addEventListener('click', closeReactionsModal);
+    document.getElementById('testReactionBtn')?.addEventListener('click', testReactionSystem);
+    
+    document.getElementById('reactionsModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'reactionsModal') {
+            closeReactionsModal();
+        }
+    });
+    
+    console.log("✅ Système de réactions initialisé");
+}
+
+async function loadAvailableReactions() {
+    try {
+        console.log("🔄 Chargement des réactions disponibles...");
+        
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/reactions/available`, {
+            headers: { 'Authorization': `Bearer ${state.token}` }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            state.availableReactions = data.reactions || [];
+            console.log("✅ Réactions chargées:", state.availableReactions);
+            updateReactionsModal();
+        } else {
+            console.warn("⚠️ Impossible de charger les réactions, utilisation des valeurs par défaut");
+            state.availableReactions = ["❤️", "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "👏", "💯"];
+        }
+    } catch (error) {
+        console.error("❌ Erreur chargement réactions:", error);
+        state.availableReactions = ["❤️", "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "👏", "💯"];
+    }
+}
+
+function updateReactionsModal() {
+    const reactionsGrid = document.getElementById('reactionsGrid');
+    if (!reactionsGrid) return;
+    
+    reactionsGrid.innerHTML = '';
+    
+    if (state.availableReactions.length === 0) {
+        reactionsGrid.innerHTML = '<div class="no-reactions">Aucune réaction disponible</div>';
+        return;
+    }
+    
+    state.availableReactions.forEach(emoji => {
+        const button = document.createElement('button');
+        button.className = 'reaction-btn';
+        button.textContent = emoji;
+        button.dataset.emoji = emoji;
+        button.title = `Réagir avec ${emoji}`;
+        
+        button.addEventListener('click', () => {
+            addReactionToCurrentMessage(emoji);
+        });
+        
+        reactionsGrid.appendChild(button);
+    });
+}
+
+function showReactionsForCurrentConversation() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez d'abord une conversation", "warning");
+        return;
+    }
+    showReactionsModal();
+}
+
+function showReactionsModal(messageId = null) {
+    state.currentMessageForReaction = messageId;
+    const modal = document.getElementById('reactionsModal');
+    modal.style.display = 'flex';
+    updateReactionsModal();
+}
+
+function closeReactionsModal() {
+    const modal = document.getElementById('reactionsModal');
+    modal.style.display = 'none';
+    state.currentMessageForReaction = null;
+}
+
+async function addReactionToCurrentMessage(emoji) {
+    if (!state.currentMessageForReaction) {
+        showMessage("Aucun message sélectionné pour réagir", "warning");
+        closeReactionsModal();
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/reactions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                messageId: state.currentMessageForReaction,
+                emoji: emoji
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            console.log("✅ Réaction ajoutée:", data);
+            showMessage(`Réaction ${emoji} ajoutée!`, "success");
+            
+            if (state.currentConversation) {
+                await loadMessages(state.currentConversation._id, false);
+            }
+        } else {
+            showMessage(data.error || "Erreur lors de l'ajout de la réaction", "error");
+        }
+    } catch (error) {
+        console.error("❌ Erreur ajout réaction:", error);
+        showMessage("Erreur de connexion", "error");
+    }
+    
+    closeReactionsModal();
+}
+
+function testReactionSystem() {
+    if (!state.currentConversation) {
+        showMessage("Ouvrez une conversation pour tester les réactions", "warning");
+        return;
+    }
+    
+    const messages = state.messages.get(state.currentConversation._id) || [];
+    if (messages.length === 0) {
+        showMessage("Envoyez un message pour tester les réactions", "warning");
+        return;
+    }
+    
+    const testMessage = messages[0];
+    showReactionsModal(testMessage._id);
+    showMessage("Cliquez sur une réaction pour tester!", "info");
+}
+
+function initUserProfileSystem() {
+    console.log("🎯 Initialisation du système de profil...");
+    
+    document.getElementById('infoBtn')?.addEventListener('click', showUserProfile);
+    document.getElementById('closeProfileModal')?.addEventListener('click', closeUserProfile);
+    document.getElementById('blockUserBtn')?.addEventListener('click', blockCurrentUser);
+    document.getElementById('unblockUserBtn')?.addEventListener('click', unblockCurrentUser);
+    
+    document.getElementById('userProfileModal')?.addEventListener('click', (e) => {
+        if (e.target.id === 'userProfileModal') {
+            closeUserProfile();
+        }
+    });
+    
+    console.log("✅ Système de profil initialisé");
+}
+
+function showUserProfile() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez une conversation pour voir le profil", "warning");
+        return;
+    }
+    
+    const modal = document.getElementById('userProfileModal');
+    const otherUser = getOtherParticipant();
+    
+    if (otherUser) {
+        document.getElementById('profileAvatar').textContent = otherUser.username?.charAt(0)?.toUpperCase() || 'U';
+        document.getElementById('profileUsername').textContent = otherUser.username || 'Utilisateur';
+        document.getElementById('profileEmail').textContent = otherUser.email || 'Email non disponible';
+        document.getElementById('profileStatus').textContent = '🟢 En ligne';
+    }
+    
+    checkBlockStatus().then(isBlocked => {
+        document.getElementById('blockUserBtn').style.display = isBlocked ? 'none' : 'block';
+        document.getElementById('unblockUserBtn').style.display = isBlocked ? 'block' : 'none';
+    });
+    
+    modal.style.display = 'flex';
+}
+
+function closeUserProfile() {
+    const modal = document.getElementById('userProfileModal');
+    modal.style.display = 'none';
+}
+
+async function blockCurrentUser() {
+    const otherUser = getOtherParticipant();
+    if (!otherUser) return;
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/relations/block`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                blockedUserId: otherUser._id
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage("Utilisateur bloqué avec succès", "success");
+            document.getElementById('blockUserBtn').style.display = 'none';
+            document.getElementById('unblockUserBtn').style.display = 'block';
+        } else {
+            showMessage(data.error || "Erreur lors du blocage", "error");
+        }
+    } catch (error) {
+        console.error("❌ Erreur blocage:", error);
+        showMessage("Erreur de connexion", "error");
+    }
+}
+
+async function unblockCurrentUser() {
+    const otherUser = getOtherParticipant();
+    if (!otherUser) return;
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/relations/unblock`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                blockedUserId: otherUser._id
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            showMessage("Utilisateur débloqué avec succès", "success");
+            document.getElementById('blockUserBtn').style.display = 'block';
+            document.getElementById('unblockUserBtn').style.display = 'none';
+        } else {
+            showMessage(data.error || "Erreur lors du déblocage", "error");
+        }
+    } catch (error) {
+        console.error("❌ Erreur déblocage:", error);
+        showMessage("Erreur de connexion", "error");
+    }
+}
+
+async function checkBlockStatus() {
+    const otherUser = getOtherParticipant();
+    if (!otherUser) return false;
+    
+    try {
+        return false;
+    } catch (error) {
+        console.error("❌ Erreur vérification blocage:", error);
+        return false;
+    }
+}
+
+function getOtherParticipant() {
+    if (!state.currentConversation || !state.currentConversation.participants) return null;
+    
+    return state.currentConversation.participants.find(
+        p => p._id !== state.user.id
+    );
+}
+
+// 🎤 SYSTÈME D'ENREGISTREMENT VOCAL ADAPTÉ AU BACKEND
+function initVoiceRecording() {
+    console.log("🎤 Initialisation enregistrement vocal...");
+    
+    const voiceBtn = document.getElementById('voiceMessageBtn');
+    const startBtn = document.getElementById('startRecordBtn');
+    const stopBtn = document.getElementById('stopRecordBtn');
+    const playBtn = document.getElementById('playRecordBtn');
+    const sendBtn = document.getElementById('sendRecordBtn');
+    const closeBtn = document.getElementById('closeVoiceModal');
+    
+    voiceBtn?.addEventListener('click', showVoiceRecordModal);
+    startBtn?.addEventListener('click', startRecording);
+    stopBtn?.addEventListener('click', stopRecording);
+    playBtn?.addEventListener('click', playRecording);
+    sendBtn?.addEventListener('click', sendVoiceMessage);
+    closeBtn?.addEventListener('click', closeVoiceRecordModal);
+    
+    console.log("✅ Enregistrement vocal initialisé");
+}
+
+// 🎤 AFFICHER LE MODAL D'ENREGISTREMENT
+async function showVoiceRecordModal() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez une conversation d'abord", "warning");
+        return;
+    }
+    
+    try {
+        console.log("🎤 Demande d'accès au microphone...");
+        
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: {
+                echoCancellation: true,
+                noiseSuppression: true,
+                autoGainControl: true,
+                channelCount: 1,
+                sampleRate: 44100
+            } 
+        });
+        
+        state.audioRecorder.mediaRecorder = new MediaRecorder(stream, {
+            mimeType: 'audio/webm;codecs=opus'
+        });
+        state.audioRecorder.audioChunks = [];
+        
+        state.audioRecorder.mediaRecorder.ondataavailable = (event) => {
+            if (event.data.size > 0) {
+                state.audioRecorder.audioChunks.push(event.data);
+            }
+        };
+        
+        state.audioRecorder.mediaRecorder.onstop = () => {
+            state.audioRecorder.audioBlob = new Blob(state.audioRecorder.audioChunks, { 
+                type: 'audio/webm;codecs=opus'
+            });
+            state.audioRecorder.audioUrl = URL.createObjectURL(state.audioRecorder.audioBlob);
+            
+            document.getElementById('playRecordBtn').disabled = false;
+            document.getElementById('sendRecordBtn').disabled = false;
+            document.getElementById('recordingStatus').textContent = '✅ Enregistrement terminé';
+            document.getElementById('recordingStatus').style.color = '#4caf50';
+            
+            // Calculer la durée réelle
+            const duration = Math.round((Date.now() - state.audioRecorder.recordingStartTime) / 1000);
+            state.audioRecorder.audioDuration = duration;
+            
+            console.log(`🎤 Enregistrement terminé - Durée: ${duration}s - Taille: ${state.audioRecorder.audioBlob.size} bytes`);
+        };
+        
+        document.getElementById('voiceRecordModal').style.display = 'flex';
+        resetRecordingUI();
+        
+        console.log("✅ Microphone accessible, modal ouvert");
+        
+    } catch (error) {
+        console.error('❌ Erreur accès microphone:', error);
+        showMessage('Accès au microphone refusé ou non disponible', 'error');
+    }
+}
+
+// 🎤 DÉMARRER L'ENREGISTREMENT
+function startRecording() {
+    if (!state.audioRecorder.mediaRecorder) return;
+    
+    state.audioRecorder.audioChunks = [];
+    state.audioRecorder.isRecording = true;
+    state.audioRecorder.recordingStartTime = Date.now();
+    state.audioRecorder.audioDuration = 0;
+    
+    state.audioRecorder.mediaRecorder.start(100);
+    
+    document.getElementById('startRecordBtn').disabled = true;
+    document.getElementById('stopRecordBtn').disabled = false;
+    document.getElementById('recordingStatus').textContent = '🔴 Enregistrement en cours...';
+    document.getElementById('recordingStatus').style.color = '#ff4444';
+    
+    startRecordingTimer();
+    
+    console.log("🎤 Enregistrement démarré");
+}
+
+// 🎤 ARRÊTER L'ENREGISTREMENT
+function stopRecording() {
+    if (!state.audioRecorder.mediaRecorder || !state.audioRecorder.isRecording) return;
+    
+    state.audioRecorder.mediaRecorder.stop();
+    state.audioRecorder.isRecording = false;
+    
+    document.getElementById('startRecordBtn').disabled = false;
+    document.getElementById('stopRecordBtn').disabled = true;
+    
+    stopRecordingTimer();
+    
+    console.log("🎤 Enregistrement arrêté");
+}
+
+// 🎤 ÉCOUTER L'ENREGISTREMENT
+function playRecording() {
+    if (!state.audioRecorder.audioUrl) return;
+    
+    const audio = new Audio(state.audioRecorder.audioUrl);
+    
+    document.getElementById('recordingStatus').textContent = '▶️ Lecture en cours...';
+    document.getElementById('recordingStatus').style.color = '#2196f3';
+    
+    audio.play().catch(error => {
+        console.error('❌ Erreur lecture audio:', error);
+        showMessage('Erreur lors de la lecture', 'error');
+    });
+    
+    audio.onended = () => {
+        document.getElementById('recordingStatus').textContent = '✅ Enregistrement terminé';
+        document.getElementById('recordingStatus').style.color = '#4caf50';
+    };
+    
+    console.log("🎤 Lecture de l'enregistrement");
+}
+
+// 🎤 ENVOYER LE MESSAGE VOCAL - ADAPTÉ AU BACKEND
+async function sendVoiceMessage() {
+    if (!state.audioRecorder.audioBlob || !state.currentConversation) {
+        showMessage('Aucun enregistrement à envoyer', 'error');
+        return;
+    }
+    
+    const sendBtn = document.getElementById('sendRecordBtn');
+    
+    try {
+        setButtonLoading(sendBtn, true);
+        console.log("🎤 Envoi du message vocal via API...");
+        
+        // Créer un FormData pour l'envoi multipart
+        const formData = new FormData();
+        
+        // Ajouter le fichier audio
+        const audioFile = new File([state.audioRecorder.audioBlob], 
+            `voice_message_${Date.now()}.webm`, {
+            type: 'audio/webm'
+        });
+        formData.append('audio', audioFile);
+        
+        // Ajouter les métadonnées REQUISES par votre backend
+        formData.append('conversationId', state.currentConversation._id);
+        
+        console.log("📤 Données envoyées:", {
+            conversationId: state.currentConversation._id,
+            duration: state.audioRecorder.audioDuration,
+            fileSize: audioFile.size
+        });
+
+        // ENVOI VIA L'API HTTP
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/audio/send`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: formData
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+            console.log("✅ Message audio envoyé avec succès:", data);
+            showMessage('Message vocal envoyé!', 'success');
+            
+            // Fermer le modal
+            closeVoiceRecordModal();
+            
+            // Recharger les messages pour afficher le nouveau message audio
+            if (state.currentConversation) {
+                await loadMessages(state.currentConversation._id, false);
+            }
+        } else {
+            throw new Error(data.message || data.error || 'Erreur d\'envoi');
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur envoi message vocal:', error);
+        showMessage(`Erreur: ${error.message}`, 'error');
+    } finally {
+        setButtonLoading(sendBtn, false);
+    }
+}
+
+// 🎤 TIMER POUR L'ENREGISTREMENT
+function startRecordingTimer() {
+    state.audioRecorder.recordingTimer = setInterval(() => {
+        const elapsed = Date.now() - state.audioRecorder.recordingStartTime;
+        const seconds = Math.floor(elapsed / 1000);
+        const minutes = Math.floor(seconds / 60);
+        const displaySeconds = seconds % 60;
+        
+        document.getElementById('recordingTime').textContent = 
+            `${minutes.toString().padStart(2, '0')}:${displaySeconds.toString().padStart(2, '0')}`;
+            
+        // Arrêter automatiquement après 5 minutes
+        if (seconds >= 300) {
+            stopRecording();
+            showMessage('Enregistrement automatiquement arrêté après 5 minutes', 'info');
+        }
+    }, 1000);
+}
+
+function stopRecordingTimer() {
+    if (state.audioRecorder.recordingTimer) {
+        clearInterval(state.audioRecorder.recordingTimer);
+    }
+}
+
+// 🎤 RÉINITIALISER L'UI
+function resetRecordingUI() {
+    document.getElementById('recordingTime').textContent = '00:00';
+    document.getElementById('recordingStatus').textContent = 'Prêt à enregistrer';
+    document.getElementById('recordingStatus').style.color = '#f9ee34';
+    
+    document.getElementById('startRecordBtn').disabled = false;
+    document.getElementById('stopRecordBtn').disabled = true;
+    document.getElementById('playRecordBtn').disabled = true;
+    document.getElementById('sendRecordBtn').disabled = true;
+}
+
+// 🎤 FERMER LE MODAL
+function closeVoiceRecordModal() {
+    if (state.audioRecorder.isRecording) {
+        stopRecording();
+    }
+    
+    if (state.audioRecorder.mediaRecorder && state.audioRecorder.mediaRecorder.stream) {
+        state.audioRecorder.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+    }
+    
+    if (state.audioRecorder.audioUrl) {
+        URL.revokeObjectURL(state.audioRecorder.audioUrl);
+    }
+    
+    state.audioRecorder = {
+        mediaRecorder: null,
+        audioChunks: [],
+        audioBlob: null,
+        audioUrl: null,
+        isRecording: false,
+        recordingTimer: null,
+        recordingStartTime: null,
+        audioDuration: 0
+    };
+    
+    document.getElementById('voiceRecordModal').style.display = 'none';
+    console.log("🎤 Modal enregistrement fermé");
+}
+
+function initFileUploads() {
+    const imageBtn = document.getElementById('imageBtn');
+    const fileBtn = document.getElementById('fileBtn');
+    const videoBtn = document.getElementById('videoBtn');
+    const imageInput = document.getElementById('imageInput');
+    const fileInput = document.getElementById('fileInput');
+    const videoInput = document.getElementById('videoInput');
+
+    imageBtn?.addEventListener('click', () => imageInput.click());
+    fileBtn?.addEventListener('click', () => fileInput.click());
+    videoBtn?.addEventListener('click', () => videoInput.click());
+
+    imageInput?.addEventListener('change', (e) => handleFileSelect(e, 'image'));
+    fileInput?.addEventListener('change', (e) => handleFileSelect(e, 'file'));
+    videoInput?.addEventListener('change', (e) => handleFileSelect(e, 'video'));
+
+    document.getElementById('closePreviewModal')?.addEventListener('click', closePreviewModal);
+    document.getElementById('cancelPreviewBtn')?.addEventListener('click', closePreviewModal);
+    document.getElementById('sendPreviewBtn')?.addEventListener('click', sendFileMessage);
+
+    console.log('✅ Système upload fichiers initialisé');
+}
+
+function handleFileSelect(event, type) {
+    const files = event.target.files;
+    if (!files.length) return;
+
+    const file = files[0];
+    
+    if (file.size > CONFIG.MAX_FILE_SIZE) {
+        showMessage(`Fichier trop volumineux (max ${formatFileSize(CONFIG.MAX_FILE_SIZE)})`, 'error');
+        return;
+    }
+
+    if (type === 'image' && !file.type.startsWith('image/')) {
+        showMessage('Veuillez sélectionner une image valide', 'error');
+        return;
+    }
+
+    if (type === 'video' && !file.type.startsWith('video/')) {
+        showMessage('Veuillez sélectionner une vidéo valide', 'error');
+        return;
+    }
+
+    state.pendingFiles = [{
+        file: file,
+        type: type,
+        previewUrl: URL.createObjectURL(file)
+    }];
+
+    showPreviewModal(state.pendingFiles[0]);
+    event.target.value = '';
+}
+
+function showPreviewModal(fileData) {
+    const previewContent = document.getElementById('previewContent');
+    const modal = document.getElementById('previewModal');
+
+    let content = '';
+    
+    switch (fileData.type) {
+        case 'image':
+            content = `<img src="${fileData.previewUrl}" alt="Prévisualisation">`;
+            break;
+        case 'video':
+            content = `<video controls><source src="${fileData.previewUrl}" type="${fileData.file.type}"></video>`;
+            break;
+        case 'audio':
+            content = `
+                <div class="audio-preview-large">
+                    <div class="audio-icon">🎵</div>
+                    <div class="audio-info">
+                        <div class="audio-name">${fileData.file.name}</div>
+                        <div class="audio-size">${formatFileSize(fileData.file.size)}</div>
+                        <div class="audio-type">Fichier audio</div>
+                    </div>
+                    <audio controls class="audio-player">
+                        <source src="${fileData.previewUrl}" type="${fileData.file.type}">
+                        Votre navigateur ne supporte pas la lecture audio.
+                    </audio>
+                </div>
+            `;
+            break;
+        case 'file':
+            content = `
+                <div class="file-preview-large">
+                    <div class="file-icon">📄</div>
+                    <div class="file-info">
+                        <div class="file-name">${fileData.file.name}</div>
+                        <div class="file-size">${formatFileSize(fileData.file.size)}</div>
+                        <div class="file-type">${fileData.file.type || 'Type inconnu'}</div>
+                    </div>
+                </div>
+            `;
+            break;
+    }
+
+    previewContent.innerHTML = content;
+    modal.style.display = 'flex';
+}
+
+function closePreviewModal() {
+    const modal = document.getElementById('previewModal');
+    modal.style.display = 'none';
+    
+    state.pendingFiles.forEach(fileData => {
+        if (fileData.previewUrl) {
+            URL.revokeObjectURL(fileData.previewUrl);
+        }
+    });
+    
+    state.pendingFiles = [];
+}
+
+async function sendFileMessage() {
+    if (!state.pendingFiles.length || !state.currentConversation) {
+        showMessage('Aucun fichier à envoyer', 'error');
+        return;
+    }
+
+    const fileData = state.pendingFiles[0];
+    const sendBtn = document.getElementById('sendPreviewBtn');
+    const sendStatus = document.getElementById('sendStatus');
+
+    try {
+        setButtonLoading(sendBtn, true);
+        sendStatus.textContent = 'Envoi en cours...';
+
+        const base64 = await fileToBase64(fileData.file);
+
+        const messageData = {
+            conversationId: state.currentConversation._id,
+            Id_receiver: getOtherParticipantId(),
+            file: base64,
+            fileName: fileData.file.name,
+            fileType: fileData.file.type,
+            fileSize: fileData.file.size,
+            originalName: fileData.file.name
+        };
+
+        let eventName;
+        switch (fileData.type) {
+            case 'image':
+                eventName = 'send_image_message';
+                break;
+            case 'video':
+                eventName = 'send_video_message';
+                break;
+            case 'audio':
+                eventName = 'send_audio_message';
+                break;
+            case 'file':
+                eventName = 'send_file_message';
+                break;
+        }
+
+        if (state.socket && state.isConnected) {
+            state.socket.emit(eventName, messageData);
+            sendStatus.textContent = 'Envoi...';
+            closePreviewModal();
+            showMessage('Fichier en cours d\'envoi...', 'success');
+        } else {
+            closePreviewModal();
+            showMessage('WebSocket déconnecté - Recharge la page et réessaye', 'error');
+        }
+
+    } catch (error) {
+        console.error('Send file error:', error);
+        sendStatus.textContent = '❌ Erreur';
+        showMessage('Erreur: ' + error.message, 'error');
+    } finally {
+        setButtonLoading(sendBtn, false);
+    }
+}
+
+function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = error => reject(error);
+    });
+}
+
+function formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function getOtherParticipantId() {
+    if (!state.currentConversation || !state.currentConversation.participants) return null;
+    
+    const otherParticipant = state.currentConversation.participants.find(
+        p => p._id !== state.user.id
+    );
+    
+    return otherParticipant?._id || null;
+}
+
 async function loadInitialData() {
   showLoading(true);
 
   try {
     await Promise.all([loadConversations(), loadUnreadCounts()]);
+    await loadAvailableReactions();
   } catch (error) {
     console.error("Error loading initial data:", error);
     showMessage("Erreur de chargement des données", "error");
@@ -420,11 +1188,10 @@ function renderConversations() {
     return;
   }
 
-  // Trier les conversations par dernier message
   const sortedConversations = state.conversations.sort((a, b) => {
     const dateA = new Date(a.lastMessageAt || a.createdAt);
     const dateB = new Date(b.lastMessageAt || b.createdAt);
-    return dateB - dateA; // Plus récent en premier
+    return dateB - dateA;
   });
 
   sortedConversations.forEach((conversation) => {
@@ -471,17 +1238,30 @@ function createConversationElement(conversation) {
 }
 
 function getLastMessagePreview(conversation) {
-  if (!conversation.lastMessage) {
-    return "Aucun message";
-  }
-
-  if (conversation.lastMessage.includes("Message audio")) {
-    return "🎤 Message audio";
-  }
-
-  return conversation.lastMessage.length > 30
-    ? conversation.lastMessage.substring(0, 30) + "..."
-    : conversation.lastMessage;
+    if (!conversation.lastMessage) {
+        return 'Aucun message';
+    }
+    
+    // 🎤 ADAPTÉ AU BACKEND : Détection améliorée des messages audio
+    if (conversation.lastMessageType === 'audio' || 
+        conversation.lastMessage.includes('Message audio') ||
+        (conversation.lastMessage.includes('res.cloudinary.com') && 
+         (conversation.lastMessage.includes('/audio_messages/') || conversation.lastMessage.includes('.mp3')))) {
+        return '🎤 Message audio';
+    }
+    if (conversation.lastMessageType === 'image') {
+        return '📷 Image';
+    }
+    if (conversation.lastMessageType === 'video') {
+        return '🎥 Vidéo';
+    }
+    if (conversation.lastMessageType === 'file') {
+        return '📁 Fichier';
+    }
+    
+    return conversation.lastMessage.length > 30 ? 
+        conversation.lastMessage.substring(0, 30) + '...' : 
+        conversation.lastMessage;
 }
 
 async function selectConversation(conversation) {
@@ -528,9 +1308,10 @@ function updateChatHeader(conversation) {
     : "🟢 En ligne";
 }
 
-// 🆕 FONCTION LOAD MESSAGES CORRIGÉE
 async function loadMessages(conversationId, showLoader = true) {
-  if (state.isLoadingMessages) return;
+    if (state.isLoadingMessages && !showLoader) {
+        return;
+    }
 
   state.isLoadingMessages = true;
 
@@ -556,14 +1337,22 @@ async function loadMessages(conversationId, showLoader = true) {
     if (response.ok && data.success) {
       console.log("✅ Messages reçus de l'API:", data.messages.length);
 
-      // 🆕 DEBUG COMPLET DES DONNÉES
-      debugMessageData(data.messages);
+      // 🎤 ADAPTATION : Vérifier la structure des messages audio
+      const processedMessages = data.messages.map(message => {
+        // Si c'est un message audio mais que content est du texte, utiliser audioUrl
+        if (message.typeMessage === 'audio' && message.audioUrl && message.content.includes('Message audio')) {
+          return {
+            ...message,
+            content: message.audioUrl // Remplacer par l'URL audio réelle
+          };
+        }
+        return message;
+      });
 
-      // 🆕 TRI CHRONOLOGIQUE ROBUSTE
-      const sortedMessages = data.messages.sort((a, b) => {
+      const sortedMessages = processedMessages.sort((a, b) => {
         const dateA = new Date(a.createdAt || a.timestamp || a.date);
         const dateB = new Date(b.createdAt || b.timestamp || b.date);
-        return dateA - dateB; // Ordre chronologique
+        return dateA - dateB;
       });
 
       state.messages.set(conversationId, sortedMessages);
@@ -582,193 +1371,270 @@ async function loadMessages(conversationId, showLoader = true) {
   }
 }
 
-// 🆕 FONCTION RENDER MESSAGES CORRIGÉE
 function renderMessages(conversationId) {
-  const messagesList = document.getElementById("messagesList");
-  const messages = state.messages.get(conversationId) || [];
+    const messagesList = document.getElementById('messagesList');
+    const messages = state.messages.get(conversationId) || [];
+    
+    console.log("🔍 Affichage de", messages.length, "messages dans l'ordre chronologique");
 
-  console.log(
-    "🔍 Affichage de",
-    messages.length,
-    "messages dans l'ordre chronologique"
-  );
-
-  messagesList.innerHTML = "";
-
-  if (messages.length === 0) {
-    messagesList.innerHTML = `
+    messagesList.innerHTML = '';
+    
+    if (messages.length === 0) {
+        messagesList.innerHTML = `
             <div style="text-align: center; padding: 40px; color: #666;">
                 <p>Aucun message</p>
                 <p style="font-size: 12px; margin-top: 10px;">Envoyez le premier message !</p>
             </div>
         `;
-    return;
-  }
-
-  // 🆕 AFFICHAGE DANS L'ORDRE CHRONOLOGIQUE
-  messages.forEach((message) => {
-    const messageElement = createMessageElement(message);
-    messagesList.appendChild(messageElement);
-  });
-
-  scrollToBottom();
-}
-
-// 🆕 FONCTION CREATE MESSAGE ELEMENT COMPLÈTEMENT CORRIGÉE
-function createMessageElement(message) {
-  const element = document.createElement("div");
-
-  const isSent = isMyMessage(message);
-
-  console.log(
-    `🎯 Création message: "${message.content}" - estDeMoi: ${isSent}`
-  );
-  console.log("📅 Données complètes:", {
-    content: message.content,
-    createdAt: message.createdAt,
-    timestamp: message.timestamp,
-    sender: message.Id_sender,
-    isSent: isSent,
-  });
-
-  element.className = `message ${isSent ? "sent" : "received"}`;
-  element.dataset.messageId = message._id;
-
-  // 🆕 GESTION ROBUSTE DE LA DATE ET HEURE
-  const time = formatMessageTimeRobuste(message);
-  const statusIcon = isSent ? (message.status === "seen" ? "✓✓" : "✓") : "";
-
-  element.innerHTML = `
-        <div class="message-content">${escapeHtml(message.content)}</div>
-        <div class="message-time">${time} ${statusIcon}</div>
-    `;
-
-  // 🆕 STYLES FORCÉS POUR LA SÉPARATION
-  element.style.alignSelf = isSent ? "flex-end" : "flex-start";
-  element.style.marginLeft = isSent ? "auto" : "0";
-  element.style.marginRight = isSent ? "0" : "auto";
-  element.style.maxWidth = "70%";
-
-  return element;
-}
-
-// 🆕 FONCTION AMÉLIORÉE POUR DÉTERMINER SI LE MESSAGE EST DE MOI
-function isMyMessage(message) {
-  if (!message || !state.user) {
-    console.log("❌ Message ou user manquant");
-    return false;
-  }
-
-  // 🆕 GESTION ROBUSTE DE L'EXPÉDITEUR
-  let senderId;
-
-  if (typeof message.Id_sender === "string") {
-    senderId = message.Id_sender;
-  } else if (message.Id_sender && message.Id_sender._id) {
-    senderId = message.Id_sender._id.toString();
-  } else if (message.Id_sender && typeof message.Id_sender === "object") {
-    senderId = message.Id_sender.toString();
-  } else {
-    senderId = message.senderId || null;
-  }
-
-  const myId = state.user.id || state.user._id;
-
-  console.log("🔍 Analyse expéditeur:", {
-    senderData: message.Id_sender,
-    senderId: senderId,
-    myId: myId,
-    isEqual: senderId === myId,
-  });
-
-  if (!senderId || !myId) {
-    console.log("❌ ID manquant - senderId:", senderId, "myId:", myId);
-    return false;
-  }
-
-  const result = senderId === myId;
-  console.log(
-    `✅ Résultat: ${result ? "MESSAGE DE MOI" : "MESSAGE DE QUELQU'UN D'AUTRE"}`
-  );
-
-  return result;
-}
-
-// 🆕 FONCTION FORMAT TIME ROBUSTE
-function formatMessageTimeRobuste(message) {
-  // 🆕 ESSAYER DIFFÉRENTS CHAMPS DE DATE
-  const dateString =
-    message.createdAt ||
-    message.timestamp ||
-    message.date ||
-    message.created_at;
-
-  if (!dateString) {
-    console.log("❌ Aucune date trouvée pour le message:", message._id);
-    return "--:--";
-  }
-
-  try {
-    const date = new Date(dateString);
-
-    // 🆕 VÉRIFICATION QUE LA DATE EST VALIDE
-    if (isNaN(date.getTime())) {
-      console.log("❌ Date invalide:", dateString);
-      return "--:--";
+        return;
     }
 
-    const timeString = date.toLocaleTimeString("fr-FR", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
+    messages.forEach(message => {
+        const messageElement = createMessageElement(message);
+        messagesList.appendChild(messageElement);
     });
 
-    console.log(`🕒 Date convertie: ${dateString} → ${timeString}`);
-    return timeString;
-  } catch (error) {
-    console.error("❌ Erreur formatage date:", error, "Date:", dateString);
-    return "--:--";
-  }
+    scrollToBottom();
 }
 
-// 🆕 FONCTION DE DEBUG COMPLÈTE
-function debugMessageData(messages) {
-  console.log("🐛 DEBUG COMPLET DES MESSAGES:");
-  console.log("📊 Nombre de messages:", messages.length);
-  console.log("👤 User actuel:", state.user);
+function createMessageElement(message) {
+    const element = document.createElement('div');
+    const isSent = isMyMessage(message);
+    
+    console.log(`🎯 Création message: "${message.content?.substring(0, 50)}..." - type: ${message.typeMessage} - estDeMoi: ${isSent}`, message);
 
-  if (messages.length === 0) {
-    console.log("❌ Aucun message à afficher");
-    return;
-  }
+    element.className = `message ${isSent ? 'sent' : 'received'} ${message.typeMessage}-message`;
+    element.dataset.messageId = message._id;
+    
+    const time = formatMessageTimeRobuste(message);
+    const statusIcon = isSent ? (message.status === 'seen' ? '✓✓' : '✓') : '';
+    
+    let contentHtml = '';
+    
+    // 🎤 ADAPTÉ AU BACKEND : Gestion des messages audio
+    if (message.typeMessage === 'audio' || 
+        (message.content && message.content.includes('res.cloudinary.com') && message.content.includes('/audio_messages/')) ||
+        message.audioUrl) {
+        
+        console.log("🎵 Message audio détecté - Structure:", message);
+        
+        // 🎯 DÉTERMINER LA BONNE URL AUDIO
+        let audioUrl = message.audioUrl || message.content;
+        let audioDuration = message.audioDuration || message.fileInfo?.audioDuration || '0:09';
+        
+        // 🎯 CORRECTION CLOUDINARY : S'assurer que c'est une URL valide
+        if (audioUrl && audioUrl.includes('res.cloudinary.com')) {
+            // Vérifier que c'est bien une URL raw/upload pour les fichiers audio
+            if (audioUrl.includes('/image/upload/')) {
+                audioUrl = audioUrl.replace('/image/upload/', '/raw/upload/');
+            }
+            // Ajouter des paramètres pour forcer le téléchargement si nécessaire
+            if (!audioUrl.includes('fl_attachment')) {
+                audioUrl += (audioUrl.includes('?') ? '&' : '?') + 'fl_attachment';
+            }
+        }
+        
+        console.log("🔊 URL audio finale:", audioUrl);
+        
+        if (audioUrl && audioUrl.includes('http')) {
+            contentHtml = `
+                <div class="message-content">
+                    <div class="audio-message">
+                        <div class="audio-icon">${isSent ? '🎤' : '🎵'}</div>
+                        <div class="audio-info">
+                            <div class="audio-name">${isSent ? 'Votre message audio' : 'Message audio'}</div>
+                            <div class="audio-duration">${formatAudioDuration(audioDuration)}</div>
+                        </div>
+                        <audio controls class="audio-player" preload="metadata">
+                            <source src="${audioUrl}" type="audio/webm">
+                            <source src="${audioUrl}" type="audio/mpeg">
+                            <source src="${audioUrl}" type="audio/wav">
+                            Votre navigateur ne supporte pas la lecture audio.
+                        </audio>
+                    </div>
+                </div>
+            `;
+        } else {
+            // Fallback si pas d'URL valide
+            contentHtml = `
+                <div class="message-content">
+                    <div class="audio-message">
+                        <div class="audio-icon">🔇</div>
+                        <div class="audio-info">
+                            <div class="audio-name">Message audio</div>
+                            <div class="audio-duration">${formatAudioDuration(audioDuration)}</div>
+                            <div class="audio-error" style="font-size: 11px; color: #ff4444;">
+                                ${audioUrl ? 'Fichier en cours de traitement...' : 'Fichier non disponible'}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+    } else {
+        // Gestion des autres types de messages
+        switch (message.typeMessage) {
+            case 'image':
+                contentHtml = `
+                    <div class="message-content">
+                        <img src="${message.content}" alt="Image partagée" onclick="openImageModal('${message.content}')">
+                    </div>
+                `;
+                break;
+                
+            case 'video':
+                contentHtml = `
+                    <div class="message-content">
+                        <video controls onclick="this.paused ? this.play() : this.pause()">
+                            <source src="${message.content}" type="video/mp4">
+                            Votre navigateur ne supporte pas la lecture vidéo.
+                        </video>
+                    </div>
+                `;
+                break;
+                
+            case 'file':
+                const fileName = message.fileInfo?.fileName || message.content.split('/').pop() || 'Fichier';
+                const fileSize = message.fileInfo?.fileSize ? formatFileSize(message.fileInfo.fileSize) : '';
+                contentHtml = `
+                    <div class="message-content">
+                        <div class="file-message">
+                            <div class="file-icon">📄</div>
+                            <div class="file-info">
+                                <div class="file-name">${fileName}</div>
+                                ${fileSize ? `<div class="file-size">${fileSize}</div>` : ''}
+                            </div>
+                            <a href="${message.content}" download="${fileName}" class="download-btn">
+                                Télécharger
+                            </a>
+                        </div>
+                    </div>
+                `;
+                break;
+                
+            default:
+                contentHtml = `
+                    <div class="message-content">${escapeHtml(message.content)}</div>
+                `;
+        }
+    }
+    
+    element.innerHTML = `
+        ${contentHtml}
+        <div class="message-time">${time} ${statusIcon}</div>
+    `;
+    
+    return element;
+}
 
-  console.log("🕒 Plage temporelle:");
-  console.log(
-    "   Premier message:",
-    messages[0].createdAt,
-    "-",
-    messages[0].content
-  );
-  console.log(
-    "   Dernier message:",
-    messages[messages.length - 1].createdAt,
-    "-",
-    messages[messages.length - 1].content
-  );
+// 🎤 FORMATER LA DURÉE AUDIO
+function formatAudioDuration(duration) {
+    if (!duration) return '0:00';
+    
+    if (typeof duration === 'number') {
+        const minutes = Math.floor(duration / 60);
+        const seconds = duration % 60;
+        return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
+    if (typeof duration === 'string') {
+        // Si c'est déjà au format "X:XX"
+        if (duration.match(/^\d+:\d{2}$/)) {
+            return duration;
+        }
+        
+        // Si c'est en secondes
+        const seconds = parseInt(duration);
+        if (!isNaN(seconds)) {
+            const minutes = Math.floor(seconds / 60);
+            const remainingSeconds = seconds % 60;
+            return `${minutes}:${remainingSeconds.toString().padStart(2, '0')}`;
+        }
+    }
+    
+    return '0:00';
+}
 
-  console.log("🔍 Détail de chaque message:");
-  messages.forEach((msg, index) => {
-    const isSent = isMyMessage(msg);
-    console.log(`--- Message ${index + 1} ---`);
-    console.log("Contenu:", msg.content);
-    console.log("ID Message:", msg._id);
-    console.log("Expéditeur:", msg.Id_sender);
-    console.log("Date création:", msg.createdAt);
-    console.log("Timestamp:", msg.timestamp);
-    console.log("Est mon message?:", isSent);
-    console.log("Heure formatée:", formatMessageTimeRobuste(msg));
-    console.log("-------------------");
-  });
+function openImageModal(imageUrl) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+        <div class="modal-content" style="max-width: 90vw; max-height: 90vh; background: transparent; border: none;">
+            <div class="modal-header" style="justify-content: flex-end; background: transparent;">
+                <button class="modal-close" onclick="this.closest('.modal-overlay').remove()">×</button>
+            </div>
+            <div class="modal-body" style="padding: 0; display: flex; justify-content: center; align-items: center; background: transparent;">
+                <img src="${imageUrl}" style="max-width: 100%; max-height: 80vh; border-radius: 12px;">
+            </div>
+        </div>
+    `;
+    
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+    
+    document.body.appendChild(modal);
+}
+
+function isMyMessage(message) {
+    if (!message || !state.user) {
+        console.log("❌ Message ou user manquant");
+        return false;
+    }
+
+    let senderId;
+
+    if (typeof message.Id_sender === "string") {
+        senderId = message.Id_sender;
+    } else if (message.Id_sender && message.Id_sender._id) {
+        senderId = message.Id_sender._id.toString();
+    } else if (message.Id_sender && typeof message.Id_sender === "object") {
+        senderId = message.Id_sender.toString();
+    } else {
+        senderId = message.senderId || null;
+    }
+
+    const myId = state.user.id || state.user._id;
+
+    if (!senderId || !myId) {
+        console.log("❌ ID manquant - senderId:", senderId, "myId:", myId);
+        return false;
+    }
+
+    return senderId === myId;
+}
+
+function formatMessageTimeRobuste(message) {
+    const dateString = message.createdAt || message.timestamp || message.date || message.created_at;
+    
+    if (!dateString) {
+        console.log("❌ Aucune date trouvée pour le message:", message._id);
+        return '--:--';
+    }
+    
+    try {
+        const date = new Date(dateString);
+        
+        if (isNaN(date.getTime())) {
+            console.log("❌ Date invalide:", dateString);
+            return '--:--';
+        }
+        
+        const timeString = date.toLocaleTimeString('fr-FR', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            hour12: false 
+        });
+        
+        return timeString;
+        
+    } catch (error) {
+        console.error("❌ Erreur formatage date:", error, "Date:", dateString);
+        return '--:--';
+    }
 }
 
 function initMessageInput() {
@@ -805,12 +1671,19 @@ function initMessageInput() {
   sendButton.addEventListener("click", sendMessage);
 }
 
-// 🆕 FONCTION SEND MESSAGE CORRIGÉE
 async function sendMessage() {
   const messageInput = document.getElementById("messageInput");
   const content = messageInput.value.trim();
 
   if (!content || !state.currentConversation) return;
+
+  // 🆕 PROTECTION ANTI-DOUBLE CLIC
+  if (state.isSendingMessage) {
+    console.log('🚫 Message déjà en cours d\'envoi - bloqué');
+    return;
+  }
+
+  state.isSendingMessage = true;
 
   const sendButton = document.getElementById("sendButton");
   const sendStatus = document.getElementById("sendStatus");
@@ -819,56 +1692,58 @@ async function sendMessage() {
     setButtonLoading(sendButton, true);
     sendStatus.textContent = "Envoi...";
 
-    // VIDER LE CHAMP IMMÉDIATEMENT
-    messageInput.value = "";
+    console.log('🎯 ENVOI TEMPS RÉEL WebSocket');
 
-    if (state.socket && state.isConnected) {
-      // Utiliser WebSocket pour l'envoi en temps réel
-      state.socket.emit("send_message", {
-        conversationId: state.currentConversation._id,
-        content: content,
-        typeMessage: "text",
-      });
-
-      sendStatus.textContent = "Envoi...";
-    } else {
-      // Fallback HTTP
-      const response = await fetch(`${CONFIG.BACKEND_URL}/api/messages/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${state.token}`,
-        },
-        body: JSON.stringify({
-          conversationId: state.currentConversation._id,
-          content: content,
-          typeMessage: "text",
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || "Erreur d'envoi");
-      }
-
-      // Recharger les messages après envoi réussi
-      await loadMessages(state.currentConversation._id, false);
-      sendStatus.textContent = "✓ Envoyé";
+    // 🆕 VÉRIFICATION RENFORCÉE WEBSOCKET
+    if (!state.socket) {
+      throw new Error('WebSocket non initialisé');
     }
 
-    setTimeout(() => {
-      sendStatus.textContent = "";
-    }, 2000);
-  } catch (error) {
-    console.error("Send message error:", error);
-    sendStatus.textContent = "❌ Erreur";
-    showMessage("Erreur d'envoi du message", "error");
+    if (!state.isConnected) {
+      // 🆕 TENTATIVE DE RECONNEXION AUTOMATIQUE
+      console.log('🔄 Tentative de reconnexion WebSocket...');
+      state.socket.connect();
+      
+      // Attendre un peu pour la reconnexion
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      if (!state.socket.connected) {
+        throw new Error('WebSocket toujours déconnecté après reconnexion');
+      }
+    }
 
-    // Remettre le message dans le champ en cas d'erreur
+    // 🎯 ENVOI PAR WEBSOCKET UNIQUEMENT
+    console.log('📤 Émission WebSocket:', {
+      conversationId: state.currentConversation._id,
+      content: content.substring(0, 50) + '...'
+    });
+
+    state.socket.emit("send_message", {
+      conversationId: state.currentConversation._id,
+      content: content,
+      typeMessage: "text",
+    });
+
+    // Vide immédiatement le champ
+    messageInput.value = "";
+    sendStatus.textContent = "Envoi en cours...";
+
+    // 🆕 TIMEOUT DE SÉCURITÉ
+    setTimeout(() => {
+      if (sendStatus.textContent === "Envoi en cours...") {
+        sendStatus.textContent = "✓ Envoyé (temps réel)";
+      }
+    }, 2000);
+
+  } catch (error) {
+    console.error("❌ Erreur envoi WebSocket:", error);
+    sendStatus.textContent = "❌ Erreur WebSocket";
+    showMessage("WebSocket déconnecté - Rechargez la page", "error");
+    // Remet le contenu pour réessayer
     messageInput.value = content;
   } finally {
     setButtonLoading(sendButton, false);
+    state.isSendingMessage = false;
   }
 }
 
@@ -936,9 +1811,90 @@ function connectSocketIO() {
     }
   });
 
-  state.socket.on("new_message", (message) => {
-    console.log("📨 New message received:", message);
-    handleNewMessage(message);
+// ==== APRES - CORRIGÉ ====
+state.socket.on("new_message", (data) => {
+  console.log("🔔 [STRUCTURE BACKEND] Message reçu:", data);
+  
+  // 🎯 ADAPTATION À LA STRUCTURE BACKEND
+  const message = {
+    _id: data._id || data.messageId,
+    conversationId: data.conversationId,
+    Id_sender: data.Id_sender,  // ✅ Structure backend
+    senderId: data.Id_sender,   // ✅ Compatibilité frontend
+    content: data.content,
+    typeMessage: data.typeMessage,
+    status: data.status || "sent",
+    timestamp: data.timestamp || new Date(),
+    createdAt: data.createdAt || data.timestamp || new Date(),
+    
+    // 🎯 Support des fichiers multimédias
+    ...(data.imageInfo && { imageInfo: data.imageInfo }),
+    ...(data.fileInfo && { fileInfo: data.fileInfo }),
+    ...(data.videoInfo && { videoInfo: data.videoInfo })
+  };
+  
+  console.log("🔄 Message adapté pour le frontend:", message);
+  handleNewMessage(message);
+});
+  // 🎤 ÉVÉNEMENTS AUDIO ADAPTÉS
+  state.socket.on("audio_message_sent", (data) => {
+    console.log('✅ Audio sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("audio_message_error", (data) => {
+    console.error('❌ Audio send error:', data);
+    showMessage('Erreur d\'envoi de l\'audio: ' + data.error, 'error');
+  });
+
+  state.socket.on("new_audio_message", (data) => {
+    console.log('🔊 Nouveau message audio en temps réel:', data);
+    handleNewMessage(data.message);
+  });
+
+  state.socket.on("reaction_added", (data) => {
+    console.log("❤️ Réaction ajoutée:", data);
+    handleReactionAdded(data);
+  });
+
+  state.socket.on("reaction_removed", (data) => {
+    console.log("🗑️ Réaction supprimée:", data);
+    handleReactionRemoved(data);
+  });
+
+  state.socket.on("reaction_error", (data) => {
+    console.error("❌ Erreur réaction:", data);
+    showMessage(data.error || "Erreur avec la réaction", "error");
+  });
+
+  state.socket.on("image_message_sent", (data) => {
+    console.log('✅ Image sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("file_message_sent", (data) => {
+    console.log('✅ File sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("video_message_sent", (data) => {
+    console.log('✅ Video sent confirmation:', data);
+    handleFileMessageSent(data);
+  });
+
+  state.socket.on("image_message_error", (data) => {
+    console.error('❌ Image send error:', data);
+    showMessage('Erreur d\'envoi de l\'image: ' + data.error, 'error');
+  });
+
+  state.socket.on("file_message_error", (data) => {
+    console.error('❌ File send error:', data);
+    showMessage('Erreur d\'envoi du fichier: ' + data.error, 'error');
+  });
+
+  state.socket.on("video_message_error", (data) => {
+    console.error('❌ Video send error:', data);
+    showMessage('Erreur d\'envoi de la vidéo: ' + data.error, 'error');
   });
 
   state.socket.on("user_typing", (data) => {
@@ -956,44 +1912,60 @@ function connectSocketIO() {
   });
 }
 
-// 🆕 FONCTION POUR GÉRER LES NOUVEAUX MESSAGES
-function handleNewMessage(message) {
-  console.log("📨 Nouveau message reçu:", message);
-
-  if (
-    state.currentConversation &&
-    message.conversationId === state.currentConversation._id
-  ) {
-    // Vérifier si le message n'existe pas déjà
-    const existingMessages =
-      state.messages.get(state.currentConversation._id) || [];
-    const messageExists = existingMessages.some((m) => m._id === message._id);
-
-    if (!messageExists) {
-      // Ajouter le nouveau message et trier
-      existingMessages.push(message);
-      const sortedMessages = existingMessages.sort((a, b) => {
-        const dateA = new Date(a.createdAt || a.timestamp || a.date);
-        const dateB = new Date(b.createdAt || b.timestamp || b.date);
-        return dateA - dateB;
-      });
-
-      state.messages.set(state.currentConversation._id, sortedMessages);
-      renderMessages(state.currentConversation._id);
+function handleReactionAdded(data) {
+    if (state.currentConversation && data.messageId) {
+        loadMessages(state.currentConversation._id, false);
     }
+}
 
-    markAsRead(state.currentConversation._id);
-  } else {
-    updateConversationBadge(message.conversationId);
-    showNotification({
-      type: "new_message",
-      conversationId: message.conversationId,
-      senderName: message.Id_sender?.username || "Quelqu'un",
-      messagePreview: message.content,
-    });
-  }
+function handleReactionRemoved(data) {
+    if (state.currentConversation && data.messageId) {
+        loadMessages(state.currentConversation._id, false);
+    }
+}
 
-  updateConversationLastMessage(message.conversationId, message);
+function handleFileMessageSent(data) {
+    if (data.success && state.currentConversation) {
+        loadMessages(state.currentConversation._id, false);
+        showMessage('Fichier envoyé avec succès!', 'success');
+    }
+}
+
+function handleNewMessage(message) {
+    console.log('📨 Nouveau message reçu:', message);
+    
+    // 🎯 Mettre à jour la dernière conversation
+    updateConversationLastMessage(message.conversationId, message);
+    
+    // 🎯 Mettre à jour les badges de notification
+    if (!state.currentConversation || message.conversationId !== state.currentConversation._id) {
+        updateConversationBadge(message.conversationId);
+        
+        let preview = message.content;
+        if (message.typeMessage === 'image') preview = '📷 Image';
+        if (message.typeMessage === 'video') preview = '🎥 Vidéo';
+        if (message.typeMessage === 'file') preview = '📁 Fichier';
+        if (message.typeMessage === 'audio') preview = '🎤 Message audio';
+        
+        showNotification({
+            type: 'new_message',
+            conversationId: message.conversationId,
+            senderName: message.Id_sender?.username || 'Quelqu\'un',
+            messagePreview: preview
+        });
+    }
+    
+    // 🎯 SI c'est la conversation active, recharger les messages UNE FOIS
+    if (state.currentConversation && message.conversationId === state.currentConversation._id) {
+        // ⛔ NE PAS ajouter manuellement le message
+        // ✅ Laisser le rechargement naturel se faire
+        markAsRead(state.currentConversation._id);
+        
+        // Optionnel : recharger les messages après un court délai
+        setTimeout(() => {
+            loadMessages(state.currentConversation._id, false);
+        }, 100);
+    }
 }
 
 function handleTypingIndicator(data) {
@@ -1077,6 +2049,199 @@ function initModals() {
       }
     });
   });
+}
+
+function initGroupCreation() {
+    const searchInput = document.getElementById('searchMemberInput');
+    const createBtn = document.getElementById('createGroupConfirmBtn');
+    
+    searchInput?.addEventListener('input', handleUserSearch);
+    createBtn?.addEventListener('click', createGroup);
+}
+
+async function handleUserSearch(event) {
+    const searchTerm = event.target.value.trim();
+    const resultsContainer = document.getElementById('searchMemberResults');
+    
+    if (searchTerm.length < 2) {
+        resultsContainer.style.display = 'none';
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/users/search?q=${encodeURIComponent(searchTerm)}`, {
+            headers: {'Authorization': `Bearer ${state.token}`}
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            displaySearchResults(data.users);
+        } else {
+            showMessage(data.message || 'Aucun utilisateur trouvé', 'info');
+            resultsContainer.innerHTML = '<div style="padding: 10px; color: #666; text-align: center;">Aucun utilisateur trouvé</div>';
+            resultsContainer.style.display = 'block';
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur recherche BDD:', error);
+        showMessage('Erreur de recherche - Vérifie que la route API existe', 'error');
+        resultsContainer.innerHTML = '<div style="padding: 10px; color: #ff4444; text-align: center;">Erreur de recherche</div>';
+        resultsContainer.style.display = 'block';
+    }
+}
+
+function displaySearchResults(users) {
+    const resultsContainer = document.getElementById('searchMemberResults');
+    
+    if (users.length === 0) {
+        resultsContainer.innerHTML = '<div style="padding: 10px; color: #666; text-align: center;">Aucun utilisateur trouvé</div>';
+        resultsContainer.style.display = 'block';
+        return;
+    }
+    
+    resultsContainer.innerHTML = users.map(user => `
+        <div class="user-result" data-user-id="${user._id}" style="display: flex; justify-content: between; align-items: center; padding: 10px; border-bottom: 1px solid #333; cursor: pointer;">
+            <div style="display: flex; align-items: center; gap: 10px; flex: 1;">
+                <div class="user-avatar" style="width: 30px; height: 30px; border-radius: 50%; background: #f9ee34; color: #1c1c1c; display: flex; align-items: center; justify-content: center; font-weight: bold;">
+                    ${user.username.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                    <div style="font-weight: bold; color: #f9ee34;">${user.username}</div>
+                    <div style="font-size: 11px; color: #ffeca2;">${user.email}</div>
+                </div>
+            </div>
+            <button class="add-user-btn" style="background: #f9ee34; color: #1c1c1c; border: none; border-radius: 50%; width: 25px; height: 25px; cursor: pointer; font-weight: bold;">
+                +
+            </button>
+        </div>
+    `).join('');
+    
+    resultsContainer.style.display = 'block';
+    
+    resultsContainer.querySelectorAll('.add-user-btn').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const userElement = btn.closest('.user-result');
+            const userId = userElement.dataset.userId;
+            const username = userElement.querySelector('div > div:first-child').textContent;
+            addUserToGroup(userId, username);
+        });
+    });
+    
+    resultsContainer.querySelectorAll('.user-result').forEach(row => {
+        row.addEventListener('click', (e) => {
+            if (!e.target.classList.contains('add-user-btn')) {
+                const userId = row.dataset.userId;
+                const username = row.querySelector('div > div:first-child').textContent;
+                addUserToGroup(userId, username);
+            }
+        });
+    });
+}
+
+function addUserToGroup(userId, username) {
+    const selectedList = document.getElementById('selectedMembersList');
+    const selectedCount = document.getElementById('selectedCount');
+    
+    if (selectedList.querySelector(`[data-user-id="${userId}"]`)) {
+        showMessage(`${username} est déjà dans le groupe`, 'info');
+        return;
+    }
+    
+    if (selectedList.children.length === 1 && selectedList.children[0].style.color === 'rgb(102, 102, 102)') {
+        selectedList.innerHTML = '';
+    }
+    
+    const memberElement = document.createElement('div');
+    memberElement.className = 'member-item';
+    memberElement.dataset.userId = userId;
+    memberElement.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px; background: #252525; border-radius: 6px; margin: 5px 0;">
+            <span style="color: #f9ee34;">${username}</span>
+            <button class="remove-user-btn" style="background: #ff4444; color: white; border: none; border-radius: 50%; width: 20px; height: 20px; cursor: pointer; font-size: 12px;">
+                ×
+            </button>
+        </div>
+    `;
+    
+    memberElement.querySelector('.remove-user-btn').addEventListener('click', () => {
+        memberElement.remove();
+        updateSelectedCount();
+        
+        if (selectedList.children.length === 0) {
+            selectedList.innerHTML = '<div style="color: #666; text-align: center; font-size: 12px;">Aucun membre sélectionné</div>';
+        }
+    });
+    
+    selectedList.appendChild(memberElement);
+    updateSelectedCount();
+    
+    document.getElementById('searchMemberResults').style.display = 'none';
+    document.getElementById('searchMemberInput').value = '';
+    
+    showMessage(`${username} ajouté au groupe!`, 'success');
+}
+
+function updateSelectedCount() {
+    const selectedCount = document.getElementById('selectedCount');
+    const members = document.querySelectorAll('#selectedMembersList .member-item');
+    selectedCount.textContent = members.length;
+}
+
+async function createGroup() {
+    const groupName = document.getElementById('groupNameInput').value.trim();
+    const selectedMembers = Array.from(document.querySelectorAll('#selectedMembersList .member-item'))
+        .map(item => item.dataset.userId);
+    
+    if (!groupName) {
+        showMessage('Donne un nom à ton groupe!', 'error');
+        return;
+    }
+    
+    if (selectedMembers.length < 2) {
+        showMessage('Ajoute au moins 2 membres pour créer un groupe!', 'error');
+        return;
+    }
+    
+    try {
+        showMessage('Création du groupe en cours...', 'info');
+        
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/conversations/groups/create`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                groupName: groupName,
+                participantIds: selectedMembers
+            })
+        });
+
+        const data = await response.json();
+
+        if (response.ok && data.success) {
+            showMessage(`✅ Groupe "${groupName}" créé avec ${selectedMembers.length} membres!`, 'success');
+            
+            document.getElementById('createGroupModal').style.display = 'none';
+            
+            document.getElementById('groupNameInput').value = '';
+            document.getElementById('selectedMembersList').innerHTML = '<div style="color: #666; text-align: center; font-size: 12px;">Aucun membre sélectionné</div>';
+            document.getElementById('selectedCount').textContent = '0';
+            document.getElementById('searchMemberResults').style.display = 'none';
+            document.getElementById('searchMemberInput').value = '';
+            
+            await loadConversations();
+            
+        } else {
+            throw new Error(data.error || data.message || 'Erreur de création');
+        }
+        
+    } catch (error) {
+        console.error('❌ Erreur création groupe:', error);
+        showMessage(`Erreur: ${error.message}`, 'error');
+    }
 }
 
 function showNewConversationModal() {
@@ -1173,37 +2338,33 @@ function updateTotalUnreadCount() {
 }
 
 function updateConversationLastMessage(conversationId, message) {
-  const conversationElement = document.querySelector(
-    `[data-conversation-id="${conversationId}"]`
-  );
-  if (conversationElement) {
-    const lastMessageElement =
-      conversationElement.querySelector(".contact-info p");
-    const timeElement = conversationElement.querySelector(".conversation-time");
-
-    if (lastMessageElement) {
-      lastMessageElement.textContent = getLastMessagePreview({
-        lastMessage: message.content,
-      });
+    const conversationElement = document.querySelector(`[data-conversation-id="${conversationId}"]`);
+    if (conversationElement) {
+        const lastMessageElement = conversationElement.querySelector('.contact-info p');
+        const timeElement = conversationElement.querySelector('.conversation-time');
+        
+        if (lastMessageElement) {
+            let preview = message.content;
+            if (message.typeMessage === 'image') preview = '📷 Image';
+            if (message.typeMessage === 'video') preview = '🎥 Vidéo';
+            if (message.typeMessage === 'file') preview = '📁 Fichier';
+            if (message.typeMessage === 'audio') preview = '🎤 Message audio';
+            
+            lastMessageElement.textContent = preview.length > 30 ? 
+                preview.substring(0, 30) + '...' : preview;
+        }
+        
+        if (timeElement) {
+            timeElement.textContent = formatTime(message.createdAt);
+        }
+        
+        const contactsList = document.getElementById('contactsList');
+        const conversationsContainer = contactsList.querySelector('.contacts-list') || contactsList;
+        
+        conversationElement.remove();
+        const header = conversationsContainer.querySelector('.contacts-header');
+        conversationsContainer.insertBefore(conversationElement, header.nextSibling);
     }
-
-    if (timeElement) {
-      timeElement.textContent = formatTime(message.createdAt);
-    }
-
-    // Re-trier les conversations
-    const contactsList = document.getElementById("contactsList");
-    const conversationsContainer =
-      contactsList.querySelector(".contacts-list") || contactsList;
-
-    // Supprimer et réinsérer pour remettre en haut
-    conversationElement.remove();
-    const header = conversationsContainer.querySelector(".contacts-header");
-    conversationsContainer.insertBefore(
-      conversationElement,
-      header.nextSibling
-    );
-  }
 }
 
 // ===== NOTIFICATIONS =====
@@ -1311,7 +2472,6 @@ function showLoading(show) {
   }
 }
 
-// 🆕 FONCTION POUR LE CHARGEMENT DES MESSAGES
 function showMessageLoading(show) {
   const messagesList = document.getElementById("messagesList");
   if (!messagesList) return;
@@ -1390,11 +2550,181 @@ function updateMessageStatus(messageId, status) {
 }
 
 // Gestion de la déconnexion
-window.addEventListener("beforeunload", () => {
-  if (state.socket) {
-    state.socket.disconnect();
-  }
+window.addEventListener('beforeunload', () => {
+    if (state.socket) {
+        state.socket.disconnect();
+    }
+    
+    state.pendingFiles.forEach(fileData => {
+        if (fileData.previewUrl) {
+            URL.revokeObjectURL(fileData.previewUrl);
+        }
+    });
 });
+
+// ====================================================================
+//                     ÉPINGLAGE MESSAGES (COMME MESSENGER)
+// ====================================================================
+
+// Ajout du bandeau épinglé en haut du chat (une seule fois)
+function initPinnedBanner() {
+    if (document.getElementById("pinnedBanner")) return;
+
+    const banner = document.createElement("div");
+    banner.id = "pinnedBanner";
+    banner.className = "pinned-banner bg-gradient-to-r from-purple-700 to-indigo-700 text-white p-5 shadow-2xl border-b-4 border-yellow-400 hidden";
+    banner.innerHTML = `
+        <div class="max-w-4xl mx-auto">
+            <div class="flex items-center justify-between mb-3">
+                <h3 class="font-bold text-lg flex items-center gap-2">
+                    Messages épinglés (<span id="pinnedCount">0</span>)
+                </h3>
+                <button onclick="document.getElementById('pinnedBanner').classList.add('hidden')" class="text-sm opacity-70 hover:opacity-100">
+                    Masquer
+                </button>
+            </div>
+            <div id="pinnedList" class="space-y-3 max-h-64 overflow-y-auto"></div>
+        </div>
+    `;
+
+    // Insérer juste avant la zone des messages
+    document.querySelector(".chat-area").insertBefore(banner, document.querySelector(".messages-container"));
+}
+
+// Charger les messages épinglés
+async function loadPinnedMessages(conversationId) {
+    try {
+        const res = await fetch(`${CONFIG.BACKEND_URL}/api/messages/${conversationId}/pinned`, {
+            headers: { Authorization: `Bearer ${state.token}` }
+        });
+        const data = await res.json();
+        if (data.pinnedMessages) {
+            renderPinnedBanner(data.pinnedMessages);
+        }
+    } catch (err) {
+        console.error("Erreur chargement messages épinglés:", err);
+    }
+}
+
+// Afficher le bandeau avec les messages épinglés
+function renderPinnedBanner(pinnedMessages) {
+    const banner = document.getElementById("pinnedBanner");
+    const list = document.getElementById("pinnedList");
+    const count = document.getElementById("pinnedCount");
+
+    if (!pinnedMessages || pinnedMessages.length === 0) {
+        banner.classList.add("hidden");
+        return;
+    }
+
+    banner.classList.remove("hidden");
+    count.textContent = pinnedMessages.length;
+    list.innerHTML = "";
+
+    pinnedMessages.forEach(msg => {
+        const isMine = isMyMessage(msg);
+        const item = document.createElement("div");
+        item.className = "bg-white/20 backdrop-blur rounded-lg p-4 flex justify-between items-center";
+        item.innerHTML = `
+            <div class="flex-1 pr-4">
+                <strong>${isMine ? "Toi" : "Autre"} :</strong>
+                <span class="ml-2 break-words">
+                    ${msg.typeMessage === "text" ? escapeHtml(msg.content) :
+                     msg.typeMessage === "image" ? "Photo" :
+                     msg.typeMessage === "video" ? "Vidéo" :
+                     msg.typeMessage === "audio" ? "Message vocal" : "Fichier"}
+                </span>
+            </div>
+            ${isMine ? `<button onclick="togglePin('${msg._id}', true)" class="text-yellow-300 hover:text-white text-sm">Retirer</button>` : ""}
+        `;
+        list.appendChild(item);
+    });
+}
+
+// Fonction d’épinglage / désépinglage
+async function togglePin(messageId, isPinned = false) {
+    if (!state.currentConversation) return;
+
+    const url = isPinned
+        ? `${CONFIG.BACKEND_URL}/api/messages/${messageId}/unpin`
+        : `${CONFIG.BACKEND_URL}/api/messages/${messageId}/pin`;
+
+    try {
+        await fetch(url, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${state.token}` }
+        });
+
+        // Recharger les messages + bandeau
+        await loadMessages(state.currentConversation._id, false);
+        await loadPinnedMessages(state.currentConversation._id);
+    } catch (err) {
+        showMessage("Erreur épinglage", "error");
+    }
+}
+
+// Modifier createMessageElement pour ajouter le bouton étoile
+const originalCreateMessageElement = createMessageElement;
+createMessageElement = function(message) {
+    const el = originalCreateMessageElement(message);
+    const isSent = isMyMessage(message);
+
+    // Ajouter le bouton étoile au survol
+    const bubble = el.querySelector(".message-content") || el.querySelector(".message-bubble") || el;
+    if (bubble) {
+        bubble.classList.add("group", "relative");
+
+        const pinBtn = document.createElement("button");
+        pinBtn.className = `absolute -top-10 right-4 bg-gray-900 text-yellow-400 text-3xl px-4 py-2 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-2xl z-10 hover:bg-gray-800`;
+        pinBtn.innerHTML = message.isPinned ? "Épinglé" : "Épingler";
+        pinBtn.onclick = (e) => {
+            e.stopPropagation();
+            togglePin(message._id, message.isPinned);
+        };
+
+        el.appendChild(pinBtn);
+    }
+
+    // Marquer les messages épinglés visuellement
+    if (message.isPinned) {
+        el.style.borderLeft = "4px solid #f9ee34";
+        el.style.backgroundColor = isSent ? "rgba(249, 238, 52, 0.15)" : "rgba(249, 238, 52, 0.1)";
+    }
+
+    return el;
+};
+
+// Écoute des événements Socket.IO pour l’épinglage en temps réel
+if (state.socket) {
+    state.socket.on("message:pinned", (data) => {
+        if (state.currentConversation?._id === data.conversationId) {
+            loadMessages(state.currentConversation._id, false);
+            loadPinnedMessages(state.currentConversation._id);
+        }
+    });
+
+    state.socket.on("message:unpinned", (data) => {
+        if (state.currentConversation?._id === data.conversationId) {
+            loadMessages(state.currentConversation._id, false);
+            loadPinnedMessages(state.currentConversation._id);
+        }
+    });
+}
+
+// Initialiser le bandeau au chargement
+document.addEventListener("DOMContentLoaded", () => {
+    initPinnedBanner();
+});
+
+// Quand on ouvre une conversation → charger aussi les épinglés
+const originalSelectConversation = selectConversation;
+selectConversation = async function(conversation) {
+    await originalSelectConversation(conversation);
+    await loadPinnedMessages(conversation._id);
+};
 
 // Export pour debug
 window.owlyState = state;
+window.openImageModal = openImageModal;
+window.showReactionsModal = showReactionsModal;
+window.showVoiceRecordModal = showVoiceRecordModal;

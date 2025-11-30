@@ -15,4 +15,12 @@ router.post("/", authMiddleware, addReaction);
 router.delete("/:messageId", authMiddleware, removeReaction);
 router.get("/message/:messageId", authMiddleware, getMessageReactions);
 
+// 🆕 AJOUTE CETTE ROUTE POUR LES RÉACTIONS DISPONIBLES
+router.get("/available", authMiddleware, (req, res) => {
+  res.json({
+    success: true,
+    reactions: ["❤️", "👍", "😂", "😮", "😢", "😡", "🎉", "🔥", "👏", "💯"]
+  });
+});
+
 export default router;

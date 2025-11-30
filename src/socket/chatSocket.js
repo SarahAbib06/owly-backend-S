@@ -3,7 +3,7 @@ import { conversationController } from "../controllers/conversationController.js
 import Participants from "../models/Participants.js";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
-import Reaction from "../models/Reaction.js"; // 🆕 IMPORT AJOUTÉ
+import Reaction from "../models/Reaction.js";
 import jwt from "jsonwebtoken";
 
 export const configureChatSockets = (io) => {
@@ -386,7 +386,7 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ
+    // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ - CORRIGÉ SANS DOUBLON
     socket.on("send_message", async (data) => {
       console.log("📨 Message reçu:", data);
 
@@ -419,7 +419,7 @@ export const configureChatSockets = (io) => {
           Id_sender: socket.userId, // ← SÉCURISÉ DU TOKEN
         };
 
-        // SAUVEGARDE DU MESSAGE
+        // SAUVEGARDE DU MESSAGE (l'émission se fait dans handleMessageCreation)
         const savedMessage = await messageController.createMessage(
           finalMessageData,
           io,
@@ -429,14 +429,14 @@ export const configureChatSockets = (io) => {
         // METTRE À JOUR L'ACTIVITÉ
         await updateUserActivity(socket.userId, socket.id);
 
-        // Réponse à l'émetteur
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
         socket.emit("message_sent", {
           success: true,
           data: savedMessage,
           timestamp: new Date(),
         });
 
-        console.log("🎉 Message diffusé - ID:", savedMessage._id);
+        console.log("🎉 Message traité - ID:", savedMessage._id);
       } catch (error) {
         console.error("💥 Erreur traitement message:", error.message);
 
@@ -444,6 +444,247 @@ export const configureChatSockets = (io) => {
           success: false,
           error: error.message,
           timestamp: new Date(),
+        });
+      }
+    });
+
+    // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ SANS DOUBLON
+    socket.on('send_image_message', async (data) => {
+      console.log('🖼️ Image message reçu:', data);
+      
+      try {
+        // Vérification autorisation
+        if (data.conversationId) {
+          await conversationController.checkUserAuthorization(
+            socket.userId, 
+            data.conversationId
+          );
+        }
+
+        const messageData = {
+          conversationId: data.conversationId,
+          Id_receiver: data.Id_receiver,
+          typeMessage: 'image'
+        };
+
+        // Traitement du fichier image
+        let fileBuffer;
+        if (typeof data.file === 'string' && data.file.startsWith('data:image')) {
+          const base64Data = data.file.split(',')[1];
+          fileBuffer = Buffer.from(base64Data, 'base64');
+        } else if (data.fileBuffer) {
+          fileBuffer = Buffer.from(data.fileBuffer);
+        } else {
+          throw new Error('Format de fichier image non reconnu');
+        }
+
+        // Création objet fichier
+        const file = { 
+          buffer: fileBuffer,
+          originalname: data.fileName || 'image',
+          mimetype: data.fileType || 'image/jpeg'
+        };
+
+        // 🆕 L'émission se fait dans uploadImageMessage via handleMessageCreation
+        const savedMessage = await messageController.uploadImageMessage(
+          file, 
+          messageData, 
+          io, 
+          socket.userId
+        );
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
+
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
+        socket.emit('image_message_sent', {
+          success: true,
+          data: savedMessage,
+          timestamp: new Date()
+        });
+
+        console.log('🖼️ Message image traité - ID:', savedMessage._id);
+
+      } catch (error) {
+        console.error('💥 Erreur traitement image message:', error.message);
+        socket.emit('image_message_error', {
+          success: false,
+          error: error.message,
+          timestamp: new Date()
+        });
+      }
+    });
+
+    // 🆕 ÉVÉNEMENT ENVOI FICHIER - CORRIGÉ SANS DOUBLON
+    socket.on('send_file_message', async (data) => {
+      console.log('📎 File message reçu:', data);
+      
+      try {
+        // Vérification autorisation
+        if (data.conversationId) {
+          await conversationController.checkUserAuthorization(
+            socket.userId, 
+            data.conversationId
+          );
+        }
+
+        const messageData = {
+          conversationId: data.conversationId,
+          Id_receiver: data.Id_receiver,
+          fileName: data.fileName,
+          fileType: data.fileType,
+          fileSize: data.fileSize,
+          originalName: data.originalName,
+          typeMessage: 'file'
+        };
+
+        // Traitement du fichier
+        let fileBuffer;
+        if (typeof data.file === 'string' && data.file.startsWith('data:')) {
+          const base64Data = data.file.split(',')[1];
+          fileBuffer = Buffer.from(base64Data, 'base64');
+        } else if (data.fileBuffer) {
+          fileBuffer = Buffer.from(data.fileBuffer);
+        } else {
+          throw new Error('Format de fichier non reconnu');
+        }
+
+        // Création objet fichier
+        const file = { 
+          buffer: fileBuffer,
+          originalname: data.fileName || data.originalName || 'file',
+          mimetype: data.fileType || 'application/octet-stream',
+          size: data.fileSize
+        };
+
+        // 🆕 L'émission se fait dans uploadFileMessage via handleMessageCreation
+        const savedMessage = await messageController.uploadFileMessage(
+          file,
+          messageData,
+          io,
+          socket.userId
+        );
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
+
+        // Formater le message pour l'interface
+        const formattedMessage = {
+          _id: savedMessage._id,
+          conversationId: savedMessage.conversationId,
+          Id_sender: savedMessage.Id_sender,
+          Id_receiver: data.Id_receiver,
+          typeMessage: savedMessage.typeMessage || 'file',
+          content: savedMessage.content,
+          fileUrl: savedMessage.fileUrl,
+          fileName: savedMessage.fileName || data.fileName,
+          fileSize: savedMessage.fileSize || data.fileSize,
+          fileType: savedMessage.fileType || data.fileType,
+          originalName: savedMessage.originalName || data.originalName,
+          status: savedMessage.status,
+          time: savedMessage.time || savedMessage.timestamp,
+          timestamp: new Date()
+        };
+
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
+        socket.emit('file_message_sent', {
+          success: true,
+          data: formattedMessage,
+          timestamp: new Date()
+        });
+
+        console.log('📎 Message fichier traité - ID:', savedMessage._id);
+
+      } catch (error) {
+        console.error('💥 Erreur traitement fichier message:', error.message);
+        socket.emit('file_message_error', {
+          success: false,
+          error: error.message,
+          timestamp: new Date()
+        });
+      }
+    });
+
+    // 🆕 ÉVÉNEMENT ENVOI VIDÉO - CORRIGÉ SANS DOUBLON
+    socket.on('send_video_message', async (data) => {
+      console.log('🎥 Video message reçu:', data);
+      
+      try {
+        if (!data.file) {
+          throw new Error('Aucun fichier vidéo reçu');
+        }
+
+        // Vérification autorisation
+        if (data.conversationId) {
+          await conversationController.checkUserAuthorization(
+            socket.userId, 
+            data.conversationId
+          );
+        }
+
+        const messageData = {
+          conversationId: data.conversationId,
+          Id_receiver: data.Id_receiver,
+          fileName: data.fileName,
+          fileType: data.fileType,
+          fileSize: data.fileSize,
+          typeMessage: 'video'
+        };
+
+        // Conversion ArrayBuffer → Buffer Node.js
+        const fileBuffer = Buffer.from(new Uint8Array(data.file));
+
+        // Création objet fichier
+        const file = { 
+          buffer: fileBuffer,
+          originalname: data.fileName || 'video',
+          mimetype: data.fileType || 'video/mp4',
+          size: data.fileSize
+        };
+
+        // 🆕 L'émission se fait dans uploadVideoMessage via handleMessageCreation
+        const savedMessage = await messageController.uploadVideoMessage(
+          file,
+          messageData, 
+          io,
+          socket.userId
+        );
+
+        // METTRE À JOUR L'ACTIVITÉ
+        await updateUserActivity(socket.userId, socket.id);
+
+        // Formater le message pour l'interface
+        const formattedMessage = {
+          _id: savedMessage._id,
+          conversationId: savedMessage.conversationId,
+          Id_sender: savedMessage.Id_sender,
+          Id_receiver: data.Id_receiver,
+          typeMessage: savedMessage.typeMessage || 'video',
+          content: savedMessage.content,
+          fileUrl: savedMessage.fileUrl,
+          fileName: savedMessage.fileName || data.fileName,
+          fileSize: savedMessage.fileSize || data.fileSize,
+          fileType: savedMessage.fileType || data.fileType,
+          status: savedMessage.status,
+          time: savedMessage.time || savedMessage.timestamp,
+          timestamp: new Date()
+        };
+
+        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
+        socket.emit('video_message_sent', {
+          success: true,
+          data: formattedMessage,
+          timestamp: new Date()
+        });
+
+        console.log('🎥 Message vidéo traité - ID:', savedMessage._id);
+
+      } catch (error) {
+        console.error('💥 Erreur traitement vidéo message:', error.message);
+        socket.emit('video_message_error', {
+          success: false,
+          error: error.message,
+          timestamp: new Date()
         });
       }
     });

@@ -1,3 +1,4 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -17,6 +18,7 @@ import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
+import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
@@ -37,27 +39,47 @@ console.log(
 
 const app = express();
 const server = createServer(app);
+
+// ✅ CONFIGURATION CORS POUR EXPRESS
+app.use(cors({
+  origin: [
+    "http://localhost:5173",
+    "http://localhost:5174", 
+    "http://localhost:5175",
+    "http://127.0.0.1:5500",
+    "http://localhost:5500",
+    "http://127.0.0.1:5501",
+    "http://localhost:5501"
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+// 🆕 SOCKET.IO CONFIGURÉ POUR LES FICHIERS
 const io = new Server(server, {
   cors: {
     origin: [
       "http://localhost:5173",
       "http://localhost:5174",
       "http://localhost:5175",
-      "http://127.0.0.1:5500", // 🆕 AJOUTÉ
+      "http://127.0.0.1:5500",
       "http://localhost:5500",
-
       "http://127.0.0.1:5501",
-      "http://localhost:5501",
-
-      "null", // 🆕 AJOUTÉ
+      "http://127.0.0.1:5501", 
+      "http://localhost:5501" ,
     ],
-    credentials: true,
+    credentials: true
   },
+  maxHttpBufferSize: 1e8
 });
 
 // ✅ 1. Connexion à la base de données
 connectDB();
+app.set('io', io); 
 
+// ✅ Configuration des sockets
+configureChatSockets(io);
 // 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
 const cleanupOrphans = async () => {
   try {
@@ -69,31 +91,14 @@ const cleanupOrphans = async () => {
 };
 cleanupOrphans();
 
-// ✅ 2. Middlewares CORS et JSON
-
-app.use(
-  cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "http://127.0.0.1:5500",
-      "http://127.0.0.1:5501",
-      "http://localhost:5501", // 🆕 AJOUTÉ
-      "http://localhost:5500",
-      "null", // 🆕 AJOUTÉ
-    ],
-    credentials: true,
-  })
-);
-
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+app.use("/public", express.static("public"));
 
 // ✅ 3. Routes
 app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
+
 
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
@@ -102,10 +107,12 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
+app.use('/api/auth', authRoutes);
+app.use('/api', searchRelationsRoutes);
 
-// ✅ 4. Configuration Socket.io
-configureChatSockets(io);
+
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
+
 server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));

@@ -7,8 +7,9 @@ const userSchema = new mongoose.Schema(
     username: { type: String, required: true, unique: true },
     email: { type: String, required: true, unique: true },
     passwordHash: { type: String, required: true }, // OBLIGATOIRE
-    profilePicture: { type: String, default: null },
     dateOfBirth: { type: Date }, // 🆕 AJOUTÉ depuis votre version
+    profilePicture: { type: String,
+       default: "https://res.cloudinary.com/dv9oqjulh/image/upload/v1764324539/photo_de_profil_par_defaut_j3qm1p.png" },
     qrCode: { type: String },
     status: {
       type: String,
@@ -16,21 +17,27 @@ const userSchema = new mongoose.Schema(
       default: "offline",
     },
 
-    // 🆕 SESSIONS ACTIVES POUR MULTI-DEVICES (AJOUTÉ depuis votre version)
-    activeSessions: [
-      {
-        socketId: { type: String, required: true },
-        deviceType: {
-          type: String,
-          enum: ["desktop", "mobile", "tablet"],
-          default: "desktop",
-        },
-        userAgent: { type: String },
-        ipAddress: { type: String },
-        connectedAt: { type: Date, default: Date.now },
-        lastActivity: { type: Date, default: Date.now },
+activeSessions: [
+  {
+    socketId: { type: String, required: false },
+    deviceInfo: {  // 🆕 Nouveau champ structuré
+      type: {
+        type: String,  // 'desktop', 'mobile', 'tablet'
+        default: 'desktop'
       },
-    ],
+      platform: {
+        type: String,  // 'web', 'android', 'ios', 'windows', 'macos'
+        default: 'web'
+      },
+      browser: String,  // 'chrome', 'firefox', 'safari'
+      os: String,       // 'Windows', 'macOS', 'Android', 'iOS'
+      userAgent: String // User agent complet
+    },
+    ipAddress: { type: String },
+    connectedAt: { type: Date, default: Date.now },
+    lastActivity: { type: Date, default: Date.now },
+  },
+],
 
     // 🆕 PRÉFÉRENCES NOTIFICATIONS (AJOUTÉ depuis votre version)
     notificationPreferences: {
