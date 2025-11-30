@@ -181,7 +181,7 @@ export const getAudioMessages = async (req, res) => {
       typeMessage: "audio",
     })
       .populate("Id_sender", "username photo")
-      .sort({ time: -1 });
+      .sort({ time: -1 }); // Du plus récent au plus ancien
 
     console.log(`✅ ${audioMessages.length} messages audio trouvés`);
 
