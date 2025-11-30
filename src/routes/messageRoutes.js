@@ -12,7 +12,10 @@ const router = express.Router();
 // Récupération des messages d'une conversation
 router.get("/:conversationId", protact, async (req, res) => {
   try {
-    console.log("API - Récupération messages conversation:", req.params.conversationId);
+    console.log(
+      "API - Récupération messages conversation:",
+      req.params.conversationId
+    );
 
     const { conversationId } = req.params;
     const page = parseInt(req.query.page) || 1;
@@ -93,6 +96,12 @@ router.get('/:conversationId/media', protact, messageController.getConversationM
 
 
 // Bonus : récupérer les messages épinglés d'une conversation (super utile pour l'affichage en haut)
-router.get("/:conversationId/pinned", protact, messageController.getPinnedMessages);
+router.get(
+  "/:conversationId/pinned",
+  protact,
+  messageController.getPinnedMessages
+);
+//pour trensfer de msg
+router.post("/:messageId/forward", protact, messageController.forwardMessage);
 
 export default router;

@@ -1,4 +1,3 @@
-
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -18,7 +17,7 @@ import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
-import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
+import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
@@ -41,20 +40,23 @@ const app = express();
 const server = createServer(app);
 
 // ✅ CONFIGURATION CORS POUR EXPRESS
-app.use(cors({
-  origin: [
-    "http://localhost:5173",
-    "http://localhost:5174", 
-    "http://localhost:5175",
-    "http://127.0.0.1:5500",
-    "http://localhost:5500",
-    "http://127.0.0.1:5501",
-    "http://localhost:5501"
-  ],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization']
-}));
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+      "http://127.0.0.1:5500",
+      "http://localhost:5500",
+      "http://127.0.0.1:5501",
+      "http://localhost:5501",
+      "null",
+    ],
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
 // 🆕 SOCKET.IO CONFIGURÉ POUR LES FICHIERS
 const io = new Server(server, {
@@ -66,17 +68,17 @@ const io = new Server(server, {
       "http://127.0.0.1:5500",
       "http://localhost:5500",
       "http://127.0.0.1:5501",
-      "http://127.0.0.1:5501", 
-      "http://localhost:5501" ,
+      "http://127.0.0.1:5501",
+      "http://localhost:5501",
     ],
-    credentials: true
+    credentials: true,
   },
-  maxHttpBufferSize: 1e8
+  maxHttpBufferSize: 1e8,
 });
 
 // ✅ 1. Connexion à la base de données
 connectDB();
-app.set('io', io); 
+app.set("io", io);
 
 // ✅ Configuration des sockets
 configureChatSockets(io);
@@ -99,7 +101,6 @@ app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
 
-
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
 app.use("/api/conversations", conversationRoutes);
@@ -107,10 +108,8 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
-app.use('/api/auth', authRoutes);
-app.use('/api', searchRelationsRoutes);
-
-
+app.use("/api/auth", authRoutes);
+app.use("/api", searchRelationsRoutes);
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;

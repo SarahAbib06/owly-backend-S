@@ -252,14 +252,46 @@ async function handleSuccessfulAuth(authData) {
     }, 1000);
 }
 
-function checkExistingAuth() {
+async function checkExistingAuth() {
     const token = localStorage.getItem("owly_token");
     const userData = localStorage.getItem("owly_user");
 
-    if (token && userData) {
-        // Rediriger directement vers la messagerie
-        window.location.href = "conversations.html";
+    // Si pas de token ou pas d'user → on reste sur login
+    if (!token || !userData) {
+        return;
     }
+
+    try {
+        // On teste si le token est VALIDE en appelant une route protégée
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/me`, {
+            method: "GET",
+            headers: {
+                "Authorization": `Bearer ${token}`,
+                "Content-Type": "application/json"
+            }
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+            // Token valide → on garde la session
+            console.log("Session valide, redirection vers messagerie...");
+            window.location.href = "conversations.html";
+        } else {
+            // Token invalide ou expiré → on nettoie tout
+            console.log("Token invalide ou expiré → déconnexion forcée");
+            forceLogout();
+        }
+    } catch (error) {
+        console.error("Erreur vérification session:", error);
+        forceLogout();
+    }
+}
+
+function forceLogout() {
+    localStorage.removeItem("owly_token");
+    localStorage.removeItem("owly_user");
+    sessionStorage.clear();
+    showMessage("Session expirée. Veuillez vous reconnecter.", "warning");
 }
 
 function setButtonLoading(button, isLoading) {
