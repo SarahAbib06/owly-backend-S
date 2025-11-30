@@ -287,6 +287,89 @@ export const configureChatSockets = (io) => {
       });
     });
 
+    // ==================== TRANSFERT DE MESSAGE (FORWARD) EN TEMPS RÉEL ====================
+    // Événement déclenché depuis le frontend quand l'utilisateur clique sur "Transférer"
+    socket.on("forward_message", async (data) => {
+      try {
+        const { messageId, targetConversationId } = data;
+        const userId = socket.userId;
+
+        console.log("Message transféré via Socket.IO:", {
+          messageId,
+          targetConversationId,
+          userId,
+        });
+
+        if (!messageId || !targetConversationId) {
+          throw new Error("messageId et targetConversationId sont requis");
+        }
+
+        // Vérifie que l'utilisateur a accès à la conversation cible
+        const hasAccess = await Participants.findOne({
+          Id_Conversation: targetConversationId,
+          Id_User: userId,
+        });
+
+        if (!hasAccess) {
+          throw new Error("Vous n'êtes pas membre de la conversation cible");
+        }
+
+        // On passe io et req.user dans la requête simulée
+        const fakeReq = {
+          params: { messageId },
+          body: { targetConversationId },
+          user: { id: userId, username: socket.username },
+          io: io, // Très important : on donne accès à io
+        };
+
+        const fakeRes = {
+          json: (obj) => {
+            // Si succès → on émet directement le nouveau message transféré
+            if (obj.success) {
+              console.log(
+                "Message transféré avec succès → diffusion en temps réel"
+              );
+
+              // On émet le message dans la conversation cible
+              io.to(targetConversationId.toString()).emit("new_message", {
+                message: obj.forwardedMessage,
+                forwarded: true,
+                originalMessageId: messageId,
+              });
+
+              // On notifie aussi l'émetteur que tout s'est bien passé
+              socket.emit("forward_success", {
+                success: true,
+                message: "Message transféré !",
+                forwardedMessage: obj.forwardedMessage,
+                targetConversationId,
+              });
+            } else {
+              throw new Error(obj.error || "Échec du transfert");
+            }
+          },
+          status: (code) => ({
+            json: (obj) => {
+              socket.emit("forward_error", {
+                success: false,
+                error: obj.error || "Erreur lors du transfert",
+                statusCode: code,
+              });
+            },
+          }),
+        };
+
+        // Appelle directement la méthode du controller (elle gère tout : chiffrement, sauvegarde, socket, etc.)
+        await messageController.forwardMessage(fakeReq, fakeRes);
+      } catch (error) {
+        console.error("Erreur transfert de message (socket):", error.message);
+        socket.emit("forward_error", {
+          success: false,
+          error: error.message || "Impossible de transférer le message",
+        });
+      }
+    });
+
     // ==================== VOTRE CODE EXISTANT ====================
 
     // 🆕 JOIN NOTIFICATIONS AVEC USERID DU TOKEN
@@ -449,14 +532,14 @@ export const configureChatSockets = (io) => {
     });
 
     // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ SANS DOUBLON
-    socket.on('send_image_message', async (data) => {
-      console.log('🖼️ Image message reçu:', data);
-      
+    socket.on("send_image_message", async (data) => {
+      console.log("🖼️ Image message reçu:", data);
+
       try {
         // Vérification autorisation
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
-            socket.userId, 
+            socket.userId,
             data.conversationId
           );
         }
@@ -464,32 +547,35 @@ export const configureChatSockets = (io) => {
         const messageData = {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
-          typeMessage: 'image'
+          typeMessage: "image",
         };
 
         // Traitement du fichier image
         let fileBuffer;
-        if (typeof data.file === 'string' && data.file.startsWith('data:image')) {
-          const base64Data = data.file.split(',')[1];
-          fileBuffer = Buffer.from(base64Data, 'base64');
+        if (
+          typeof data.file === "string" &&
+          data.file.startsWith("data:image")
+        ) {
+          const base64Data = data.file.split(",")[1];
+          fileBuffer = Buffer.from(base64Data, "base64");
         } else if (data.fileBuffer) {
           fileBuffer = Buffer.from(data.fileBuffer);
         } else {
-          throw new Error('Format de fichier image non reconnu');
+          throw new Error("Format de fichier image non reconnu");
         }
 
         // Création objet fichier
-        const file = { 
+        const file = {
           buffer: fileBuffer,
-          originalname: data.fileName || 'image',
-          mimetype: data.fileType || 'image/jpeg'
+          originalname: data.fileName || "image",
+          mimetype: data.fileType || "image/jpeg",
         };
 
         // 🆕 L'émission se fait dans uploadImageMessage via handleMessageCreation
         const savedMessage = await messageController.uploadImageMessage(
-          file, 
-          messageData, 
-          io, 
+          file,
+          messageData,
+          io,
           socket.userId
         );
 
@@ -497,33 +583,32 @@ export const configureChatSockets = (io) => {
         await updateUserActivity(socket.userId, socket.id);
 
         // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit('image_message_sent', {
+        socket.emit("image_message_sent", {
           success: true,
           data: savedMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        console.log('🖼️ Message image traité - ID:', savedMessage._id);
-
+        console.log("🖼️ Message image traité - ID:", savedMessage._id);
       } catch (error) {
-        console.error('💥 Erreur traitement image message:', error.message);
-        socket.emit('image_message_error', {
+        console.error("💥 Erreur traitement image message:", error.message);
+        socket.emit("image_message_error", {
           success: false,
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     });
 
     // 🆕 ÉVÉNEMENT ENVOI FICHIER - CORRIGÉ SANS DOUBLON
-    socket.on('send_file_message', async (data) => {
-      console.log('📎 File message reçu:', data);
-      
+    socket.on("send_file_message", async (data) => {
+      console.log("📎 File message reçu:", data);
+
       try {
         // Vérification autorisation
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
-            socket.userId, 
+            socket.userId,
             data.conversationId
           );
         }
@@ -535,26 +620,26 @@ export const configureChatSockets = (io) => {
           fileType: data.fileType,
           fileSize: data.fileSize,
           originalName: data.originalName,
-          typeMessage: 'file'
+          typeMessage: "file",
         };
 
         // Traitement du fichier
         let fileBuffer;
-        if (typeof data.file === 'string' && data.file.startsWith('data:')) {
-          const base64Data = data.file.split(',')[1];
-          fileBuffer = Buffer.from(base64Data, 'base64');
+        if (typeof data.file === "string" && data.file.startsWith("data:")) {
+          const base64Data = data.file.split(",")[1];
+          fileBuffer = Buffer.from(base64Data, "base64");
         } else if (data.fileBuffer) {
           fileBuffer = Buffer.from(data.fileBuffer);
         } else {
-          throw new Error('Format de fichier non reconnu');
+          throw new Error("Format de fichier non reconnu");
         }
 
         // Création objet fichier
-        const file = { 
+        const file = {
           buffer: fileBuffer,
-          originalname: data.fileName || data.originalName || 'file',
-          mimetype: data.fileType || 'application/octet-stream',
-          size: data.fileSize
+          originalname: data.fileName || data.originalName || "file",
+          mimetype: data.fileType || "application/octet-stream",
+          size: data.fileSize,
         };
 
         // 🆕 L'émission se fait dans uploadFileMessage via handleMessageCreation
@@ -574,7 +659,7 @@ export const configureChatSockets = (io) => {
           conversationId: savedMessage.conversationId,
           Id_sender: savedMessage.Id_sender,
           Id_receiver: data.Id_receiver,
-          typeMessage: savedMessage.typeMessage || 'file',
+          typeMessage: savedMessage.typeMessage || "file",
           content: savedMessage.content,
           fileUrl: savedMessage.fileUrl,
           fileName: savedMessage.fileName || data.fileName,
@@ -583,41 +668,40 @@ export const configureChatSockets = (io) => {
           originalName: savedMessage.originalName || data.originalName,
           status: savedMessage.status,
           time: savedMessage.time || savedMessage.timestamp,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
 
         // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit('file_message_sent', {
+        socket.emit("file_message_sent", {
           success: true,
           data: formattedMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        console.log('📎 Message fichier traité - ID:', savedMessage._id);
-
+        console.log("📎 Message fichier traité - ID:", savedMessage._id);
       } catch (error) {
-        console.error('💥 Erreur traitement fichier message:', error.message);
-        socket.emit('file_message_error', {
+        console.error("💥 Erreur traitement fichier message:", error.message);
+        socket.emit("file_message_error", {
           success: false,
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     });
 
     // 🆕 ÉVÉNEMENT ENVOI VIDÉO - CORRIGÉ SANS DOUBLON
-    socket.on('send_video_message', async (data) => {
-      console.log('🎥 Video message reçu:', data);
-      
+    socket.on("send_video_message", async (data) => {
+      console.log("🎥 Video message reçu:", data);
+
       try {
         if (!data.file) {
-          throw new Error('Aucun fichier vidéo reçu');
+          throw new Error("Aucun fichier vidéo reçu");
         }
 
         // Vérification autorisation
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
-            socket.userId, 
+            socket.userId,
             data.conversationId
           );
         }
@@ -628,24 +712,24 @@ export const configureChatSockets = (io) => {
           fileName: data.fileName,
           fileType: data.fileType,
           fileSize: data.fileSize,
-          typeMessage: 'video'
+          typeMessage: "video",
         };
 
         // Conversion ArrayBuffer → Buffer Node.js
         const fileBuffer = Buffer.from(new Uint8Array(data.file));
 
         // Création objet fichier
-        const file = { 
+        const file = {
           buffer: fileBuffer,
-          originalname: data.fileName || 'video',
-          mimetype: data.fileType || 'video/mp4',
-          size: data.fileSize
+          originalname: data.fileName || "video",
+          mimetype: data.fileType || "video/mp4",
+          size: data.fileSize,
         };
 
         // 🆕 L'émission se fait dans uploadVideoMessage via handleMessageCreation
         const savedMessage = await messageController.uploadVideoMessage(
           file,
-          messageData, 
+          messageData,
           io,
           socket.userId
         );
@@ -659,7 +743,7 @@ export const configureChatSockets = (io) => {
           conversationId: savedMessage.conversationId,
           Id_sender: savedMessage.Id_sender,
           Id_receiver: data.Id_receiver,
-          typeMessage: savedMessage.typeMessage || 'video',
+          typeMessage: savedMessage.typeMessage || "video",
           content: savedMessage.content,
           fileUrl: savedMessage.fileUrl,
           fileName: savedMessage.fileName || data.fileName,
@@ -667,24 +751,23 @@ export const configureChatSockets = (io) => {
           fileType: savedMessage.fileType || data.fileType,
           status: savedMessage.status,
           time: savedMessage.time || savedMessage.timestamp,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
 
         // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit('video_message_sent', {
+        socket.emit("video_message_sent", {
           success: true,
           data: formattedMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        console.log('🎥 Message vidéo traité - ID:', savedMessage._id);
-
+        console.log("🎥 Message vidéo traité - ID:", savedMessage._id);
       } catch (error) {
-        console.error('💥 Erreur traitement vidéo message:', error.message);
-        socket.emit('video_message_error', {
+        console.error("💥 Erreur traitement vidéo message:", error.message);
+        socket.emit("video_message_error", {
           success: false,
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     });
