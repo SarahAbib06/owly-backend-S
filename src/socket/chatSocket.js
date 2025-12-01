@@ -5,6 +5,7 @@ import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Reaction from "../models/Reaction.js";
 import jwt from "jsonwebtoken";
+import { archiveSocketService } from "../services/archiveSocketService.js";
 
 export const configureChatSockets = (io) => {
   console.log("🔧 WebSocket configuré - Système présence avancé activé");
@@ -366,6 +367,198 @@ export const configureChatSockets = (io) => {
         socket.emit("forward_error", {
           success: false,
           error: error.message || "Impossible de transférer le message",
+        });
+      }
+    });
+    // ==================== 🗃️ ARCHIVAGE DES CONVERSATIONS EN TEMPS RÉEL ====================
+
+    socket.on("archive_conversation", async (data) => {
+      try {
+        const { conversationId } = data;
+        const userId = socket.userId;
+
+        console.log("🗃️ Archivage conversation via socket:", {
+          conversationId,
+          userId,
+        });
+
+        if (!conversationId) {
+          throw new Error("ID conversation requis");
+        }
+
+        // Vérifier que l'utilisateur a accès à la conversation
+        const hasAccess = await Participants.findOne({
+          Id_Conversation: conversationId,
+          Id_User: userId,
+        });
+
+        if (!hasAccess) {
+          throw new Error("Vous n'êtes pas membre de cette conversation");
+        }
+
+        // Simuler une requête pour le controller d'archivage
+        const fakeReq = {
+          params: { conversationId },
+          user: { _id: userId },
+        };
+
+        const fakeRes = {
+          json: (obj) => {
+            if (obj.success) {
+              // Notifier l'utilisateur que l'archivage a réussi
+              socket.emit("conversation_archived", {
+                success: true,
+                conversationId: conversationId,
+                archivedAt: new Date(),
+              });
+
+              // Notifier tous les clients de cet utilisateur pour mettre à jour l'interface
+              io.to(`user_${userId}`).emit("conversation_archived_update", {
+                type: "archived",
+                conversationId: conversationId,
+                timestamp: new Date(),
+              });
+
+              console.log(
+                `✅ Conversation ${conversationId} archivée par ${userId}`
+              );
+            } else {
+              throw new Error(obj.error || "Échec de l'archivage");
+            }
+          },
+          status: (code) => ({
+            json: (obj) => {
+              socket.emit("archive_error", {
+                success: false,
+                error: obj.error || "Erreur lors de l'archivage",
+                statusCode: code,
+              });
+            },
+          }),
+        };
+
+        // Utiliser le controller d'archivage (vous devrez l'importer)
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        await archiveController.archiveConversation(userId, conversationId);
+
+        // Émettre les événements de succès
+        socket.emit("conversation_archived", {
+          success: true,
+          conversationId: conversationId,
+          archivedAt: new Date(),
+        });
+
+        io.to(`user_${userId}`).emit("conversation_archived_update", {
+          type: "archived",
+          conversationId: conversationId,
+          timestamp: new Date(),
+        });
+      } catch (error) {
+        console.error("💥 Erreur archivage socket:", error);
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    socket.on("unarchive_conversation", async (data) => {
+      try {
+        const { conversationId } = data;
+        const userId = socket.userId;
+
+        console.log("🗃️ Désarchivage conversation via socket:", {
+          conversationId,
+          userId,
+        });
+
+        if (!conversationId) {
+          throw new Error("ID conversation requis");
+        }
+
+        // Utiliser le controller d'archivage
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        await archiveController.unarchiveConversation(userId, conversationId);
+
+        // Notifier l'utilisateur que le désarchivage a réussi
+        socket.emit("conversation_unarchived", {
+          success: true,
+          conversationId: conversationId,
+        });
+
+        // Notifier tous les clients de cet utilisateur pour mettre à jour l'interface
+        io.to(`user_${userId}`).emit("conversation_archived_update", {
+          type: "unarchived",
+          conversationId: conversationId,
+          timestamp: new Date(),
+        });
+
+        console.log(
+          `✅ Conversation ${conversationId} désarchivée par ${userId}`
+        );
+      } catch (error) {
+        console.error("💥 Erreur désarchivage socket:", error);
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    socket.on("get_archived_conversations", async () => {
+      try {
+        const userId = socket.userId;
+
+        console.log(
+          "🗃️ Récupération conversations archivées via socket:",
+          userId
+        );
+
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        const archivedConversations =
+          await archiveController.getArchivedConversations(userId);
+
+        socket.emit("archived_conversations_data", {
+          success: true,
+          conversations: archivedConversations,
+          count: archivedConversations.length,
+        });
+
+        console.log(
+          `✅ ${archivedConversations.length} conversations archivées envoyées`
+        );
+      } catch (error) {
+        console.error("💥 Erreur récupération archivées socket:", error);
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    socket.on("get_archived_count", async () => {
+      try {
+        const userId = socket.userId;
+
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        const archivedCount = await archiveController.getArchivedCount(userId);
+
+        socket.emit("archived_count_data", {
+          success: true,
+          archivedCount: archivedCount,
+        });
+      } catch (error) {
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
         });
       }
     });

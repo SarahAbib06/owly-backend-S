@@ -24,7 +24,7 @@ let state = {
   availableReactions: [],
   currentMessageForReaction: null,
   isSendingMessage: false,
-  currentMessageForForward: null, // 🆕 Message sélectionné pour transfert
+  currentMessageForForward: null,
 
   // 🎤 ÉTAT ENREGISTREMENT VOCAL AMÉLIORÉ
   audioRecorder: {
@@ -37,6 +37,11 @@ let state = {
     recordingStartTime: null,
     audioDuration: 0,
   },
+
+  // 🆕 ÉTAT ARCHIVAGE
+  archivedConversations: [],
+  isViewingArchived: false,
+  currentArchiveFilter: "",
 };
 
 // ===== INITIALISATION =====
@@ -346,7 +351,8 @@ function initMessagingPage() {
   initReactionsSystem();
   initUserProfileSystem();
   initVoiceRecording();
-  initForwardSystem(); // 🆕 AJOUTER CETTE LIGNE
+  initForwardSystem();
+  initArchiveSystem(); // 🆕 SYSTÈME D'ARCHIVAGE
 
   loadInitialData();
 }
@@ -377,6 +383,378 @@ function initUserPanel() {
 
 function initConversations() {
   console.log("✅ Conversations initialisées");
+}
+
+// 🆕 SYSTÈME D'ARCHIVAGE
+function initArchiveSystem() {
+  console.log("🗃️ Initialisation du système d'archivage...");
+
+  // Écouteurs d'événements
+  document
+    .getElementById("archiveBtn")
+    ?.addEventListener("click", toggleArchiveConversation);
+  document
+    .getElementById("showArchivedBtn")
+    ?.addEventListener("click", showArchivedModal);
+  document
+    .getElementById("closeArchivedModal")
+    ?.addEventListener("click", closeArchivedModal);
+  document
+    .getElementById("searchArchivedInput")
+    ?.addEventListener("input", handleArchiveSearch);
+
+  // Initialisation du modal
+  initArchiveModal();
+
+  console.log("✅ Système d'archivage initialisé");
+}
+
+function initArchiveModal() {
+  const modal = document.getElementById("archivedModal");
+  const closeBtn = document.getElementById("closeArchivedModal");
+  const searchInput = document.getElementById("searchArchivedInput");
+
+  // Fermeture du modal
+  closeBtn?.addEventListener("click", closeArchivedModal);
+  modal?.addEventListener("click", (e) => {
+    if (e.target === modal) {
+      closeArchivedModal();
+    }
+  });
+
+  // Recherche dans les archives
+  searchInput?.addEventListener("input", handleArchiveSearch);
+}
+
+// 🆕 ARCHIVER/DÉSARCHIVER UNE CONVERSATION
+async function toggleArchiveConversation() {
+  if (!state.currentConversation) {
+    showMessage("Sélectionnez d'abord une conversation", "warning");
+    return;
+  }
+
+  const conversationId = state.currentConversation._id;
+  const isCurrentlyArchived = state.currentConversation.isArchived;
+
+  try {
+    if (isCurrentlyArchived) {
+      // Désarchiver
+      await unarchiveConversation(conversationId);
+    } else {
+      // Archiver
+      await archiveConversation(conversationId);
+    }
+  } catch (error) {
+    console.error("❌ Erreur archivage:", error);
+    showMessage("Erreur: " + error.message, "error");
+  }
+}
+
+// 🆕 ARCHIVER VIA WEBSOCKET
+async function archiveConversation(conversationId) {
+  return new Promise((resolve, reject) => {
+    if (!state.socket || !state.isConnected) {
+      reject(new Error("WebSocket déconnecté"));
+      return;
+    }
+
+    console.log("🗃️ Archivage conversation:", conversationId);
+
+    state.socket.emit("archive_conversation", { conversationId });
+
+    // Écouter la confirmation
+    const successHandler = (data) => {
+      if (data.conversationId === conversationId) {
+        state.socket.off("conversation_archived", successHandler);
+        state.socket.off("archive_error", errorHandler);
+
+        showMessage("✅ Conversation archivée", "success");
+        updateArchiveUI(true);
+        loadConversations(); // Recharger la liste
+        resolve(data);
+      }
+    };
+
+    const errorHandler = (data) => {
+      state.socket.off("conversation_archived", successHandler);
+      state.socket.off("archive_error", errorHandler);
+      reject(new Error(data.error || "Erreur d'archivage"));
+    };
+
+    state.socket.on("conversation_archived", successHandler);
+    state.socket.on("archive_error", errorHandler);
+
+    // Timeout de sécurité
+    setTimeout(() => {
+      state.socket.off("conversation_archived", successHandler);
+      state.socket.off("archive_error", errorHandler);
+      reject(new Error("Timeout archivage"));
+    }, 10000);
+  });
+}
+
+// 🆕 DÉSARCHIVER VIA WEBSOCKET
+async function unarchiveConversation(conversationId) {
+  return new Promise((resolve, reject) => {
+    if (!state.socket || !state.isConnected) {
+      reject(new Error("WebSocket déconnecté"));
+      return;
+    }
+
+    console.log("🗃️ Désarchivage conversation:", conversationId);
+
+    state.socket.emit("unarchive_conversation", { conversationId });
+
+    // Écouter la confirmation
+    const successHandler = (data) => {
+      if (data.conversationId === conversationId) {
+        state.socket.off("conversation_unarchived", successHandler);
+        state.socket.off("archive_error", errorHandler);
+
+        showMessage("✅ Conversation désarchivée", "success");
+        updateArchiveUI(false);
+        loadConversations(); // Recharger la liste
+        resolve(data);
+      }
+    };
+
+    const errorHandler = (data) => {
+      state.socket.off("conversation_unarchived", successHandler);
+      state.socket.off("archive_error", errorHandler);
+      reject(new Error(data.error || "Erreur de désarchivage"));
+    };
+
+    state.socket.on("conversation_unarchived", successHandler);
+    state.socket.on("archive_error", errorHandler);
+
+    // Timeout de sécurité
+    setTimeout(() => {
+      state.socket.off("conversation_unarchived", successHandler);
+      state.socket.off("archive_error", errorHandler);
+      reject(new Error("Timeout désarchivage"));
+    }, 10000);
+  });
+}
+
+// 🆕 METTRE À JOUR L'UI POUR L'ARCHIVAGE
+function updateArchiveUI(isArchived) {
+  const archiveBtn = document.getElementById("archiveBtn");
+  const archiveMenuItem = document.getElementById("archiveMenuItem");
+
+  if (archiveBtn) {
+    archiveBtn.title = isArchived ? "Désarchiver" : "Archiver";
+    archiveBtn.innerHTML = isArchived
+      ? '<i class="fas fa-inbox"></i>'
+      : '<i class="fas fa-archive"></i>';
+  }
+
+  if (archiveMenuItem) {
+    archiveMenuItem.textContent = isArchived ? "Désarchiver" : "Archiver";
+  }
+
+  // Mettre à jour l'état local
+  if (state.currentConversation) {
+    state.currentConversation.isArchived = isArchived;
+  }
+}
+
+// 🆕 AFFICHER LE MODAL DES ARCHIVES
+async function showArchivedModal() {
+  const modal = document.getElementById("archivedModal");
+
+  try {
+    // Charger les conversations archivées
+    await loadArchivedConversations();
+    modal.style.display = "flex";
+  } catch (error) {
+    console.error("❌ Erreur chargement archives:", error);
+    showMessage("Erreur de chargement des archives", "error");
+  }
+}
+
+// 🆕 FERMER LE MODAL DES ARCHIVES
+function closeArchivedModal() {
+  const modal = document.getElementById("archivedModal");
+  modal.style.display = "none";
+  state.currentArchiveFilter = "";
+}
+
+// 🆕 CHARGER LES CONVERSATIONS ARCHIVÉES
+async function loadArchivedConversations() {
+  return new Promise((resolve, reject) => {
+    if (!state.socket || !state.isConnected) {
+      reject(new Error("WebSocket déconnecté"));
+      return;
+    }
+
+    console.log("🔄 Chargement des conversations archivées...");
+
+    state.socket.emit("get_archived_conversations");
+
+    const successHandler = (data) => {
+      if (data.success) {
+        state.socket.off("archived_conversations_data", successHandler);
+        state.socket.off("archive_error", errorHandler);
+
+        state.archivedConversations = data.conversations || [];
+        renderArchivedConversations();
+        updateArchivedCount();
+        resolve(data);
+      }
+    };
+
+    const errorHandler = (data) => {
+      state.socket.off("archived_conversations_data", successHandler);
+      state.socket.off("archive_error", errorHandler);
+      reject(new Error(data.error || "Erreur de chargement"));
+    };
+
+    state.socket.on("archived_conversations_data", successHandler);
+    state.socket.on("archive_error", errorHandler);
+
+    // Timeout
+    setTimeout(() => {
+      state.socket.off("archived_conversations_data", successHandler);
+      state.socket.off("archive_error", errorHandler);
+      reject(new Error("Timeout chargement archives"));
+    }, 10000);
+  });
+}
+
+// 🆕 AFFICHER LES CONVERSATIONS ARCHIVÉES
+function renderArchivedConversations() {
+  const container = document.getElementById("archivedConversationsList");
+  const conversations = state.archivedConversations;
+
+  if (!conversations || conversations.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <i class="fas fa-archive"></i>
+        <p>Aucune conversation archivée</p>
+        <p style="font-size: 12px; margin-top: 5px;">Les conversations archivées n'apparaîtront pas dans votre liste principale</p>
+      </div>
+    `;
+    return;
+  }
+
+  // Appliquer le filtre de recherche
+  let filteredConversations = conversations;
+  if (state.currentArchiveFilter) {
+    const term = state.currentArchiveFilter.toLowerCase();
+    filteredConversations = conversations.filter(
+      (conv) =>
+        conv.name.toLowerCase().includes(term) ||
+        (conv.participants &&
+          conv.participants.some(
+            (p) => p.username && p.username.toLowerCase().includes(term)
+          ))
+    );
+  }
+
+  if (filteredConversations.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <i class="fas fa-search"></i>
+        <p>Aucun résultat trouvé</p>
+        <p style="font-size: 12px; margin-top: 5px;">Essayez avec d'autres termes de recherche</p>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = filteredConversations
+    .map((conv) => {
+      const isGroup = conv.type === "group";
+      const avatarText = isGroup
+        ? "👥"
+        : (conv.name || "C").charAt(0).toUpperCase();
+      const archivedDate = conv.archivedAt
+        ? new Date(conv.archivedAt)
+        : new Date();
+
+      return `
+      <div class="archived-conversation" data-conversation-id="${conv._id}" 
+           style="padding: 12px; border-bottom: 1px solid #333; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: background 0.2s;"
+           onmouseover="this.style.background='#252525'" onmouseout="this.style.background='transparent'">
+        <div class="contact-avatar" style="width: 45px; height: 45px; border-radius: 50%; background: #666; color: white; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 16px;">
+          ${avatarText}
+        </div>
+        <div style="flex: 1;">
+          <div style="font-weight: bold; color: #ccc; font-size: 14px;">
+            ${conv.name || "Conversation"}
+            ${
+              isGroup
+                ? '<span style="font-size: 10px; background: #444; padding: 2px 6px; border-radius: 10px; margin-left: 8px;">Groupe</span>'
+                : ""
+            }
+          </div>
+          <div style="font-size: 11px; color: #888; margin-top: 2px;">
+            Archivée le ${archivedDate.toLocaleDateString("fr-FR")}
+          </div>
+        </div>
+        <button class="action-btn small" onclick="event.stopPropagation(); unarchiveFromModal('${
+          conv._id
+        }')" 
+                title="Désarchiver" style="background: #f9ee34; color: #1c1c1c; border: none; border-radius: 6px; padding: 6px 10px; font-size: 11px; cursor: pointer;">
+          <i class="fas fa-inbox"></i>
+        </button>
+      </div>
+    `;
+    })
+    .join("");
+
+  // Ajouter les écouteurs pour ouvrir la conversation
+  container.querySelectorAll(".archived-conversation").forEach((element) => {
+    element.addEventListener("click", function () {
+      const conversationId = this.dataset.conversationId;
+      openArchivedConversation(conversationId);
+    });
+  });
+}
+
+// 🆕 DÉSARCHIVER DEPUIS LE MODAL
+async function unarchiveFromModal(conversationId) {
+  try {
+    await unarchiveConversation(conversationId);
+    // Recharger la liste des archives
+    await loadArchivedConversations();
+  } catch (error) {
+    console.error("❌ Erreur désarchivage modal:", error);
+    showMessage("Erreur: " + error.message, "error");
+  }
+}
+
+// 🆕 OUVRIR UNE CONVERSATION ARCHIVÉE
+async function openArchivedConversation(conversationId) {
+  try {
+    // Désarchiver d'abord
+    await unarchiveConversation(conversationId);
+    // Fermer le modal
+    closeArchivedModal();
+    // La conversation apparaîtra maintenant dans la liste principale
+    showMessage("Conversation désarchivée et ouverte", "success");
+  } catch (error) {
+    console.error("❌ Erreur ouverture conversation archivée:", error);
+    showMessage("Erreur: " + error.message, "error");
+  }
+}
+
+// 🆕 RECHERCHE DANS LES ARCHIVES
+function handleArchiveSearch(event) {
+  state.currentArchiveFilter = event.target.value.trim();
+  renderArchivedConversations();
+}
+
+// 🆕 METTRE À JOUR LE COMPTEUR D'ARCHIVES
+function updateArchivedCount() {
+  const countElement = document.getElementById("archivedCount");
+  const count = state.archivedConversations.length;
+
+  if (countElement) {
+    countElement.textContent = `${count} conversation${
+      count > 1 ? "s" : ""
+    } archivée${count > 1 ? "s" : ""}`;
+  }
 }
 
 // 🆕 SYSTÈME DE TRANSFERT DE MESSAGES
@@ -2369,6 +2747,35 @@ function connectSocketIO() {
     );
   });
 
+  // 🆕 GESTIONNAIRES WEBSOCKET POUR L'ARCHIVAGE
+  state.socket.on("conversation_archived_update", (data) => {
+    console.log("🔄 Mise à jour archivage:", data);
+
+    if (data.type === "archived") {
+      showMessage("✅ Conversation archivée", "success");
+    } else if (data.type === "unarchived") {
+      showMessage("✅ Conversation désarchivée", "success");
+    }
+
+    // Recharger les conversations
+    loadConversations();
+  });
+
+  state.socket.on("archived_conversations_data", (data) => {
+    console.log(
+      "📁 Conversations archivées reçues:",
+      data.conversations?.length
+    );
+    state.archivedConversations = data.conversations || [];
+    renderArchivedConversations();
+    updateArchivedCount();
+  });
+
+  state.socket.on("archived_count_data", (data) => {
+    console.log("📊 Compteur archives:", data.archivedCount);
+    updateArchivedCountDisplay(data.archivedCount);
+  });
+
   // 🎤 ÉVÉNEMENTS AUDIO ADAPTÉS
   state.socket.on("audio_message_sent", (data) => {
     console.log("✅ Audio sent confirmation:", data);
@@ -3131,6 +3538,16 @@ function updateMessageStatus(messageId, status) {
   }
 }
 
+// 🆕 METTRE À JOUR L'AFFICHAGE DU COMPTEUR D'ARCHIVES
+function updateArchivedCountDisplay(count) {
+  const countElement = document.getElementById("archivedCount");
+  if (countElement) {
+    countElement.textContent = `${count} conversation${
+      count > 1 ? "s" : ""
+    } archivée${count > 1 ? "s" : ""}`;
+  }
+}
+
 // Gestion de la déconnexion
 window.addEventListener("beforeunload", () => {
   if (state.socket) {
@@ -3335,3 +3752,5 @@ window.showReactionsModal = showReactionsModal;
 window.showVoiceRecordModal = showVoiceRecordModal;
 window.showMessageContextMenu = showMessageContextMenu;
 window.handleForwardAction = handleForwardAction;
+window.showArchivedModal = showArchivedModal;
+window.toggleArchiveConversation = toggleArchiveConversation;

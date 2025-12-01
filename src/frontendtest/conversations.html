@@ -148,6 +148,25 @@
             >
               <i class="fas fa-search"></i>
             </button>
+
+            <!-- 🆕 Bouton d'archivage -->
+            <button
+              class="action-btn"
+              id="archiveBtn"
+              title="Archiver la conversation"
+            >
+              <i class="fas fa-archive"></i>
+            </button>
+
+            <!-- 🆕 Bouton pour voir les archives -->
+            <button
+              class="action-btn"
+              id="showArchivedBtn"
+              title="Conversations archivées"
+            >
+              <i class="fas fa-inbox"></i>
+            </button>
+
             <button class="action-btn" id="infoBtn" title="Informations">
               <i class="fas fa-info-circle"></i>
             </button>
@@ -165,6 +184,11 @@
               </div>
               <div class="menu-item" onclick="muteConversation()">
                 <i class="fas fa-volume-mute"></i> Mettre en sourdine
+              </div>
+              <!-- 🆕 Option d'archivage dans le menu -->
+              <div class="menu-item" onclick="toggleArchiveConversation()">
+                <i class="fas fa-archive"></i>
+                <span id="archiveMenuItem">Archiver</span>
               </div>
             </div>
           </div>
@@ -189,6 +213,10 @@
                 <button class="quick-btn" onclick="showCreateGroupModal()">
                   <i class="fas fa-users"></i>
                   <span>Créer un groupe</span>
+                </button>
+                <button class="quick-btn" onclick="showArchivedModal()">
+                  <i class="fas fa-archive"></i>
+                  <span>Conversations archivées</span>
                 </button>
               </div>
             </div>
@@ -416,6 +444,58 @@
 
           <button class="create-group-btn" id="createGroupConfirmBtn">
             <i class="fas fa-plus"></i> Créer le groupe
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 🆕 Modal Conversations Archivées -->
+    <div id="archivedModal" class="modal-overlay" style="display: none">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-archive"></i> Conversations archivées</h3>
+          <button class="modal-close" id="closeArchivedModal">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="archived-stats">
+            <div class="stat-item">
+              <i class="fas fa-inbox"></i>
+              <span id="archivedCount">0 conversation archivée</span>
+            </div>
+          </div>
+
+          <div class="search-box-modal" style="margin: 15px 0">
+            <i class="fas fa-search"></i>
+            <input
+              type="text"
+              id="searchArchivedInput"
+              placeholder="Rechercher dans les archives..."
+            />
+          </div>
+
+          <div
+            id="archivedConversationsList"
+            class="conversations-list"
+            style="max-height: 400px; overflow-y: auto"
+          >
+            <div class="empty-state">
+              <i class="fas fa-archive"></i>
+              <p>Aucune conversation archivée</p>
+              <p style="font-size: 12px; margin-top: 5px">
+                Les conversations archivées n'apparaîtront pas dans votre liste
+                principale
+              </p>
+            </div>
+          </div>
+        </div>
+        <div
+          class="modal-footer"
+          style="padding: 15px; border-top: 1px solid #333; text-align: right"
+        >
+          <button class="action-btn secondary" onclick="closeArchivedModal()">
+            <i class="fas fa-times"></i> Fermer
           </button>
         </div>
       </div>
@@ -763,5 +843,65 @@
     <!-- 🔄 Socket.IO pour temps réel -->
     <script src="http://localhost:5000/socket.io/socket.io.js"></script>
     <script src="test-script.js"></script>
+
+    <script>
+      // 🆕 Fonctions d'archivage (à intégrer dans test-script.js)
+      function initArchiveSystem() {
+        console.log("🗃️ Initialisation du système d'archivage...");
+
+        // Écouteurs d'événements
+        document
+          .getElementById("archiveBtn")
+          ?.addEventListener("click", toggleArchiveConversation);
+        document
+          .getElementById("showArchivedBtn")
+          ?.addEventListener("click", showArchivedModal);
+        document
+          .getElementById("closeArchivedModal")
+          ?.addEventListener("click", closeArchivedModal);
+        document
+          .getElementById("searchArchivedInput")
+          ?.addEventListener("input", handleArchiveSearch);
+
+        console.log("✅ Système d'archivage initialisé");
+      }
+
+      async function toggleArchiveConversation() {
+        if (!state.currentConversation) {
+          showMessage("Sélectionnez d'abord une conversation", "warning");
+          return;
+        }
+
+        const conversationId = state.currentConversation._id;
+        const isCurrentlyArchived = state.currentConversation.isArchived;
+
+        try {
+          if (isCurrentlyArchived) {
+            await unarchiveConversation(conversationId);
+          } else {
+            await archiveConversation(conversationId);
+          }
+        } catch (error) {
+          console.error("❌ Erreur archivage:", error);
+          showMessage("Erreur: " + error.message, "error");
+        }
+      }
+
+      function showArchivedModal() {
+        const modal = document.getElementById("archivedModal");
+        modal.style.display = "flex";
+        loadArchivedConversations();
+      }
+
+      function closeArchivedModal() {
+        const modal = document.getElementById("archivedModal");
+        modal.style.display = "none";
+      }
+
+      // Initialiser l'archivage au chargement
+      document.addEventListener("DOMContentLoaded", function () {
+        setTimeout(initArchiveSystem, 1000);
+      });
+    </script>
   </body>
 </html>
