@@ -16,11 +16,11 @@ import authMiddleware from '../middleware/auth.js';
 
 const router = express.Router();
 
-// ===== RECHERCHE =====
+//  RECHERCHE 
 router.get('/search/users', authMiddleware, searchUsers);
 router.get('/search/users/:userId', authMiddleware, getUserProfile);
 
-// ===== RELATIONS =====
+// RELATIONS 
 router.post('/relations/invite', authMiddleware, sendInvitation);
 router.post('/relations/accept', authMiddleware, acceptInvitation);
 router.get('/relations/invitations', authMiddleware, getPendingInvitations);
