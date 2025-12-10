@@ -4,6 +4,8 @@ import cors from 'cors';
 import connectDB from './src/config/db.js';
 import authRoutes from './src/routes/auth.js';
 import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
+import relationsRoutes from './src/routes/relationsRoutes.js'; // <-- IMPORT
+
 
 
 
@@ -27,6 +29,10 @@ app.use("/public", express.static("public"));
 //  3. Les routes après
 app.use('/api/auth', authRoutes);
 app.use('/api', searchRelationsRoutes);
+
+app.use('/api/relations', relationsRoutes); // <-- AJOUTE CETTE LIGNE
+
+
 
 
 const PORT = process.env.PORT || 5000;
