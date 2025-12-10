@@ -1,4 +1,4 @@
-// routes/relationsRoutes.js
+
 import express from 'express';
 import { getContacts } from '../controllers/relationsController.js';
 import authMiddleware from '../middleware/auth.js';

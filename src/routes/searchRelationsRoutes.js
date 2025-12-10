@@ -2,8 +2,7 @@
 import express from 'express';
 import {
   searchUsers,
-  getUserProfile,
-  getContacts, 
+  getUserProfile, 
 } from '../controllers/searchRelationsController.js';
 
 // Import du contrôleur QR

@@ -1,11 +1,11 @@
-// src/controllers/qrController.js
+
 import QRCode from 'qrcode';
 import User from '../models/User.js';
-import Relation from '../models/Relation.js'; // AJOUTEZ CET IMPORT
+import Relation from '../models/Relation.js'; 
 
-// ========================================
+
 // 1. GÉNÉRER QR CODE POUR RECHERCHE AUTOMATIQUE
-// ========================================
+
 export const generateQRCode = async (req, res) => {
   try {
     const userId = req.user.id;

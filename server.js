@@ -4,7 +4,7 @@ import cors from 'cors';
 import connectDB from './src/config/db.js';
 import authRoutes from './src/routes/auth.js';
 import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
-import relationsRoutes from './src/routes/relationsRoutes.js'; // <-- IMPORT
+import relationsRoutes from './src/routes/relationsRoutes.js'; 
 
 
 
@@ -30,7 +30,7 @@ app.use("/public", express.static("public"));
 app.use('/api/auth', authRoutes);
 app.use('/api', searchRelationsRoutes);
 
-app.use('/api/relations', relationsRoutes); // <-- AJOUTE CETTE LIGNE
+app.use('/api/relations', relationsRoutes); 
 
 
 

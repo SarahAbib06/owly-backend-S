@@ -73,7 +73,7 @@ const usernameRegex = /^[a-zA-Z0-9_.-]+$/;
 
 if (!usernameRegex.test(username)) {
   return res.status(400).json({
-    message: "Le nom d'utilisateur ne doit contenir que des lettres, chiffres, '.', '-' ou '_' et aucun espace."
+    message: " nom d'utilisateur invalide "
   });
 }
 
@@ -96,7 +96,7 @@ if (cleanUsername.length < 3 || cleanUsername.length > 30) {
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=\[{\]};:'"\\|,.<>/?`~]).{8,}$/;
     if (!passwordRegex.test(password)) {
       return res.status(400).json({
-        message: 'Le mot de passe doit contenir au moins 8 caractères, incluant : une majuscule, une minuscule, un chiffre et un caractère spécial.',
+        message: ' mot de passe faible ',
       });
     }
     if (password !== passwordConfirm) {
