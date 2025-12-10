@@ -1,9 +1,9 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
-
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
@@ -102,6 +102,7 @@ app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
 
+
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
 app.use("/api/conversations", conversationRoutes);
@@ -112,6 +113,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+
+
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
