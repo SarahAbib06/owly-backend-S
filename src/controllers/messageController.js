@@ -59,6 +59,8 @@ function decryptContent(stored) {
   }
 }
 
+
+
 let userPresence = new Map();
 
 // 🆕 CONFIGURATION DES FICHIERS
@@ -444,6 +446,37 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
 export const messageController = {
   createMessage: async (messageData, io = null, userIdFromToken = null) => {
     return await handleMessageCreation(messageData, io, userIdFromToken);
+  },
+  // TRADUIRE UN MESSAGE
+  translateMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const { targetLang = "fr" } = req.body;
+      const userId = req.user.id;
+
+      const message = await Message.findById(messageId);
+      if (!message || message.typeMessage !== "text") {
+        return res.status(400).json({ success: false, error: "Message invalide" });
+      }
+
+      const hasAccess = await Participants.findOne({
+        Id_Conversation: message.conversationId,
+        Id_User: userId
+      });
+      if (!hasAccess) return res.status(403).json({ success: false });
+
+      const original = decryptContent(message.content);
+      const translated = await translateText(original, targetLang);
+
+      res.json({
+        success: true,
+        translated,
+        original,
+        targetLang
+      });
+    } catch (error) {
+      res.status(500).json({ success: false });
+    }
   },
 
   // IMAGE
@@ -888,6 +921,7 @@ export const messageController = {
   },
 }; // ← Fermeture CORRECTE de l’objet messageController
 
+
 // FONCTIONS ANNEXES
 async function isUserOnlineAdvanced(io, userId) {
   try {
@@ -921,6 +955,78 @@ async function isUserOnlineAdvanced(io, userId) {
   }
 }
 
+    translateMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const { targetLang = "fr" } = req.body || {};
+      const userId = req.user?.id;
+
+      console.log("TRADUCTION DEMANDÉE :", { messageId, targetLang, userId });
+
+      // 1. Récupérer le message
+      const message = await Message.findById(messageId);
+      if (!message) {
+        console.log("Message non trouvé :", messageId);
+        return res.status(404).json({ success: false, error: "Message introuvable" });
+      }
+      if (message.typeMessage !== "text") {
+        return res.status(400).json({ success: false, error: "Seuls les messages texte peuvent être traduits" });
+      }
+
+      const originalText = decryptContent(message.content).trim();
+      console.log("Texte original :", originalText);
+
+      // 2. Si on demande le français → on renvoie direct
+      if (!targetLang || targetLang.toLowerCase() === "fr") {
+        return res.json({
+          success: true,
+          original: originalText,
+          translated: originalText,
+          targetLang: "fr"
+        });
+      }
+
+      // 3. TRADUCTION MYMEMORY (fonctionne toujours en 2025)
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(originalText)}&langpair=auto|${targetLang.toLowerCase()}`;
+
+      console.log("Appel API traduction :", url);
+
+      const apiRes = await fetch(url, {
+        headers: {
+          "User-Agent": "OwlyApp/1.0"
+        }
+      });
+
+      if (!apiRes.ok) {
+        console.log("API MyMemory a répondu avec status :", apiRes.status);
+        throw new Error(`HTTP ${apiRes.status}`);
+      }
+
+      const data = await apiRes.json();
+      console.log("Réponse MyMemory :", data);
+
+      const translated = data.responseStatus === 200 
+        ? data.responseData.translatedText 
+        : originalText;
+
+      console.log("Traduction réussie :", translated);
+
+      return res.json({
+        success: true,
+        original: originalText,
+        translated,
+        targetLang
+      });
+
+    } catch (error) {
+      console.error("ERREUR COMPLÈTE TRADUCTION :", error);
+      return res.status(500).json({
+        success: false,
+        error: "Traduction impossible pour le moment",
+        debug: error.message  // tu verras le vrai problème dans la console
+      });
+    }
+  },
 async function areNotificationsEnabled(userId) {
   try {
     const user = await User.findById(userId);
@@ -979,3 +1085,5 @@ async function shouldSendPushNotification(userId) {
   }
 }
 
+
+  

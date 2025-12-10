@@ -7,6 +7,7 @@ import {
 import { protact } from "../middleware/authen.js";
 import audioUpload from "../middleware/audioUpload.js";
 
+
 const router = express.Router();
 
 // Récupération des messages d'une conversation
@@ -92,6 +93,10 @@ router.post("/:messageId/pin", protact, messageController.pinMessage);
 router.post("/:messageId/unpin", protact, messageController.unpinMessage);
 // Route pour la galerie médias/fichiers (comme Messenger)
 router.get('/:conversationId/media', protact, messageController.getConversationMedia);
+router.post("/:messageId/translate", protact, (req, res) => {
+  console.log("ROUTE /translate TOUCHÉE !", req.params, req.body);
+  messageController.translateMessage(req, res);
+});
 
 
 
