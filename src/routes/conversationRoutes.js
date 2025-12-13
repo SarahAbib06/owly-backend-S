@@ -7,6 +7,38 @@ import { protact } from "../middleware/authen.js";
 
 const router = express.Router();
 
+// 🆕 CRÉER / OBTENIR UNE CONVERSATION PRIVÉE
+router.post("/private", protact, async (req, res) => {
+  try {
+    const { receiverId } = req.body;
+    const senderId = req.user._id; // pris depuis le token
+
+    if (!receiverId) {
+      return res.status(400).json({
+        success: false,
+        error: "receiverId est requis",
+      });
+    }
+
+    const conversation = await conversationController.getOrCreateConversation(
+      senderId,
+      receiverId
+    );
+
+    res.json({
+      success: true,
+      conversation,
+    });
+  } catch (error) {
+    console.error("❌ Erreur création conversation privée:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
+
 // 🆕 ROUTE POUR CRÉER UN GROUPE
 router.post("/groups/create", protact, async (req, res) => {
   try {

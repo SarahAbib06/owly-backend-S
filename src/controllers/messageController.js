@@ -408,35 +408,36 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
   }
 
   if (io) {
+    const conversation = await Conversation.findById(finalConversationId);
+
     const messageToEmit = {
       _id: savedMessage._id,
       conversationId: finalConversationId,
-      Id_sender: Id_sender,
-
-      content: typeMessage === 'text' ? content.trim() : content,
-      typeMessage: typeMessage,
-      status: "sent",
-      timestamp: new Date(),
-      isGroup: (await Conversation.findById(finalConversationId))?.type === "group",
-      ...additionalData
-
+      Id_sender,
+      content: typeMessage === "text" ? content.trim() : content,
+      typeMessage,
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,     // IMPORTANT
+      timestamp: savedMessage.createdAt,
+      isGroup: conversation?.type === "group",
+      ...additionalData,
     };
 
     io.to(finalConversationId.toString()).emit("new_message", messageToEmit);
   }
 
+    const conversation = await Conversation.findById(finalConversationId);
+
   return {
     _id: savedMessage._id,
     conversationId: finalConversationId,
     Id_sender,
-
-    content: typeMessage === 'text' ? content.trim() : content,
-
+    content: typeMessage === "text" ? content.trim() : content,
     typeMessage,
-    status: "sent",
-    timestamp: new Date(),
-    isGroup:
-      (await Conversation.findById(finalConversationId))?.type === "group",
+    status: savedMessage.status,
+    createdAt: savedMessage.createdAt,       // IMPORTANT
+    timestamp: savedMessage.createdAt,
+    isGroup: conversation?.type === "group",
     ...additionalData,
   };
 };
