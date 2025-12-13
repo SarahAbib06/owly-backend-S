@@ -17,22 +17,24 @@ export const getContacts = async (req, res) => {
     .populate('contactId', 'username profilePicture status');
 
     // Formate les contacts : pour chaque relation, prend l'autre utilisateur (pas moi)
-    const contacts = relations.map(relation => {
-      // Si je suis le userId, le contact est contactId
-      // Si je suis le contactId, le contact est userId
-      const isUser = relation.userId._id.toString() === userId;
-      const contact = isUser ? relation.contactId : relation.userId;
-      
-      return {
-        id: contact._id,
-        _id: contact._id,
-        username: contact.username,
-        profilePicture: contact.profilePicture || null,
-        status: contact.status || 'offline',
-        relationId: relation._id, // ID de la relation
-        addedAt: relation.addedAt
-      };
-    });
+    const contacts = relations
+  .filter(relation => {
+    return relation.userId && relation.contactId;  // ← NOUVEAU : on élimine les relations cassées
+  })
+  .map(relation => {
+    const isUserInitiator = relation.userId._id.toString() === userId;  // ← renommé pour plus de clarté
+    const contact = isUserInitiator ? relation.contactId : relation.userId;
+
+    return {
+      id: contact._id,
+      _id: contact._id,
+      username: contact.username,
+      profilePicture: contact.profilePicture || null,
+      status: contact.status || 'offline',
+      relationId: relation._id,
+      addedAt: relation.addedAt || relation.createdAt  // ← petit bonus au cas où addedAt n'existe pas
+    };
+  });
 
    
 
