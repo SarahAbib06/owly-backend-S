@@ -1,8 +1,13 @@
-import "dotenv/config";
-import express from "express";
-import cors from "cors";
+
 import { createServer } from "http";
 import { Server } from "socket.io";
+import 'dotenv/config';
+import express from 'express';
+import cors from 'cors';
+import connectDB from './src/config/db.js';
+import authRoutes from './src/routes/auth.js';
+import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
+import relationsRoutes from './src/routes/relationsRoutes.js'; 
 
 import jwt from "jsonwebtoken";
 import fs from "fs";
@@ -112,6 +117,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;

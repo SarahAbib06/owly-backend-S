@@ -214,7 +214,7 @@ export const changePassword = async (req, res) => {
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[!@#$%^&*()_\-+=\[{\]};:'"\\|,.<>/?`~]).{8,}$/;
     if (!passwordRegex.test(newPassword)) {
       return res.status(400).json({
-        message: 'Le mot de passe doit contenir au moins 8 caractères, incluant : une majuscule, une minuscule, un chiffre et un caractère spécial.',
+        message: ' mot de passe faible',
       });
     }
 
