@@ -1,9 +1,9 @@
-// controllers/searchRelationsController.js
+
 import User from '../models/User.js';
 import Relation from '../models/Relation.js';
 
 // Rechercher des utilisateurs par username
-// Rechercher des utilisateurs par username (recherche exacte)
+
 export const searchUsers = async (req, res) => {
   try {
     const { username } = req.query;
@@ -53,46 +53,3 @@ export const getUserProfile = async (req, res) => {
 };
 
 
-
-
-
-// Obtenir les contacts (relations acceptées)
-export const getContacts = async (req, res) => {
-  try {
-    const relations = await Relation.find({
-      $or: [
-        { userId: req.user.id },
-        { contactId: req.user.id }
-      ],
-      status: 'accepted'
-    })
-    .populate('userId', 'username profilePicture status lastSeen')
-    .populate('contactId', 'username profilePicture status lastSeen');
-
-    const contacts = relations.map(relation => {
-      const isUser = relation.userId._id.toString() === req.user.id;
-      const contactUser = isUser ? relation.contactId : relation.userId;
-      
-      return {
-        _id: relation._id,
-        contactId: contactUser._id,
-        username: contactUser.username,
-        profilePicture: contactUser.profilePicture,
-        status: contactUser.status,
-        lastSeen: contactUser.lastSeen,
-        addedAt: relation.addedAt
-      };
-    });
-
-    res.json({ 
-      success: true, 
-      contacts 
-    });
-  } catch (error) {
-    console.error('Erreur récupération relations:', error);
-    res.status(500).json({ 
-      success: false, 
-      message: 'Erreur serveur' 
-    });
-  }
-};

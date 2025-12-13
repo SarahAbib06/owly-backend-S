@@ -1,4 +1,5 @@
 
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -101,6 +102,7 @@ app.use("/public", express.static("public"));
 app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
+
 
 
 app.use("/api/messages", messageRoutes);
