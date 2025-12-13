@@ -1,14 +1,8 @@
-
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import 'dotenv/config';
-import express from 'express';
-import cors from 'cors';
-import connectDB from './src/config/db.js';
-import authRoutes from './src/routes/auth.js';
-import searchRelationsRoutes from './src/routes/searchRelationsRoutes.js';
-import relationsRoutes from './src/routes/relationsRoutes.js'; 
-
 import jwt from "jsonwebtoken";
 import fs from "fs";
 import path from "path";
@@ -27,7 +21,8 @@ import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
-import relationRoutes from "./src/routes/relation.js";
+import relationRoutesbloquer from "./src/routes/relation.js";
+import relationRoutes from "./src/routes/relationsRoutes.js";
 
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -107,16 +102,19 @@ app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
 
+
+
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
 app.use("/api/conversations", conversationRoutes);
 app.use("/api/archive", archiveRoutes);
 app.use("/api/notifications", notificationRoutes);
-app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
+app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+
 
 
 // ✅ 5. Démarrer le serveur
