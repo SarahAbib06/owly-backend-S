@@ -21,8 +21,8 @@ import reactionRoutes from "./src/routes/reactionRoutes.js";
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutes from "./src/routes/relation.js";
+import padRoutes from "./src/routes/padRoutes.js";
 
-// ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -104,7 +104,7 @@ app.use("/api/notifications", notificationRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
-
+app.use("/api/pads", padRoutes);
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;

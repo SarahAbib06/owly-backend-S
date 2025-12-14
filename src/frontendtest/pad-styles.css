@@ -1,0 +1,553 @@
+/* ===== STYLES PAD AVANCÉ - VERSION FINALE 100% FONCTIONNELLE ===== */
+
+/* Modal Pad */
+.pad-modal-overlay {
+    background: rgba(0, 0, 0, 0.9);
+    z-index: 10000;
+}
+
+.pad-modal-content {
+    width: 95vw;
+    height: 90vh;
+    max-width: none;
+    background: #1c1c1c;
+    border: 1px solid #333;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Header Pad */
+.pad-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 15px 20px;
+    background: #252525;
+    border-bottom: 1px solid #333;
+}
+
+.pad-header-left h3 {
+    margin: 0;
+    color: #f9ee34;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pad-info-badge {
+    background: #333;
+    color: #ccc;
+    padding: 4px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    margin-top: 5px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pad-version {
+    background: #f9ee34;
+    color: #1c1c1c;
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.pad-header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+/* Mode Selector */
+.mode-selector {
+    display: flex;
+    background: #333;
+    border-radius: 8px;
+    padding: 3px;
+}
+
+.mode-btn {
+    background: transparent;
+    border: none;
+    color: #ccc;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.3s;
+}
+
+.mode-btn.active {
+    background: #f9ee34;
+    color: #1c1c1c;
+    font-weight: 600;
+}
+
+.mode-btn:hover:not(.active) {
+    background: #444;
+}
+
+/* Permissions Dropdown */
+.permissions-dropdown {
+    position: relative;
+}
+
+.permissions-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 10px;
+    min-width: 180px;
+    display: none;
+    z-index: 100;
+}
+
+.permissions-dropdown:hover .permissions-menu {
+    display: block;
+}
+
+.permission-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.3s;
+}
+
+.permission-item:hover {
+    background: #333;
+}
+
+.permission-item input[type="radio"] {
+    margin: 0;
+}
+
+.permission-item label {
+    cursor: pointer;
+    flex: 1;
+    font-size: 13px;
+}
+
+/* Body Pad */
+.pad-modal-body {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Sidebar */
+.pad-sidebar {
+    width: 280px;
+    background: #252525;
+    border-right: 1px solid #333;
+    padding: 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.pad-sidebar-section h4 {
+    color: #f9ee34;
+    margin: 0 0 15px 0;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Liste utilisateurs actifs */
+.active-users-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.active-user {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px;
+    background: #333;
+    border-radius: 8px;
+    transition: background 0.3s;
+}
+
+.active-user:hover {
+    background: #3a3a3a;
+}
+
+.user-color-indicator {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+}
+
+.active-user .username {
+    color: #fff;
+    font-size: 13px;
+    flex: 1;
+}
+
+.you-badge {
+    background: #f9ee34;
+    color: #1c1c1c;
+    padding: 2px 6px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: bold;
+}
+
+/* Commandes rapides */
+.quick-command-btn {
+    width: 100%;
+    background: #333;
+    border: 1px solid #444;
+    color: #ccc;
+    padding: 10px 15px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.3s;
+    margin-bottom: 8px;
+}
+
+.quick-command-btn:hover {
+    background: #3a3a3a;
+    border-color: #f9ee34;
+    color: #fff;
+}
+
+/* Progression */
+.progress-stats {
+    background: #333;
+    padding: 15px;
+    border-radius: 8px;
+}
+
+.progress-bar-container {
+    height: 8px;
+    background: #444;
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 10px;
+}
+
+.progress-bar-fill {
+    height: 100%;
+    background: #4caf50;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.progress-numbers {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    color: #ccc;
+}
+
+/* Zone d'édition principale */
+.pad-editor-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative; /* ← ABSOLUMENT NÉCESSAIRE POUR LES CURSEURS */
+}
+
+/* Barre d'outils */
+.pad-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 12px 20px;
+    background: #252525;
+    border-bottom: 1px solid #333;
+}
+
+.toolbar-btn {
+    background: #333;
+    border: none;
+    color: #ccc;
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.3s;
+}
+
+.toolbar-btn:hover {
+    background: #3a3a3a;
+    color: #f9ee34;
+}
+
+.toolbar-separator {
+    width: 1px;
+    height: 20px;
+    background: #444;
+    margin: 0 10px;
+}
+
+.pad-status {
+    margin-left: auto;
+    font-size: 13px;
+    color: #888;
+}
+
+.pad-status-info { color: #2196f3; }
+.pad-status-success { color: #4caf50; }
+.pad-status-error { color: #f44336; }
+
+/* Éditeur avec curseurs */
+.pad-editor-wrapper {
+    position: relative;
+    flex: 1;
+    padding: 20px;
+    overflow: hidden;
+}
+
+/* CONTENEUR DES CURSEURS DISTANTS - CRITIQUE */
+.pad-cursors-container {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    right: 20px;
+    bottom: 20px;
+    pointer-events: none;
+    z-index: 999;
+}
+
+/* Textarea */
+.pad-textarea {
+    width: 100%;
+    height: 100%;
+    min-height: 400px;
+    background: #1c1c1c;
+    color: #ffffff;
+    border: 1px solid #444;
+    border-radius: 8px;
+    padding: 20px;
+    font-family: 'Poppins', 'Segoe UI', monospace;
+    font-size: 14px;
+    line-height: 1.6;
+    resize: none;
+    transition: all 0.3s;
+    position: relative;
+    z-index: 2;
+}
+
+.pad-textarea:focus {
+    border-color: #f9ee34;
+    box-shadow: 0 0 0 2px rgba(249, 238, 52, 0.1);
+    outline: none;
+}
+
+.pad-textarea.todo-mode {
+    line-height: 2;
+    font-size: 15px;
+}
+
+.pad-textarea.todo-mode::placeholder {
+    color: #666;
+}
+
+/* ===== CURSEURS DISTANTS - AJOUTÉ & OPTIMISÉ ===== */
+.remote-cursor {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 28px;
+    background: #4ECDC4;
+    z-index: 1000;
+    pointer-events: none;
+    transition: left 0.12s ease, opacity 0.3s ease;
+    opacity: 0;
+}
+
+.remote-cursor .cursor-label {
+    position: absolute;
+    top: -32px;
+    left: -10px;
+    background: #4ECDC4;
+    color: white;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 5px 10px;
+    border-radius: 8px;
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    transform: translateX(-50%);
+    left: 50%;
+}
+
+/* Suggestions */
+.pad-suggestions-container {
+    border-top: 1px solid #333;
+    background: #252525;
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.suggestions-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    border-bottom: 1px solid #333;
+}
+
+.suggestions-header h4 {
+    margin: 0;
+    color: #f9ee34;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.close-suggestions {
+    background: none;
+    border: none;
+    color: #888;
+    cursor: pointer;
+    padding: 5px;
+    border-radius: 4px;
+}
+
+.close-suggestions:hover {
+    color: #fff;
+    background: #333;
+}
+
+.suggestions-list {
+    padding: 15px;
+}
+
+.empty-suggestions {
+    color: #666;
+    text-align: center;
+    padding: 20px;
+    font-size: 13px;
+}
+
+/* Toast notifications Pad */
+.pad-toast {
+    position: fixed;
+    bottom: 100px;
+    right: 20px;
+    background: #252525;
+    border: 1px solid #333;
+    border-radius: 8px;
+    padding: 12px 20px;
+    color: #fff;
+    font-size: 13px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    z-index: 10001;
+    max-width: 300px;
+    animation: slideInRight 0.3s ease;
+}
+
+.pad-toast-info { border-left: 4px solid #2196f3; }
+.pad-toast-success { border-left: 4px solid #4caf50; }
+.pad-toast-error { border-left: 4px solid #f44336; }
+.pad-toast-assignment { border-left: 4px solid #ff9800; }
+
+.pad-toast.fade-out {
+    animation: fadeOut 0.3s ease forwards;
+}
+
+/* Animations */
+@keyframes slideInRight {
+    from { transform: translateX(100%); opacity: 0; }
+    to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes fadeOut {
+    to { opacity: 0; transform: translateX(100%); }
+}
+
+/* Mode Todo spécifique */
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    margin: 5px 0;
+    padding-left: 10px;
+    position: relative;
+}
+
+.todo-item::before {
+    content: 'unfilled checkbox';
+    position: absolute;
+    left: -5px;
+    color: #666;
+}
+
+.todo-item.completed::before {
+    content: 'check mark';
+    color: #4caf50;
+}
+
+.todo-item:hover .assign-user-btn {
+    opacity: 1;
+}
+
+/* Responsive */
+@media (max-width: 1200px) {
+    .pad-modal-content { width: 98vw; height: 95vh; }
+    .pad-sidebar { width: 250px; }
+}
+
+@media (max-width: 900px) {
+    .pad-modal-body { flex-direction: column; }
+    .pad-sidebar { width: 100%; max-height: 200px; border-right: none; border-bottom: 1px solid #333; }
+    .pad-header-right { flex-wrap: wrap; gap: 8px; }
+    .mode-selector { order: -1; width: 100%; justify-content: center; }
+}
+
+/* Scrollbar styling */
+.pad-sidebar::-webkit-scrollbar,
+.pad-textarea::-webkit-scrollbar,
+.suggestions-list::-webkit-scrollbar {
+    width: 8px;
+}
+
+.pad-sidebar::-webkit-scrollbar-track,
+.pad-textarea::-webkit-scrollbar-track,
+.suggestions-list::-webkit-scrollbar-track {
+    background: #1c1c1c;
+}
+
+.pad-sidebar::-webkit-scrollbar-thumb,
+.pad-textarea::-webkit-scrollbar-thumb,
+.suggestions-list::-webkit-scrollbar-thumb {
+    background: #444;
+    border-radius: 4px;
+}
+
+.pad-sidebar::-webkit-scrollbar-thumb:hover,
+.pad-textarea::-webkit-scrollbar-thumb:hover,
+.suggestions-list::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}

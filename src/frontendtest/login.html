@@ -6,6 +6,52 @@
     <title>Owly - Connexion</title>
     <link rel="stylesheet" href="test-style.css">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- OneSignal SDK v16 (2025) - CONFIGURATION MINIMALE -->
+    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+    <script>
+        window.OneSignalDeferred = window.OneSignalDeferred || [];
+        
+        OneSignalDeferred.push(async function(OneSignal) {
+            try {
+                // Configuration minimale pour la page de login
+                await OneSignal.init({
+                    appId: "961d2a5c-36e7-4db3-8c28-828e4ea30548",
+                    
+                    // Configuration Service Worker
+                    serviceWorkerParam: { 
+                        scope: "/" 
+                    },
+                    serviceWorkerPath: "OneSignalSDKWorker.js",
+                    
+                    // Autoriser localhost
+                    allowLocalhostAsSecureOrigin: true,
+                    
+                    // Désactiver la bannière sur la page de login
+                    notifyButton: {
+                        enable: false
+                    },
+                    
+                    // Désactiver les notifications de bienvenue
+                    welcomeNotification: {
+                        disable: true
+                    },
+                    
+                    // Désactiver la demande automatique sur login
+                    promptOptions: {
+                        slidedown: {
+                            enabled: false
+                        }
+                    }
+                });
+                
+                console.log("✅ OneSignal initialisé (login page)");
+                
+            } catch (error) {
+                console.error("❌ Erreur initialisation OneSignal (login):", error);
+            }
+        });
+    </script>
 </head>
 <body>
     <div class="login-container">
@@ -115,6 +161,6 @@
         </div>
     </div>
 
-    <script src="login.js"></script>
-</body>
+<script src="js/app.js"></script>
+<script src="js/auth.js"></script></body>
 </html>

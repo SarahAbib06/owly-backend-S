@@ -2,7 +2,8 @@
 import express from 'express';
 import { pushNotificationService } from '../services/pushNotificationService.js';
 import PushToken from '../models/PushToken.js';
-
+import authMiddleware from '../middleware/auth.js';
+import User from '../models/User.js';
 const router = express.Router();
 
 // 🆕 ENREGISTRER UN DEVICE PUSH
@@ -92,5 +93,27 @@ router.get('/user-devices/:userId', async (req, res) => {
     });
   }
 });
+// AJOUT ONE SIGNAL – Sauvegarde du player ID (web + futur mobile)
+router.post('/save-playerid', authMiddleware, async (req, res) => {
+  try {
+    const { playerId } = req.body;
+    const userId = req.user._id;
 
+    if (!playerId) {
+      return res.status(400).json({ error: 'playerId requis' });
+    }
+
+    await User.findByIdAndUpdate(userId, { onesignalPlayerId: playerId });
+
+    console.log(`OneSignal Player ID sauvegardé → User ${userId} : ${playerId}`);
+
+    res.json({ 
+      success: true, 
+      message: 'OneSignal Player ID enregistré avec succès' 
+    });
+  } catch (error) {
+    console.error('Erreur sauvegarde OneSignal playerId:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 export default router;

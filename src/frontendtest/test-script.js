@@ -35,6 +35,15 @@ let state = {
         recordingTimer: null,
         recordingStartTime: null,
         audioDuration: 0
+    },
+    
+    // 🆕 ÉTAT PAD
+    pad: {
+        currentPad: null,
+        isPadOpen: false,
+        mode: 'text',
+        isUpdating: false,
+        updateTimeout: null
     }
 };
 
@@ -298,22 +307,105 @@ async function handleForgotPassword() {
   }
 }
 
+// ===== FONCTIONS ONESIGNAL CORRIGÉES =====
+
 async function handleSuccessfulAuth(authData) {
   state.token = authData.data?.token || authData.token;
   state.user = authData.data?.user || {
-    id: authData.id,
+    id: authData.id || authData._id,
     username: authData.username,
     email: authData.email,
   };
 
+  // Sauvegarde en localStorage
   localStorage.setItem("owly_token", state.token);
   localStorage.setItem("owly_user", JSON.stringify(state.user));
 
   showMessage("Connexion réussie! Redirection...", "success");
 
+  // 🔥 CORRECTION : Gestion OneSignal après authentification
+  setTimeout(async () => {
+    if (window.OneSignalDeferred) {
+      try {
+        OneSignalDeferred.push(async function(OneSignal) {
+          const isSubscribed = await OneSignal.isPushNotificationsEnabled();
+          
+          if (!isSubscribed) {
+            console.log("🎯 Demande de notifications après connexion...");
+            setTimeout(() => {
+              OneSignal.showSlidedownPrompt();
+            }, 2000);
+          }
+          
+          // Sauvegarder le playerId si déjà abonné
+          const playerId = await OneSignal.getUserId();
+          if (playerId && state.token) {
+            await fetch('http://localhost:5000/api/notifications/save-playerid', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+              },
+              body: JSON.stringify({ playerId })
+            });
+          }
+        });
+      } catch (error) {
+        console.error("❌ Erreur OneSignal après auth:", error);
+      }
+    }
+  }, 1000);
+
+  // Redirection
   setTimeout(() => {
     window.location.href = "conversations.html";
-  }, 1000);
+  }, 1500);
+}
+
+// Fonction de vérification du setup OneSignal
+async function verifyOneSignalSetup() {
+  console.log("🔍 Vérification configuration OneSignal...");
+  
+  // Vérifier que le Service Worker est accessible
+  try {
+    const response = await fetch('/OneSignalSDKWorker.js');
+    console.log("✅ Service Worker accessible:", response.status === 200);
+  } catch (error) {
+    console.error("❌ Service Worker inaccessible:", error);
+  }
+  
+  // Vérifier l'état des notifications
+  if (window.OneSignalDeferred) {
+    OneSignalDeferred.push(async function(OneSignal) {
+      const isSubscribed = await OneSignal.isPushNotificationsEnabled();
+      const permission = Notification.permission;
+      const playerId = await OneSignal.getUserId();
+      
+      console.log("📊 État notifications:", {
+        abonné: isSubscribed,
+        permission: permission,
+        playerId: playerId
+      });
+    });
+  }
+}
+
+// Initialisation du bouton de notification
+function initNotificationButton() {
+  const manualBtn = document.getElementById('testNotificationBtn');
+  
+  manualBtn?.addEventListener('click', async () => {
+    if (window.OneSignalDeferred) {
+      OneSignalDeferred.push(async function(OneSignal) {
+        try {
+          await OneSignal.showSlidedownPrompt();
+        } catch (error) {
+          console.error('❌ Erreur activation manuelle:', error);
+          showMessage('Erreur lors de l\'activation des notifications', 'error');
+        }
+      });
+    }
+  });
 }
 
 function checkExistingAuth() {
@@ -345,8 +437,13 @@ function initMessagingPage() {
   initReactionsSystem();
   initUserProfileSystem();
   initVoiceRecording();
+  initNotificationButton();
+  initPadSystem(); // 🆕 INITIALISATION PAD
   
   loadInitialData();
+  
+  // Vérifier le setup OneSignal
+  setTimeout(verifyOneSignalSetup, 2000);
 }
 
 function checkAuth() {
@@ -375,6 +472,323 @@ function initUserPanel() {
 
 function initConversations() {
   console.log("✅ Conversations initialisées");
+}
+
+// 🆕 SYSTÈME PAD
+function initPadSystem() {
+    console.log("📝 Initialisation du système Pad...");
+    
+    // Initialisation des événements
+    document.getElementById('padBtn')?.addEventListener('click', openPad);
+    document.getElementById('closePadModal')?.addEventListener('click', closePad);
+    document.getElementById('toggleModeBtn')?.addEventListener('click', togglePadMode);
+    document.getElementById('clearPadBtn')?.addEventListener('click', clearPad);
+    
+    // Événements WebSocket Pad
+    if (state.socket) {
+        state.socket.on('pad_content_updated', handlePadContentUpdate);
+        state.socket.on('pad_item_toggled', handlePadItemToggle);
+        state.socket.on('pad_updated', handlePadUpdate);
+    }
+    
+    // Écouter les changements de texte avec debounce
+    const padTextarea = document.getElementById('padTextarea');
+    if (padTextarea) {
+        padTextarea.addEventListener('input', debounce(updatePadContent, 500));
+    }
+    
+    console.log("✅ Système Pad initialisé");
+}
+
+// 🆕 OUVERTURE DU PAD
+async function openPad() {
+    if (!state.currentConversation) {
+        showMessage("Sélectionnez d'abord une conversation", "warning");
+        return;
+    }
+    
+    try {
+        showMessage("Chargement du Pad...", "info");
+        
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/pads/${state.currentConversation._id}`, {
+            headers: { 'Authorization': `Bearer ${state.token}` }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            state.pad.currentPad = data.pad;
+            state.pad.mode = data.pad.mode || 'text';
+            
+            // Rejoindre la room WebSocket du Pad
+            if (state.socket) {
+                state.socket.emit('join_pad', state.currentConversation._id);
+            }
+            
+            // Afficher le modal
+            showPadModal();
+            updatePadUI();
+            
+            showMessage("Pad chargé avec succès!", "success");
+        } else {
+            throw new Error(data.error || "Erreur de chargement du Pad");
+        }
+    } catch (error) {
+        console.error("❌ Erreur ouverture Pad:", error);
+        showMessage("Erreur: " + error.message, "error");
+    }
+}
+
+// 🆕 AFFICHAGE DU MODAL PAD
+function showPadModal() {
+    const modal = document.getElementById('padModal');
+    modal.style.display = 'flex';
+    state.pad.isPadOpen = true;
+    
+    // Focus sur la textarea
+    setTimeout(() => {
+        const textarea = document.getElementById('padTextarea');
+        if (textarea) {
+            textarea.focus();
+        }
+    }, 100);
+}
+
+// 🆕 FERMETURE DU PAD
+function closePad() {
+    const modal = document.getElementById('padModal');
+    modal.style.display = 'none';
+    state.pad.isPadOpen = false;
+    
+    // Quitter la room WebSocket
+    if (state.socket && state.currentConversation) {
+        state.socket.emit('leave_pad', state.currentConversation._id);
+    }
+}
+
+// 🆕 MISE À JOUR DE L'UI PAD
+function updatePadUI() {
+    if (!state.pad.currentPad) return;
+    
+    const textarea = document.getElementById('padTextarea');
+    const toggleBtn = document.getElementById('toggleModeBtn');
+    const statsContainer = document.getElementById('padStats');
+    
+    if (textarea) {
+        textarea.value = state.pad.currentPad.content || '';
+    }
+    
+    if (toggleBtn) {
+        if (state.pad.mode === 'text') {
+            toggleBtn.innerHTML = '<i class="fas fa-check-square"></i> Mode To-Do';
+            toggleBtn.title = "Basculer en mode To-Do";
+        } else {
+            toggleBtn.innerHTML = '<i class="fas fa-font"></i> Mode Texte';
+            toggleBtn.title = "Basculer en mode Texte";
+        }
+    }
+    
+    // Afficher/masquer les stats en mode To-Do
+    if (statsContainer) {
+        if (state.pad.mode === 'todo' && state.pad.currentPad.stats) {
+            statsContainer.style.display = 'block';
+            updatePadStats(state.pad.currentPad.stats);
+        } else {
+            statsContainer.style.display = 'none';
+        }
+    }
+    
+    // Appliquer le style selon le mode
+    if (textarea) {
+        textarea.className = state.pad.mode === 'todo' ? 'pad-textarea todo-mode' : 'pad-textarea';
+    }
+}
+
+// 🆕 METTRE À JOUR LES STATS
+function updatePadStats(stats) {
+    document.getElementById('completedCount').textContent = stats.completed || 0;
+    document.getElementById('totalCount').textContent = stats.total || 0;
+    
+    const progressFill = document.getElementById('progressFill');
+    if (progressFill && stats.total > 0) {
+        const progress = (stats.completed / stats.total) * 100;
+        progressFill.style.width = `${progress}%`;
+    }
+}
+
+// 🆕 BASCULER LE MODE
+async function togglePadMode() {
+    if (!state.currentConversation || !state.pad.currentPad) return;
+    
+    const newMode = state.pad.mode === 'text' ? 'todo' : 'text';
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/pads/${state.currentConversation._id}/toggle-mode`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({ mode: newMode })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            state.pad.mode = newMode;
+            state.pad.currentPad.content = data.content;
+            state.pad.currentPad.stats = data.stats;
+            
+            updatePadUI();
+            showMessage(`Mode ${newMode === 'todo' ? 'To-Do' : 'Texte'} activé!`, "success");
+        } else {
+            throw new Error(data.error || "Erreur changement de mode");
+        }
+    } catch (error) {
+        console.error("❌ Erreur toggle mode:", error);
+        showMessage("Erreur: " + error.message, "error");
+    }
+}
+
+// 🆕 METTRE À JOUR LE CONTENU (avec debounce)
+async function updatePadContent() {
+    if (!state.currentConversation || !state.pad.isPadOpen || state.pad.isUpdating) return;
+    
+    const textarea = document.getElementById('padTextarea');
+    if (!textarea) return;
+    
+    const content = textarea.value;
+    
+    state.pad.isUpdating = true;
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/pads/${state.currentConversation._id}/content`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({ 
+                content: content,
+                mode: state.pad.mode
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            state.pad.currentPad = data.pad;
+            
+            // Émettre l'événement WebSocket pour la synchro temps réel
+            if (state.socket) {
+                state.socket.emit('pad_content_change', {
+                    conversationId: state.currentConversation._id,
+                    content: content,
+                    mode: state.pad.mode
+                });
+            }
+        } else {
+            console.error("❌ Erreur mise à jour Pad:", data.error);
+        }
+    } catch (error) {
+        console.error("❌ Erreur mise à jour Pad:", error);
+    } finally {
+        state.pad.isUpdating = false;
+    }
+}
+
+// 🆕 VIDER LE PAD
+async function clearPad() {
+    if (!state.currentConversation || !confirm("Voulez-vous vraiment vider le Pad ?")) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/pads/${state.currentConversation._id}/clear`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${state.token}` }
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+            // Réinitialiser localement
+            state.pad.currentPad.content = "";
+            const textarea = document.getElementById('padTextarea');
+            if (textarea) {
+                textarea.value = "";
+            }
+            
+            showMessage("Pad vidé avec succès!", "success");
+        } else {
+            throw new Error(data.error || "Erreur de vidage");
+        }
+    } catch (error) {
+        console.error("❌ Erreur vidage Pad:", error);
+        showMessage("Erreur: " + error.message, "error");
+    }
+}
+
+// 🆕 GESTIONNAIRES D'ÉVÉNEMENTS WEBSOCKET PAD
+function handlePadContentUpdate(data) {
+    if (!state.pad.isPadOpen || state.pad.isUpdating) return;
+    
+    const textarea = document.getElementById('padTextarea');
+    if (textarea && data.content !== textarea.value) {
+        textarea.value = data.content;
+        state.pad.currentPad.content = data.content;
+    }
+    
+    if (data.mode && data.mode !== state.pad.mode) {
+        state.pad.mode = data.mode;
+        updatePadUI();
+    }
+    
+    if (data.stats) {
+        updatePadStats(data.stats);
+    }
+}
+
+function handlePadItemToggle(data) {
+    if (data.stats && state.pad.currentPad) {
+        state.pad.currentPad.stats = data.stats;
+        updatePadStats(data.stats);
+    }
+}
+
+function handlePadUpdate(data) {
+    switch (data.type) {
+        case 'mode_changed':
+            if (data.mode) {
+                state.pad.mode = data.mode;
+                state.pad.currentPad.content = data.content;
+                updatePadUI();
+            }
+            break;
+            
+        case 'pad_cleared':
+            if (state.pad.currentPad) {
+                state.pad.currentPad.content = "";
+                const textarea = document.getElementById('padTextarea');
+                if (textarea) {
+                    textarea.value = "";
+                }
+            }
+            break;
+    }
+}
+
+// 🆕 FONCTION DEBOUNCE
+function debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+        const later = () => {
+            clearTimeout(timeout);
+            func(...args);
+        };
+        clearTimeout(timeout);
+        timeout = setTimeout(later, wait);
+    };
 }
 
 function initReactionsSystem() {
@@ -1852,6 +2266,22 @@ state.socket.on("new_message", (data) => {
     handleNewMessage(data.message);
   });
 
+  // 🆕 ÉVÉNEMENTS PAD
+  state.socket.on("pad_content_updated", (data) => {
+    console.log("📝 Pad content updated:", data);
+    handlePadContentUpdate(data);
+  });
+
+  state.socket.on("pad_item_toggled", (data) => {
+    console.log("✅ Pad item toggled:", data);
+    handlePadItemToggle(data);
+  });
+
+  state.socket.on("pad_updated", (data) => {
+    console.log("🔄 Pad updated:", data);
+    handlePadUpdate(data);
+  });
+
   state.socket.on("reaction_added", (data) => {
     console.log("❤️ Réaction ajoutée:", data);
     handleReactionAdded(data);
@@ -2041,6 +2471,9 @@ function initModals() {
   document.getElementById("closeGroupModal")?.addEventListener("click", () => {
     document.getElementById("createGroupModal").style.display = "none";
   });
+
+  // 🆕 MODAL PAD
+  document.getElementById('closePadModal')?.addEventListener('click', closePad);
 
   document.querySelectorAll(".modal-overlay").forEach((modal) => {
     modal.addEventListener("click", (e) => {
@@ -2567,3 +3000,4 @@ window.owlyState = state;
 window.openImageModal = openImageModal;
 window.showReactionsModal = showReactionsModal;
 window.showVoiceRecordModal = showVoiceRecordModal;
+window.openPad = openPad; 
