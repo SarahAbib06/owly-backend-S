@@ -1224,6 +1224,22 @@ export const configureChatSockets = (io) => {
         });
       }
     });
+    // Dans la section des appels vidéo
+socket.on('call:ice-candidate', (data) => {
+  const { receiverId, candidate } = data;
+  
+  console.log(`🧊 Candidat ICE envoyé à ${receiverId}`);
+  
+  const receiverSocketId = Array.from(io.sockets.sockets.values())
+    .find(s => s.userId === receiverId)?.id;
+
+  if (receiverSocketId) {
+    io.to(receiverSocketId).emit('call:ice-candidate', {
+      callerId: socket.userId,
+      candidate
+    });
+  }
+});
 
     // Terminer un appel
     socket.on('call:end', (data) => {
