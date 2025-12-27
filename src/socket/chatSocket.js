@@ -13,6 +13,7 @@ export const configureChatSockets = (io) => {
   // 🆕 STOCKAGE PRÉSENCE AVANCÉ
   const userPresence = new Map();
 
+
   // 🆕 PARTAGE DE LA PRÉSENCE AVEC LE CONTROLLER
   messageController.setUserPresence(userPresence);
 
@@ -1055,6 +1056,20 @@ export const configureChatSockets = (io) => {
       } catch (error) {
         socket.emit("error", { message: error.message });
       }
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
     });
 // ==================== 📞 APPELS VIDÉO WEBRTC ====================
 
@@ -1282,7 +1297,12 @@ socket.on('call:ice-candidate', (data) => {
         await removeUserSession(socket.userId, socket.id);
 
         const remainingSessions = await getRemainingSessions(socket.userId);
-
+         console.log(
+      "🧠 SESSIONS ACTIVES POUR",
+      socket.userId,
+      ":",
+      remainingSessions
+    );
         if (remainingSessions === 0) {
           await updateUserStatus(socket.userId, "offline");
           notifyUserPresence(io, socket.userId, "offline");
@@ -1402,13 +1422,9 @@ socket.on('call:ice-candidate', (data) => {
             (s) => s.socketId !== socketId
           );
           const afterCount = presence.sessions.length;
-
+           console.log(`📦 SESSIONS MAP pour ${userId}:`, Array.from(presence.sessions));
           console.log(`🔢 Sessions ${userId}: ${beforeCount} → ${afterCount}`);
 
-          if (afterCount === 0) {
-            presence.status = "offline";
-            console.log(`🔔 User ${userId} marqué comme offline (0 sessions)`);
-          }
         }
       }
     } catch (error) {
@@ -1434,11 +1450,17 @@ socket.on('call:ice-candidate', (data) => {
     }, 30000); // 30 secondes
   }
 
-  function notifyUserPresence(io, userId, status) {
-    io.emit("user_presence_changed", {
-      userId: userId,
-      status: status,
-      lastSeen: new Date(),
-    });
+ function notifyUserPresence(io, userId, status, lastSeen = new Date()) {
+  if (status === "online") {
+    io.emit("user:online", { userId });
+    console.log("📡 EMIT user:online", userId);
   }
+
+  if (status === "offline") {
+    io.emit("user:offline", { userId, lastSeen });
+    console.log(`📡 EMIT user:offline → User: ${userId}, LastSeen: ${lastSeen}`);
+  }
+}
+
+
 };

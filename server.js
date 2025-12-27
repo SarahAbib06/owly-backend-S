@@ -23,7 +23,7 @@ import { participantController } from "./src/controllers/participantController.j
 import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
-
+import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -92,7 +92,7 @@ const cleanupOrphans = async () => {
     console.log("⚠️ Nettoyage participants échoué:", error.message);
   }
 };
-cleanupOrphans();
+//cleanupOrphans();
 
 app.use(express.json());
 app.use("/public", express.static("public"));
@@ -114,7 +114,7 @@ app.use("/api/relations", relationRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
-
+app.use("/api/users", userStatusRoutes);
 
 
 // ✅ 5. Démarrer le serveur
