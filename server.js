@@ -18,11 +18,13 @@ import archiveRoutes from "./src/routes/archiveRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
+import callRoutes from "./src/routes/callRoutes.js";
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
+
 
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
@@ -114,6 +116,7 @@ app.use("/api/relations", relationRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+app.use("/api/calls", callRoutes);
 
 
 

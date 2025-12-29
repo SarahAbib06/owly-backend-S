@@ -1,9 +1,11 @@
-import { messageController } from "../controllers/messageController.js";
+ import { messageController } from "../controllers/messageController.js";
 import { conversationController } from "../controllers/conversationController.js";
+import { callController } from "../controllers/callController.js";
 import Participants from "../models/Participants.js";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Reaction from "../models/Reaction.js";
+import Call from "../models/Call.js";
 import jwt from "jsonwebtoken";
 import { archiveSocketService } from "../services/archiveSocketService.js";
 
@@ -12,6 +14,9 @@ export const configureChatSockets = (io) => {
 
   // 🆕 STOCKAGE PRÉSENCE AVANCÉ
   const userPresence = new Map();
+
+  // 📞 STOCKAGE GLOBAL DES APPELS ACTIFS
+  const activeCalls = new Map(); // callId -> { callerId, receiverId, status, dbCallId, ... }
 
   // 🆕 PARTAGE DE LA PRÉSENCE AVEC LE CONTROLLER
   messageController.setUserPresence(userPresence);
@@ -47,6 +52,20 @@ export const configureChatSockets = (io) => {
     console.log("🔗 User connecté:", socket.userId, "- Socket:", socket.id);
 
     let presenceInterval = null;
+    // 🖥️ GESTION DU VERRU DE PARTAGE D'ÉCRAN
+socket.on('call:screen-share-start', (data) => {
+  const { remoteUserId } = data;
+  // On informe l'autre participant que socket.userId a pris le contrôle
+  io.to(`user_${remoteUserId}`).emit('call:screen-share-start', {
+    sharerId: socket.userId
+  });
+});
+
+socket.on('call:screen-share-stop', (data) => {
+  const { remoteUserId } = data;
+  // On libère le bouton chez l'autre
+  io.to(`user_${remoteUserId}`).emit('call:screen-share-stop');
+});
 
     // ==================== 🎯 RÉACTIONS EN TEMPS RÉEL ====================
 
@@ -1057,212 +1076,259 @@ export const configureChatSockets = (io) => {
       }
     });
 // ==================== 📞 APPELS VIDÉO WEBRTC ====================
+  socket.on('call:initiate', async (data) => {
+  console.log('📞 call:initiate received:', data, 'from user:', socket.userId);
+  try {
+    const { conversationId, receiverId, callType = 'video' } = data;
+    const callerId = socket.userId;
 
-    // État des appels en cours
-    const activeCalls = new Map(); // callId -> { callerId, receiverId, status }
+    if (callerId === receiverId) return;
 
-    // Initier un appel
-    socket.on('call:initiate', async (data) => {
-      try {
-        const { conversationId, receiverId, callType } = data;
-        const callerId = socket.userId;
+    // 1️⃣ Création DB AVANT TOUT
+    const dbCall = await callController.initiateCall(
+      callerId,
+      receiverId,
+      conversationId,
+      callType
+    );
 
-        console.log(`📞 Appel ${callType} initié:`, { callerId, receiverId });
-
-        // Vérifier si le destinataire est en ligne
-        const receiverSocketId = Array.from(io.sockets.sockets.values())
-          .find(s => s.userId === receiverId)?.id;
-
-        if (!receiverSocketId) {
-          socket.emit('call:user_offline', { receiverId });
-          return;
-        }
-
-        // Vérifier si l'utilisateur est déjà en appel
-        const isReceiverBusy = Array.from(activeCalls.values())
-          .some(call => 
-            (call.callerId === receiverId || call.receiverId === receiverId) && 
-            call.status === 'active'
-          );
-
-        if (isReceiverBusy) {
-          socket.emit('call:user_busy', { receiverId });
-          return;
-        }
-
-        // Créer un ID d'appel unique
-        const callId = `call_${Date.now()}_${callerId}`;
-
-        // Sauvegarder l'appel
-        activeCalls.set(callId, {
-          callId,
-          callerId,
-          receiverId,
-          conversationId,
-          callType,
-          status: 'ringing',
-          startedAt: new Date()
-        });
-
-        // Récupérer les infos du caller
-        const caller = await User.findById(callerId).select('username avatar');
-
-        // Notifier le destinataire
-        io.to(receiverSocketId).emit('call:incoming', {
-          callId,
-          callerId,
-          callerName: caller.username,
-          callerAvatar: caller.avatar,
-          conversationId,
-          callType,
-          timestamp: new Date()
-        });
-
-        console.log(`✅ Appel ${callId} envoyé à ${receiverId}`);
-
-      } catch (error) {
-        console.error('💥 Erreur initiation appel:', error);
-        socket.emit('call:error', { error: error.message });
-      }
+    activeCalls.set(dbCall._id.toString(), {
+      callId: dbCall._id.toString(),
+      callerId,
+      receiverId,
+      conversationId,
+      callType,
+      status: 'ringing',
+      startedAt: new Date()
     });
 
+    // 2️⃣ Rejoindre la salle d'appel (caller)
+    socket.join(`call_${dbCall._id.toString()}`);
+
+    // 3️⃣ Trouver socket receiver
+    const receiverSocket = Array.from(io.sockets.sockets.values())
+      .find(s => s.userId === receiverId);
+
+    console.log('📞 Receiver socket found:', !!receiverSocket, 'for user:', receiverId);
+
+    if (!receiverSocket) {
+      socket.emit('call:error', { error: 'Utilisateur hors ligne' });
+      return;
+    }
+
+    // 4️⃣ Envoyer appel entrant AVEC callId DB
+    receiverSocket.emit('call:incoming', {
+      callId: dbCall._id.toString(),
+      callerId,
+      conversationId,
+      callType
+    });
+
+    console.log('📞 Appel initié DB:', dbCall._id, 'sent to receiver:', receiverId);
+
+  } catch (error) {
+    console.error('❌ Erreur call:initiate:', error);
+    socket.emit('call:error', { error: error.message });
+  }
+});
+
+
+    
     // Accepter un appel
-    socket.on('call:accept', async (data) => {
-      try {
-        const { callId, callerId } = data;
-        const receiverId = socket.userId;
+     socket.on('call:accept', async (data) => {
+  console.log('📞 call:accept received:', data, 'from user:', socket.userId);
+  console.log('📞 Receiver socket ID:', socket.id, 'User ID:', socket.userId);
+  try {
+    const { callId } = data;
+    const receiverId = socket.userId;
 
-        console.log(`✅ Appel accepté:`, { callId, receiverId });
+    console.log('📞 Looking for call in DB:', callId);
 
-        // Mettre à jour le statut de l'appel
-        if (activeCalls.has(callId)) {
-          activeCalls.set(callId, {
-            ...activeCalls.get(callId),
-            status: 'active',
-            acceptedAt: new Date()
-          });
-        }
+    // 1️⃣ Mettre à jour la base de données via le controller
+    const acceptedCall = await callController.acceptCall(callId);
 
-        // Notifier le caller
-        const callerSocketId = Array.from(io.sockets.sockets.values())
-          .find(s => s.userId === callerId)?.id;
+    if (!acceptedCall) {
+      console.log('❌ Call not found in DB:', callId);
+      socket.emit('call:error', { error: 'Appel non trouvé' });
+      return;
+    }
 
-        if (callerSocketId) {
-          const receiver = await User.findById(receiverId).select('username avatar');
-          
-          io.to(callerSocketId).emit('call:accepted', {
-            callId,
-            receiverId,
-            receiverName: receiver.username,
-            receiverAvatar: receiver.avatar,
-            timestamp: new Date()
-          });
-        }
+    console.log('📞 Call found in DB:', acceptedCall._id, 'status:', acceptedCall.status);
 
-      } catch (error) {
-        console.error('💥 Erreur acceptation appel:', error);
-        socket.emit('call:error', { error: error.message });
-      }
+    // 🔒 Vérifier que c'est bien le receiver qui accepte
+    if (acceptedCall.receiverId.toString() !== receiverId) {
+      console.log('❌ Unauthorized accept attempt:', acceptedCall.receiverId, 'vs', receiverId);
+      socket.emit('call:error', { error: 'Vous n\'êtes pas autorisé à accepter cet appel' });
+      return;
+    }
+
+    // 2️⃣ Mettre à jour la mémoire
+    activeCalls.set(callId, {
+      callId,
+      callerId: acceptedCall.callerId.toString(),
+      receiverId: acceptedCall.receiverId.toString(),
+      conversationId: acceptedCall.conversationId.toString(),
+      callType: acceptedCall.callType,
+      status: 'active',
+      startedAt: acceptedCall.startTime
     });
 
+    console.log('📞 Active calls updated, joining room call_' + callId);
+
+    // 3️⃣ Rejoindre la salle d'appel
+    socket.join(`call_${callId}`); // Receiver rejoint
+
+    // 4️⃣ Notifier les deux parties
+    const notificationData = {
+      callId,
+      callerId: acceptedCall.callerId.toString(),
+      receiverId,
+      conversationId: acceptedCall.conversationId.toString(),
+      callType: acceptedCall.callType,
+      startTime: acceptedCall.startTime
+    };
+
+    console.log('📞 Notifying receiver:', receiverId);
+    // Notifier le receiver
+    socket.emit('call:accepted', notificationData);
+
+    // Notifier le caller
+    const callerSocket = Array.from(io.sockets.sockets.values())
+      .find(s => s.userId === acceptedCall.callerId.toString());
+
+    console.log('📞 Caller socket found:', !!callerSocket, 'for user:', acceptedCall.callerId.toString());
+
+    if (callerSocket) {
+      callerSocket.join(`call_${callId}`); // Caller rejoint
+      callerSocket.emit('call:accepted', notificationData);
+      console.log('📞 Caller notified successfully');
+    } else {
+      console.log('❌ Caller socket not found');
+    }
+
+    console.log('✅ call accepté → les deux parties notifiées et DB mise à jour');
+
+  } catch (err) {
+    console.error('❌ call:accept error', err);
+    socket.emit('call:error', { error: err.message });
+  }
+});
     // Rejeter un appel
     socket.on('call:reject', async (data) => {
       try {
-        const { callId, callerId } = data;
+        const { callId } = data;
+        const receiverId = socket.userId;
 
-        console.log(`❌ Appel rejeté:`, { callId });
+        console.log(`❌ Appel rejeté:`, { callId, receiverId });
 
-        // Supprimer l'appel
+        // 1️⃣ Mettre à jour la base de données
+        const rejectedCall = await callController.rejectCall(callId);
+
+        // 2️⃣ Supprimer de la mémoire
         activeCalls.delete(callId);
 
-        // Notifier le caller
-        const callerSocketId = Array.from(io.sockets.sockets.values())
-          .find(s => s.userId === callerId)?.id;
+        // 3️⃣ Notifier le caller
+        const callerSocket = Array.from(io.sockets.sockets.values())
+          .find(s => s.userId === rejectedCall.callerId.toString());
 
-        if (callerSocketId) {
-          io.to(callerSocketId).emit('call:rejected', {
+        if (callerSocket) {
+          callerSocket.emit('call:rejected', {
             callId,
+            receiverId,
             timestamp: new Date()
           });
         }
 
+        console.log(`✅ Appel ${callId} rejeté et DB mise à jour`);
+
       } catch (error) {
         console.error('💥 Erreur rejet appel:', error);
+        socket.emit('call:error', { error: error.message });
       }
     });
 
     // Envoyer offre WebRTC
     socket.on('call:offer', (data) => {
-      const { receiverId, signal } = data;
-      
-      console.log(`📡 Offre WebRTC envoyée à ${receiverId}`);
+      const { receiverId, signal, callId } = data;
 
-      const receiverSocketId = Array.from(io.sockets.sockets.values())
-        .find(s => s.userId === receiverId)?.id;
+      console.log(`📡 Offre WebRTC envoyée pour appel ${callId}`);
 
-      if (receiverSocketId) {
-        io.to(receiverSocketId).emit('call:offer', {
-          callerId: socket.userId,
-          signal
-        });
-      }
+      // Utiliser la salle d'appel pour envoyer l'offre
+      io.to(`call_${callId}`).emit('call:offer', {
+        callerId: socket.userId,
+        signal,
+        callId
+      });
     });
 
     // Envoyer réponse WebRTC
     socket.on('call:answer', (data) => {
-      const { callerId, signal } = data;
-      
-      console.log(`📡 Réponse WebRTC envoyée à ${callerId}`);
+      const { callerId, signal, callId } = data;
 
-      const callerSocketId = Array.from(io.sockets.sockets.values())
-        .find(s => s.userId === callerId)?.id;
+      console.log(`📡 Réponse WebRTC envoyée pour appel ${callId}`);
 
-      if (callerSocketId) {
-        io.to(callerSocketId).emit('call:answer', {
-          receiverId: socket.userId,
-          signal
-        });
-      }
+      // Utiliser la salle d'appel pour envoyer la réponse
+      io.to(`call_${callId}`).emit('call:answer', {
+        receiverId: socket.userId,
+        signal,
+        callId
+      });
     });
     // Dans la section des appels vidéo
 socket.on('call:ice-candidate', (data) => {
-  const { receiverId, candidate } = data;
-  
-  console.log(`🧊 Candidat ICE envoyé à ${receiverId}`);
-  
-  const receiverSocketId = Array.from(io.sockets.sockets.values())
-    .find(s => s.userId === receiverId)?.id;
+  const { callId, candidate } = data;
 
-  if (receiverSocketId) {
-    io.to(receiverSocketId).emit('call:ice-candidate', {
-      callerId: socket.userId,
-      candidate
-    });
-  }
+  console.log(`🧊 Candidat ICE envoyé pour appel ${callId}`);
+
+  // Utiliser la salle d'appel au lieu de chercher le socket individuel
+  io.to(`call_${callId}`).emit('call:ice-candidate', {
+    senderId: socket.userId,
+    candidate
+  });
 });
 
     // Terminer un appel
-    socket.on('call:end', (data) => {
-      const { userId } = data;
+    socket.on('call:end', async (data) => {
+      const { userId, callId } = data;
       const callerId = socket.userId;
 
-      console.log(`📴 Appel terminé entre ${callerId} et ${userId}`);
+      console.log(`📴 Appel terminé entre ${callerId} et ${userId} pour call ${callId}`);
 
-      // Supprimer tous les appels impliquant ces utilisateurs
-      for (const [callId, call] of activeCalls.entries()) {
-        if (call.callerId === callerId || call.receiverId === callerId ||
-            call.callerId === userId || call.receiverId === userId) {
-          activeCalls.delete(callId);
+      // Collecter les callIds à terminer
+      const callsToEnd = [];
+      if (callId) {
+        callsToEnd.push(callId);
+      } else {
+        for (const [cid, call] of activeCalls.entries()) {
+          if (call.callerId === callerId || call.receiverId === callerId ||
+              call.callerId === userId || call.receiverId === userId) {
+            callsToEnd.push(cid);
+          }
         }
       }
 
-      // Notifier l'autre utilisateur
-      const userSocketId = Array.from(io.sockets.sockets.values())
-        .find(s => s.userId === userId)?.id;
+      // Finaliser les appels en base de données
+      for (const cid of callsToEnd) {
+        const call = activeCalls.get(cid);
+        if (call && call.callId) {
+          try {
+            await callController.endCall(call.callId);
+          } catch (error) {
+            console.error(`Erreur fin appel DB ${call.callId}:`, error);
+          }
+        }
+      }
 
-      if (userSocketId) {
-        io.to(userSocketId).emit('call:ended', {
+      // Supprimer les appels de la mémoire
+      for (const cid of callsToEnd) {
+        activeCalls.delete(cid);
+      }
+
+      // Notifier tous les participants de l'appel via la salle
+      for (const cid of callsToEnd) {
+        io.to(`call_${cid}`).emit('call:ended', {
           userId: callerId,
+          callId: cid,
           timestamp: new Date()
         });
       }
@@ -1302,8 +1368,8 @@ socket.on('call:ice-candidate', (data) => {
 
     socket.on("error", (error) => {
       console.error("💥 Erreur socket:", error);
-    });
-  });
+    })
+  ;
 
   // FONCTIONS HELPER PRÉSENCE AVANCÉE
 
@@ -1379,6 +1445,8 @@ socket.on('call:ice-candidate', (data) => {
       console.error("❌ Erreur mise à jour statut:", error);
     }
   }
+  // À l'intérieur de configureChatSockets = (io) => { ...
+
 
   // FONCTION CORRIGÉE POUR SUPPRIMER LES SESSIONS
   async function removeUserSession(userId, socketId) {
@@ -1441,4 +1509,4 @@ socket.on('call:ice-candidate', (data) => {
       lastSeen: new Date(),
     });
   }
-};
+;})} 
