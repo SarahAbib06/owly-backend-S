@@ -40,8 +40,7 @@ export const callController = {
           startTime: new Date() // ⏰ Définir le vrai début de l'appel
         },
         { new: true }
-      ).populate('callerId', 'username avatar')
-       .populate('receiverId', 'username avatar');
+      )
 
       if (!updatedCall) {
         throw new Error("Appel non trouvé");
