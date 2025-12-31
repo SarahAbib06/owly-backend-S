@@ -684,78 +684,75 @@ export const messageController = {
   },
 
   pinMessage: async (req, res) => {
-    try {
-      const { messageId } = req.params;
-      const userId = req.user.id;
-      const io = req.io;
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+    const io = req.io;
 
-      const message = await Message.findById(messageId);
-      if (!message)
-        return res
-          .status(404)
-          .json({ success: false, error: "Message non trouvé" });
-
-      const conv = await Conversation.findById(message.conversationId);
-      const isParticipant =
-        conv?.participants?.some((p) => p.toString() === userId) ||
-        (await Participants.findOne({
-          Id_Conversation: message.conversationId,
-          Id_User: userId,
-        }));
-      if (!isParticipant)
-        return res.status(403).json({ success: false, error: "Non autorisé" });
-
-      message.isPinned = true;
-      message.pinnedBy = userId;
-      message.pinnedAt = new Date();
-      await message.save();
-
-      if (io) {
-        io.to(message.conversationId.toString()).emit("message:pinned", {
-          messageId: message._id,
-          pinnedBy: userId,
-          pinnedAt: message.pinnedAt,
-          content:
-            message.typeMessage === "text"
-              ? decryptContent(message.content)
-              : message.content,
-          typeMessage: message.typeMessage,
-        });
-      }
-
-      res.json({ success: true, message: "Message épinglé" });
-    } catch (error) {
-      console.error("Erreur pin:", error);
-      res.status(500).json({ success: false, error: error.message });
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, error: "Message non trouvé" });
     }
-  },
+
+    const conversationId = message.conversationId; // ← Sauvegarde ici aussi
+
+    // ... (le reste du code)
+
+    message.isPinned = true;
+    message.pinnedBy = userId;
+    message.pinnedAt = new Date();
+    await message.save();
+
+    if (io) {
+      io.to(conversationId.toString()).emit("message:pinned", {
+        messageId: message._id,
+        pinnedBy: userId,
+        pinnedAt: message.pinnedAt,
+        content: message.typeMessage === "text" ? decryptContent(message.content) : message.content,
+        typeMessage: message.typeMessage,
+      });
+    }
+
+    res.json({ success: true, message: "Message épinglé" });
+  } catch (error) {
+    console.error("Erreur pin:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+},
 
   unpinMessage: async (req, res) => {
-    try {
-      const { messageId } = req.params;
-      const io = req.io;
+  try {
+    const { messageId } = req.params;
+    const io = req.io;
 
-      const message = await Message.findByIdAndUpdate(
-        messageId,
-        { $unset: { isPinned: "", pinnedBy: "", pinnedAt: "" } },
-        { new: true }
-      );
-
-      if (!message)
-        return res.status(404).json({ error: "Message non trouvé" });
-
-      if (io) {
-        io.to(message.conversationId.toString()).emit("message:unpinned", {
-          messageId: message._id,
-        });
-      }
-
-      res.json({ success: true, message: "Message désépinglé" });
-    } catch (error) {
-      console.error("Erreur unpin:", error);
-      res.status(500).json({ error: error.message });
+    // On récupère d'abord le message pour avoir conversationId
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ error: "Message non trouvé" });
     }
-  },
+
+    const conversationId = message.conversationId; // ← On sauvegarde avant update
+
+    // On désépinglé
+    await Message.findByIdAndUpdate(
+      messageId,
+      { $unset: { isPinned: "", pinnedBy: "", pinnedAt: "" } },
+      { new: true }
+    );
+
+    // On émet l'événement AVEC l'ID de conversation sauvegardé
+    if (io) {
+      io.to(conversationId.toString()).emit("message:unpinned", {
+        messageId: message._id,
+      });
+    }
+
+    res.json({ success: true, message: "Message désépinglé" });
+  } catch (error) {
+    console.error("Erreur unpin:", error);
+    res.status(500).json({ error: error.message });
+  }
+},
 
   getPinnedMessages: async (req, res) => {
     try {
