@@ -1169,29 +1169,20 @@ socket.on('call:accept', async (data) => {
     const receiverId = socket.userId;
 
     // Vérifier autorisation
-    const existingCall = activeCalls.get(callId);
-    if (!existingCall || existingCall.receiverId !== receiverId) {
-      return socket.emit('call:error', { error: 'Non autorisé' });
+    if (receiverId === callerId) {
+      return socket.emit('call:error', { error: 'Impossible de s\'appeler soi-même' });
     }
 
-    // Mettre à jour DB
+    // ✅ Mettre à jour DB UNIQUEMENT
     const acceptedCall = await callController.acceptCall(callId);
-    
-    // Marquer actif
-    activeCalls.set(callId, {
-      callId,
-      callerId: acceptedCall.callerId.toString(),
-      receiverId: acceptedCall.receiverId.toString(),
-      conversationId: acceptedCall.conversationId.toString(),
-      callType: acceptedCall.callType,
-      status: 'active',
-      startedAt: acceptedCall.startTime
-    });
+    if (!acceptedCall) {
+      return socket.emit('call:error', { error: 'Appel non trouvé' });
+    }
 
-    // JOINDRE LA SALLE
+    // ✅ JOINDRE LA SALLE (ESSENTIEL)
     socket.join(`call:${callId}`);
-    
-    // NOTIFIER TOUS (via salle)
+
+    // ✅ ENVOYER À TOUTE LA SALLE (CALLER + RECEIVER)
     const notificationData = {
       callId,
       callerId: acceptedCall.callerId.toString(),
@@ -1200,15 +1191,18 @@ socket.on('call:accept', async (data) => {
       callType: acceptedCall.callType,
       status: 'active'
     };
-    
+
     io.to(`call:${callId}`).emit('call:accepted', notificationData);
-    console.log('✅ call:accepted envoyé à toute la salle');
-    
+    console.log('✅ call:accepted envoyé à salle call:', callId);
+
+    // ✅ SUPPRIMEZ activeCalls.set() COMPLETEMENT !
+
   } catch (err) {
-    console.error('call:accept error:', err);
+    console.error('❌ call:accept error:', err);
     socket.emit('call:error', { error: err.message });
   }
 });
+
 
 
     // Rejeter un appel
