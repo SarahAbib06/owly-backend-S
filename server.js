@@ -24,6 +24,7 @@ import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
+import favoritesRoutes from './src/routes/favoritesRoute.js';
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -115,6 +116,7 @@ app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
 app.use("/api/users", userStatusRoutes);
+app.use('/api/favorites', favoritesRoutes);
 
 
 // ✅ 5. Démarrer le serveur
