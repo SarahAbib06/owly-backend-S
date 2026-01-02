@@ -18,13 +18,19 @@ import archiveRoutes from "./src/routes/archiveRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
+import callRoutes from "./src/routes/callRoutes.js";
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
+
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
+
 import favoritesRoutes from './src/routes/favoritesRoute.js';
+
+
+
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -115,8 +121,13 @@ app.use("/api/relations", relationRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+
+app.use("/api/calls", callRoutes);
+
+
 app.use("/api/users", userStatusRoutes);
 app.use('/api/favorites', favoritesRoutes);
+
 
 
 // ✅ 5. Démarrer le serveur
