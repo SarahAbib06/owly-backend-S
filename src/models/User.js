@@ -16,6 +16,9 @@ const userSchema = new mongoose.Schema(
       enum: ["online", "offline", "away"],
       default: "offline",
     },
+    favorites: [
+  { type: mongoose.Schema.Types.ObjectId, ref: "Conversation" }
+],
 
 activeSessions: [
   {
