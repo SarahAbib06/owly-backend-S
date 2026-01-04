@@ -28,6 +28,10 @@ import relationRoutes from "./src/routes/relationsRoutes.js";
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 
 
+import favoritesRoutes from './src/routes/favoritesRoute.js';
+
+
+
 // ⭐ Configuration __dirname pour ES modules
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -123,6 +127,7 @@ app.use("/api/calls", callRoutes);
 
 
 app.use("/api/users", userStatusRoutes);
+app.use('/api/favorites', favoritesRoutes);
 
 
 
