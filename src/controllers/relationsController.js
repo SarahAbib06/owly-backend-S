@@ -1,49 +1,63 @@
 // controllers/relationsController.js
-import Relation from '../models/Relation.js';
-import User from '../models/User.js';
+import Relation from "../models/Relation.js";
+import User from "../models/User.js";
 
 export const getContacts = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    // Cherche toutes les relations "accepted" où l'utilisateur est impliqué
+    if (!userId) {
+      return res.status(401).json({ message: "Utilisateur non authentifié" });
+    }
+
+    // Recherche efficace : toutes les relations acceptées où l'utilisateur est userId OU contactId
     const relations = await Relation.find({
-      $or: [
-        { userId: userId, status: 'accepted' },
-        { contactId: userId, status: 'accepted' }
-      ]
+      status: "accepted",
+      $or: [{ userId: userId }, { contactId: userId }],
     })
-    .populate('userId', 'username profilePicture status')
-    .populate('contactId', 'username profilePicture status');
+      .populate({
+        path: "userId",
+        select: "username profilePicture status",
+      })
+      .populate({
+        path: "contactId",
+        select: "username profilePicture status",
+      })
+      .lean(); // ← Important : .lean() pour performance (retourne des objets JS purs)
 
-    // Formate les contacts : pour chaque relation, prend l'autre utilisateur (pas moi)
+    // Construction du tableau de contacts
     const contacts = relations
-  .filter(relation => {
-    return relation.userId && relation.contactId;  // ← NOUVEAU : on élimine les relations cassées
-  })
-  .map(relation => {
-    const isUserInitiator = relation.userId._id.toString() === userId;  // ← renommé pour plus de clarté
-    const contact = isUserInitiator ? relation.contactId : relation.userId;
+      .filter((relation) => {
+        // Sécurité : s'assurer que les deux users sont bien populés
+        const user = relation.userId;
+        const contact = relation.contactId;
+        return user && contact && user._id && contact._id;
+      })
+      .map((relation) => {
+        const isMeTheInitiator = relation.userId._id.toString() === userId.toString();
+        const contactUser = isMeTheInitiator ? relation.contactId : relation.userId;
 
-    return {
-      id: contact._id,
-      _id: contact._id,
-      username: contact.username,
-      profilePicture: contact.profilePicture || null,
-      status: contact.status || 'offline',
-      relationId: relation._id,
-      addedAt: relation.addedAt || relation.createdAt  // ← petit bonus au cas où addedAt n'existe pas
-    };
-  });
+        return {
+          _id: contactUser._id.toString(),
+          id: contactUser._id.toString(), // compatibilité avec ton frontend
+          username: contactUser.username || "Utilisateur inconnu",
+          profilePicture: contactUser.profilePicture || null,
+          status: contactUser.status || "offline",
+          relationId: relation._id.toString(),
+          addedAt: relation.addedAt || relation.createdAt,
+        };
+      });
 
-   
+    // Optionnel : trier par date d'ajout (le plus récent en haut)
+    contacts.sort((a, b) => new Date(b.addedAt) - new Date(a.addedAt));
 
-    res.json(contacts); // Retourne directement le tableau, pas besoin de wrapper
-
+    // Réponse directe → ton frontend attend un tableau
+    res.json(contacts);
   } catch (error) {
-    console.error('❌ Erreur récupération contacts:', error);
-    res.status(500).json({ 
-      message: 'Erreur lors de la récupération des contacts' 
+    console.error("Erreur récupération contacts:", error);
+    res.status(500).json({
+      success: false,
+      message: "Erreur serveur lors de la récupération des contacts",
     });
   }
 };

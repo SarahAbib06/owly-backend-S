@@ -11,13 +11,25 @@ const router = express.Router();
 router.post("/private", protact, async (req, res) => {
   try {
     const { receiverId } = req.body;
-    const senderId = req.user._id; // pris depuis le token
+    const senderId = req.user._id;
 
     if (!receiverId) {
       return res.status(400).json({
         success: false,
-        error: "receiverId est requis",
+        error: "receiverId requis",
       });
+    }
+
+    // Si receiverId est un ID de conversation (24 caractères hex), c'est un appel inutile → ignore
+    if (mongoose.Types.ObjectId.isValid(receiverId)) {
+      const existingConv = await Conversation.findById(receiverId);
+      if (existingConv && existingConv.type === "private") {
+        // C'est une conversation existante → retourne-la sans rien faire
+        return res.json({
+          success: true,
+          conversation: existingConv,
+        });
+      }
     }
 
     const conversation = await conversationController.getOrCreateConversation(
@@ -27,7 +39,17 @@ router.post("/private", protact, async (req, res) => {
 
     res.json({
       success: true,
-      conversation,
+      conversation: {
+        _id: conversation._id,
+        type: conversation.type,
+        participants: conversation.participants || [], // ou ce que tu as
+        // ... autres champs que tu renvoies déjà
+
+        // AJOUTE ÇA
+        isMessageRequest: conversation.isMessageRequest || false,
+        messageRequestFor: conversation.messageRequestFor || null,
+        messageRequestFrom: conversation.messageRequestFrom || null,
+      },
     });
   } catch (error) {
     console.error("❌ Erreur création conversation privée:", error);
@@ -37,7 +59,6 @@ router.post("/private", protact, async (req, res) => {
     });
   }
 });
-
 
 // 🆕 ROUTE POUR CRÉER UN GROUPE
 router.post("/groups/create", protact, async (req, res) => {
@@ -358,6 +379,9 @@ router.get("/", protact, async (req, res) => {
           participants: allParticipants.map((p) => p.Id_User), // 🎯 TOUS LES PARTICIPANTS
           createdAt: conv.createdAt,
           myRole: participant.Role, // 🎯 TON RÔLE DANS CETTE CONVERSATION
+          isMessageRequest: conv.isMessageRequest || false,
+          messageRequestFor: conv.messageRequestFor || null,
+          messageRequestFrom: conv.messageRequestFrom || null,
         };
       })
     );

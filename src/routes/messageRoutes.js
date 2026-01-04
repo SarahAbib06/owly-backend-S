@@ -104,6 +104,10 @@ router.get('/:conversationId/media', protact, messageController.getConversationM
 
 
 
+
+
+
+
 // Bonus : récupérer les messages épinglés d'une conversation (super utile pour l'affichage en haut)
 router.get(
   "/:conversationId/pinned",
