@@ -13,6 +13,7 @@ const conversationSchema = new Schema(
       },
     ],
 
+
     // Compteurs de messages non lus par utilisateur
     unreadCounts: [
       {

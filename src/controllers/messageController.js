@@ -228,11 +228,48 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
       { userId: receiverId, contactId: Id_sender },
     ],
   });
-  if (blockExists) {
+    if (blockExists) {
     throw new Error(
       "Impossible d'envoyer le message : vous avez bloqué cette personne ou elle vous a bloqué."
     );
   }
+
+  // === AJOUT : GESTION INVITATION PAR MESSAGE (Message Request) ===
+  let relation = await Relation.findOne({
+    $or: [
+      { userId: Id_sender, contactId: receiverId },
+      { userId: receiverId, contactId: Id_sender },
+    ],
+  });
+
+  let isMessageRequest = false;
+  let requestStatus = "accepted"; // "pending" ou "accepted"
+
+  if (!relation) {
+    // Première fois → on crée une relation pending
+    relation = await Relation.create({
+      userId: Id_sender,
+      contactId: receiverId,
+      status: "pending",
+    });
+    isMessageRequest = true;
+    requestStatus = "pending";
+  } else if (relation.status === "pending") {
+    // Déjà une demande en cours
+    if (relation.userId.toString() === Id_sender.toString()) {
+      // C'est moi qui ai déjà demandé
+      isMessageRequest = true;
+      requestStatus = "pending";
+    } else {
+      // L'autre m'avait déjà demandé → acceptation automatique
+      await Relation.findByIdAndUpdate(relation._id, {
+        status: "accepted",
+        acceptedAt: new Date(),
+      });
+      requestStatus = "accepted";
+    }
+  }
+  // === FIN AJOUT ===
 
   let finalConversationId = conversationId;
   if (!conversationId) {
@@ -243,6 +280,22 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     finalConversationId = conv._id;
   }
 
+  // Marquer la conversation comme demande si besoin
+  if (isMessageRequest) {
+    await Conversation.findByIdAndUpdate(finalConversationId, {
+      isMessageRequest: true,
+      messageRequestFor: receiverId,
+      messageRequestFrom: Id_sender,
+    });
+    
+  } else {
+    await Conversation.findByIdAndUpdate(finalConversationId, {
+      $set: { isMessageRequest: false, messageRequestFor: null, messageRequestFrom: null },
+    });
+  }
+
+  
+
   const encryptedContent = typeMessage === 'text' ? encryptContent(content.trim()) : content;
 
     // CORRIGÉ : On sauvegarde aussi les métadonnées image/video/file dans la BDD
@@ -251,7 +304,8 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     Id_sender,
     content: encryptedContent,
     typeMessage,
-    status: "sent",
+    status: requestStatus === "accepted" ? "sent" : "pending",
+    isPendingRequest: requestStatus !== "accepted", // ← ajoute cette ligne
     time: new Date(),
     readBy: [],
     unreadFor: [],
@@ -264,57 +318,63 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
   });
   const savedMessage = await message.save();
 
-  try {
-    const participants = await Participants.find({
-      Id_Conversation: finalConversationId,
-    });
-    const bulkOperations = [];
-    const participantsToNotify = [];
+    
 
-    for (const participant of participants) {
-      if (participant.Id_User.toString() !== Id_sender.toString()) {
-        participantsToNotify.push(participant.Id_User);
-        bulkOperations.push({
-          updateOne: {
-            filter: {
-              _id: finalConversationId,
-              "unreadCounts.userId": participant.Id_User,
-            },
-            update: {
-              $inc: { "unreadCounts.$.count": 1 },
-              $set: { lastMessageAt: new Date() },
-            },
-          },
-        });
-      }
-    }
+  // === AJOUT : Mise à jour unreadCounts SEULEMENT si la relation est acceptée ===
+  if (requestStatus === "accepted") {
+    try {
+      const participants = await Participants.find({
+        Id_Conversation: finalConversationId,
+      });
+      const bulkOperations = [];
+      const participantsToNotify = [];
 
-    if (bulkOperations.length > 0) {
-      await Conversation.bulkWrite(bulkOperations);
-      const conv = await Conversation.findById(finalConversationId);
-      const missing = [];
-      for (const uid of participantsToNotify) {
-        if (
-          !conv.unreadCounts?.some(
-            (u) => u.userId.toString() === uid.toString()
-          )
-        ) {
-          missing.push({
+      for (const participant of participants) {
+        if (participant.Id_User.toString() !== Id_sender.toString()) {
+          participantsToNotify.push(participant.Id_User);
+          bulkOperations.push({
             updateOne: {
-              filter: { _id: finalConversationId },
+              filter: {
+                _id: finalConversationId,
+                "unreadCounts.userId": participant.Id_User,
+              },
               update: {
-                $push: { unreadCounts: { userId: uid, count: 1 } },
+                $inc: { "unreadCounts.$.count": 1 },
                 $set: { lastMessageAt: new Date() },
               },
             },
           });
         }
       }
-      if (missing.length > 0) await Conversation.bulkWrite(missing);
+
+      if (bulkOperations.length > 0) {
+        await Conversation.bulkWrite(bulkOperations);
+        const conv = await Conversation.findById(finalConversationId);
+        const missing = [];
+        for (const uid of participantsToNotify) {
+          if (
+            !conv.unreadCounts?.some(
+              (u) => u.userId.toString() === uid.toString()
+            )
+          ) {
+            missing.push({
+              updateOne: {
+                filter: { _id: finalConversationId },
+                update: {
+                  $push: { unreadCounts: { userId: uid, count: 1 } },
+                  $set: { lastMessageAt: new Date() },
+                },
+              },
+            });
+          }
+        }
+        if (missing.length > 0) await Conversation.bulkWrite(missing);
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour compteurs:", error.message);
     }
-  } catch (error) {
-    console.error("Erreur mise à jour compteurs:", error.message);
   }
+  // === FIN AJOUT ===
 
   try {
     console.log("Gestion intelligente des notifications...");
@@ -684,78 +744,75 @@ export const messageController = {
   },
 
   pinMessage: async (req, res) => {
-    try {
-      const { messageId } = req.params;
-      const userId = req.user.id;
-      const io = req.io;
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+    const io = req.io;
 
-      const message = await Message.findById(messageId);
-      if (!message)
-        return res
-          .status(404)
-          .json({ success: false, error: "Message non trouvé" });
-
-      const conv = await Conversation.findById(message.conversationId);
-      const isParticipant =
-        conv?.participants?.some((p) => p.toString() === userId) ||
-        (await Participants.findOne({
-          Id_Conversation: message.conversationId,
-          Id_User: userId,
-        }));
-      if (!isParticipant)
-        return res.status(403).json({ success: false, error: "Non autorisé" });
-
-      message.isPinned = true;
-      message.pinnedBy = userId;
-      message.pinnedAt = new Date();
-      await message.save();
-
-      if (io) {
-        io.to(message.conversationId.toString()).emit("message:pinned", {
-          messageId: message._id,
-          pinnedBy: userId,
-          pinnedAt: message.pinnedAt,
-          content:
-            message.typeMessage === "text"
-              ? decryptContent(message.content)
-              : message.content,
-          typeMessage: message.typeMessage,
-        });
-      }
-
-      res.json({ success: true, message: "Message épinglé" });
-    } catch (error) {
-      console.error("Erreur pin:", error);
-      res.status(500).json({ success: false, error: error.message });
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ success: false, error: "Message non trouvé" });
     }
-  },
+
+    const conversationId = message.conversationId; // ← Sauvegarde ici aussi
+
+    // ... (le reste du code)
+
+    message.isPinned = true;
+    message.pinnedBy = userId;
+    message.pinnedAt = new Date();
+    await message.save();
+
+    if (io) {
+      io.to(conversationId.toString()).emit("message:pinned", {
+        messageId: message._id,
+        pinnedBy: userId,
+        pinnedAt: message.pinnedAt,
+        content: message.typeMessage === "text" ? decryptContent(message.content) : message.content,
+        typeMessage: message.typeMessage,
+      });
+    }
+
+    res.json({ success: true, message: "Message épinglé" });
+  } catch (error) {
+    console.error("Erreur pin:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+},
 
   unpinMessage: async (req, res) => {
-    try {
-      const { messageId } = req.params;
-      const io = req.io;
+  try {
+    const { messageId } = req.params;
+    const io = req.io;
 
-      const message = await Message.findByIdAndUpdate(
-        messageId,
-        { $unset: { isPinned: "", pinnedBy: "", pinnedAt: "" } },
-        { new: true }
-      );
-
-      if (!message)
-        return res.status(404).json({ error: "Message non trouvé" });
-
-      if (io) {
-        io.to(message.conversationId.toString()).emit("message:unpinned", {
-          messageId: message._id,
-        });
-      }
-
-      res.json({ success: true, message: "Message désépinglé" });
-    } catch (error) {
-      console.error("Erreur unpin:", error);
-      res.status(500).json({ error: error.message });
+    // On récupère d'abord le message pour avoir conversationId
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return res.status(404).json({ error: "Message non trouvé" });
     }
-  },
+
+    const conversationId = message.conversationId; // ← On sauvegarde avant update
+
+    // On désépinglé
+    await Message.findByIdAndUpdate(
+      messageId,
+      { $unset: { isPinned: "", pinnedBy: "", pinnedAt: "" } },
+      { new: true }
+    );
+
+    // On émet l'événement AVEC l'ID de conversation sauvegardé
+    if (io) {
+      io.to(conversationId.toString()).emit("message:unpinned", {
+        messageId: message._id,
+      });
+    }
+
+    res.json({ success: true, message: "Message désépinglé" });
+  } catch (error) {
+    console.error("Erreur unpin:", error);
+    res.status(500).json({ error: error.message });
+  }
+},
 
   getPinnedMessages: async (req, res) => {
     try {

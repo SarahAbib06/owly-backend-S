@@ -88,10 +88,23 @@ router.post(
 router.get("/audio/:conversationId", protact, getAudioMessages);
 
 // NOUVELLES ROUTES ÉPINGLER / DÉSÉPINGLER (ajoutées sans toucher au reste)
-router.post("/:messageId/pin", protact, messageController.pinMessage);
-router.post("/:messageId/unpin", protact, messageController.unpinMessage);
+// Épingler un message
+router.post("/:messageId/pin", protact, (req, res) => {
+  req.io = req.app.get("io");
+  messageController.pinMessage(req, res);
+});
+
+// Désépingler un message
+router.post("/:messageId/unpin", protact, (req, res) => {
+  req.io = req.app.get("io");
+  messageController.unpinMessage(req, res);
+});
 // Route pour la galerie médias/fichiers (comme Messenger)
 router.get('/:conversationId/media', protact, messageController.getConversationMedia);
+
+
+
+
 
 
 

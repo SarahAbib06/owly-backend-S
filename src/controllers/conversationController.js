@@ -6,75 +6,59 @@ import mongoose from "mongoose";
 
 export const conversationController = {
   getOrCreateConversation: async (Id_sender, Id_receiver) => {
-    // 🎯 VÉRIFICATION IDs FORMAT
-    if (
-      !mongoose.Types.ObjectId.isValid(Id_sender) ||
-      !mongoose.Types.ObjectId.isValid(Id_receiver)
-    ) {
-      throw new Error("IDs utilisateurs invalides");
-    }
+  // Conversion immédiate
+  let senderIdObj, receiverIdObj;
+  try {
+    senderIdObj = new mongoose.Types.ObjectId(Id_sender);
+    receiverIdObj = new mongoose.Types.ObjectId(Id_receiver);
+  } catch (err) {
+    throw new Error("ID invalide");
+  }
 
-    // 🎯 VÉRIFICATION SI LES USERS EXISTENT
-    const [senderExists, receiverExists] = await Promise.all([
-      User.findById(Id_sender),
-      User.findById(Id_receiver),
+  // Vérification existence
+  const [sender, receiver] = await Promise.all([
+    User.findById(senderIdObj),
+    User.findById(receiverIdObj),
+  ]);
+
+  if (!sender) throw new Error(`Expéditeur (${Id_sender}) n'existe pas`);
+  if (!receiver) throw new Error(`Destinataire (${Id_receiver}) n'existe pas`);
+
+  // ... le reste du code inchangé (recherche conversation, création, etc.)
+
+  // 🎯 RECHERCHE CONVERSATION EXISTANTE
+  const existingConversation = await Conversation.findOne({
+    Id_participant: { $all: [Id_sender, Id_receiver] },
+    type: "private",
+  });
+
+  if (existingConversation) {
+    console.log("✅ Conversation existante trouvée et utilisateurs valides:", existingConversation._id);
+    return existingConversation;
+  }
+
+  // 🎯 CRÉATION NOUVELLE CONVERSATION
+  const newConversation = await Conversation.create({
+    Id_participant: [Id_sender, Id_receiver],
+    type: "private",
+    createdBy: Id_sender,
+  });
+
+  console.log("✅ Nouvelle conversation créée:", newConversation._id);
+
+  try {
+    await Participants.create([
+      { Id_User: Id_sender, Id_Conversation: newConversation._id, Role: "membre" },
+      { Id_User: Id_receiver, Id_Conversation: newConversation._id, Role: "membre" },
     ]);
+    console.log("✅ Participants créés");
+  } catch (error) {
+    await Conversation.findByIdAndDelete(newConversation._id);
+    throw new Error("Erreur création participants: " + error.message);
+  }
 
-    if (!senderExists) {
-      throw new Error(`L'utilisateur expéditeur (${Id_sender}) n'existe pas`);
-    }
-    if (!receiverExists) {
-      throw new Error(
-        `L'utilisateur destinataire (${Id_receiver}) n'existe pas`
-      );
-    }
-
-    // 🎯 EMPÊCHER CONVERSATION AVEC SOI-MÊME
-    if (Id_sender.toString() === Id_receiver.toString()) {
-      throw new Error("Impossible de créer une conversation avec vous-même");
-    }
-
-    const existingConversation = await Conversation.findOne({
-      Id_participant: { $all: [Id_sender, Id_receiver] },
-      type: "private",
-    });
-
-    if (existingConversation) {
-      console.log("✅ Conversation existante:", existingConversation._id);
-      return existingConversation;
-    }
-
-    const newConversation = await Conversation.create({
-      Id_participant: [Id_sender, Id_receiver],
-      type: "private",
-      createdBy: Id_sender,
-    });
-
-    console.log("✅ Nouvelle conversation:", newConversation._id);
-
-    // 🆕 CRÉATION DES PARTICIPANTS AVEC VÉRIFICATION
-    try {
-      await Participants.create([
-        {
-          Id_User: Id_sender,
-          Id_Conversation: newConversation._id,
-          Role: "membre",
-        },
-        {
-          Id_User: Id_receiver,
-          Id_Conversation: newConversation._id,
-          Role: "membre",
-        },
-      ]);
-      console.log("✅ Participants créés avec succès");
-    } catch (error) {
-      // 🆕 SI ERREUR, SUPPRIMER LA CONVERSATION CRÉÉE
-      await Conversation.findByIdAndDelete(newConversation._id);
-      throw new Error("Erreur création participants: " + error.message);
-    }
-
-    return newConversation;
-  },
+  return newConversation;
+},
 
   // 🆕 FONCTION POUR CRÉER UN GROUPE (SÉCURISÉE)
   createGroupConversation: async (

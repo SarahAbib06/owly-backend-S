@@ -7,4 +7,7 @@ const router = express.Router();
 
 router.get('/contacts', authMiddleware, getContacts);
 
+
+
+
 export default router;
