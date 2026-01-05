@@ -40,63 +40,50 @@ const authenticate = (req, res, next) => {
 router.post("/generate-token", authenticate, (req, res) => {
   try {
     const { channelName, uid } = req.body;
-    
-    console.log("🔑 Demande token pour:", { channelName, uid });
 
     if (!channelName) {
       return res.status(400).json({
         success: false,
-        error: "Nom du canal requis"
+        error: "channelName requis"
       });
     }
 
-    if (!APP_ID || !APP_CERTIFICATE) {
-      return res.status(500).json({
-        success: false,
-        error: "Configuration Agora incomplète"
-      });
-    }
+    const finalUid =
+      typeof uid === "number" && uid >= 0 && uid <= 10000
+        ? uid
+        : Math.floor(Math.random() * 10000);
 
     const role = RtcRole.PUBLISHER;
     const expirationTimeInSeconds = 3600;
-    const currentTimestamp = Math.floor(Date.now() / 1000);
-    const privilegeExpiredTs = currentTimestamp + expirationTimeInSeconds;
-    
-    const numericUid = Math.abs(
-  Array.from(String(uid)).reduce((acc, c) => acc + c.charCodeAt(0), 0)
-);
+    const privilegeExpiredTs =
+      Math.floor(Date.now() / 1000) + expirationTimeInSeconds;
 
-const token = RtcTokenBuilder.buildTokenWithUid(
-  APP_ID,
-  APP_CERTIFICATE,
-  channelName,
-  numericUid,
-  role,
-  privilegeExpiredTs
-);
+    const token = RtcTokenBuilder.buildTokenWithUid(
+      APP_ID,
+      APP_CERTIFICATE,
+      channelName,
+      finalUid,
+      role,
+      privilegeExpiredTs
+    );
 
-
-
-    console.log("✅ Token généré pour", channelName);
-
-  res.json({
-  success: true,
-  token,
-  appId: APP_ID,
-  channelName,
-  uid: numericUid,
-  expiration: privilegeExpiredTs
-});
-
-
+    res.json({
+      success: true,
+      token,
+      uid: finalUid,
+      channelName,
+      appId: APP_ID
+    });
   } catch (error) {
-    console.error("❌ Erreur génération token:", error);
+    console.error("❌ Erreur token Agora:", error);
     res.status(500).json({
       success: false,
-      error: error.message || "Erreur lors de la génération du token"
+      error: "Erreur génération token"
     });
   }
 });
+
+
 
 
 // Route de test
