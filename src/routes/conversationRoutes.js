@@ -4,59 +4,86 @@ import Participants from "../models/Participants.js";
 import { conversationController } from "../controllers/conversationController.js";
 import mongoose from "mongoose";
 import { protact } from "../middleware/authen.js";
+import Relation from "../models/Relation.js";  
 
 const router = express.Router();
 
 // 🆕 CRÉER / OBTENIR UNE CONVERSATION PRIVÉE
-router.post("/private", protact, async (req, res) => {
+router.post('/private', protact, async (req, res) => {
   try {
     const { receiverId } = req.body;
-    const senderId = req.user._id;
+    const senderId = req.user.id;
+    
+    console.log('POST /private', senderId.toString(), receiverId);
+    if (!receiverId) return res.status(400).json({ success: false, error: 'receiverId requis' });
 
-    if (!receiverId) {
-      return res.status(400).json({
-        success: false,
-        error: "receiverId requis",
-      });
-    }
-
-    // Si receiverId est un ID de conversation (24 caractères hex), c'est un appel inutile → ignore
+    // Vérif conversation existante (uniquement private)
     if (mongoose.Types.ObjectId.isValid(receiverId)) {
       const existingConv = await Conversation.findById(receiverId);
-      if (existingConv && existingConv.type === "private") {
-        // C'est une conversation existante → retourne-la sans rien faire
-        return res.json({
-          success: true,
-          conversation: existingConv,
-        });
+      if (existingConv && existingConv.type === 'private') {
+        return res.json({ success: true, conversation: existingConv });
       }
     }
 
-    const conversation = await conversationController.getOrCreateConversation(
-      senderId,
-      receiverId
-    );
-
-    res.json({
-      success: true,
-      conversation: {
-        _id: conversation._id,
-        type: conversation.type,
-        participants: conversation.participants || [], // ou ce que tu as
-        // ... autres champs que tu renvoies déjà
-
-        // AJOUTE ÇA
-        isMessageRequest: conversation.isMessageRequest || false,
-        messageRequestFor: conversation.messageRequestFor || null,
-        messageRequestFrom: conversation.messageRequestFrom || null,
-      },
+    // ✅ CRÉER conversation SANS getOrCreateConversation pour contrôle total
+    const newConversation = new Conversation({
+      type: 'private',
+      participants: [senderId, receiverId],
+      createdBy: senderId,
+      isMessageRequest: true,  // ✅ TOUJOURS true initialement
+      messageRequestFrom: senderId,
+      messageRequestFor: receiverId
     });
+    await newConversation.save();
+
+    // Créer Participants si absents
+await Participants.create({ Id_User: senderId, Id_Conversation: newConversation._id });
+await Participants.create({ Id_User: receiverId, Id_Conversation: newConversation._id });
+
+    // Vérif relation pour confirmer isMessageRequest
+    const isContact = await Relation.findOne({
+      $or: [
+        { userId: senderId, contactId: receiverId, status: 'accepted' },
+        { userId: receiverId, contactId: senderId, status: 'accepted' }
+      ]
+    });
+    const isMessageRequestFinal = !isContact;  // true si pas accepted
+
+console.log('🔍 newConversation créée:', {
+  _id: newConversation._id,
+  isMessageRequest: newConversation.isMessageRequest,
+  messageRequestFrom: newConversation.messageRequestFrom,
+  messageRequestFor: newConversation.messageRequestFor
+});
+
+
+const responseData = {
+  success: true,
+  conversation: {
+    _id: newConversation._id,
+    id: newConversation._id,
+    type: newConversation.type,
+    participants: newConversation.participants,
+    
+    // 🔥 ENVOYER LES VRAIES VALEURS DEPUIS LA BDD
+    isMessageRequest: newConversation.isMessageRequest,
+    messageRequestFrom: newConversation.messageRequestFrom,
+    messageRequestFor: newConversation.messageRequestFor,
+    
+    unreadCount: 0,
+    lastMessageAt: new Date(),
+    createdAt: newConversation.createdAt,
+    name: null,
+    isGroup: false,
+    isFromArchived: false
+  }
+};
+
+console.log('📤 ENVOI AU FRONTEND:', JSON.stringify(responseData, null, 2));
+res.json(responseData);
   } catch (error) {
-    console.error("❌ Erreur création conversation privée:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+    console.error('Erreur /private', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -285,18 +312,19 @@ router.get("/user/:userId", protact, async (req, res) => {
       (p) => p.Id_Conversation !== null
     );
 
-    const conversations = filteredConversations.map((p) => ({
-      _id: p.Id_Conversation._id,
-      type: p.Id_Conversation.type,
-      name:
-        p.Id_Conversation.type === "group" ? p.Id_Conversation.groupName : null,
-      unreadCount:
-        p.Id_Conversation.unreadCounts?.find(
-          (u) => u.userId && u.userId.toString() === userId
-        )?.count || 0,
-      lastMessageAt: p.Id_Conversation.lastMessageAt,
-      participants: [p.Id_User],
-    }));
+const conversations = filteredConversations.map((p) => ({
+  _id: p.Id_Conversation._id,
+  type: p.Id_Conversation.type,
+  name: p.Id_Conversation.type === "group" ? p.Id_Conversation.groupName : null,
+  unreadCount: p.Id_Conversation.unreadCounts?.find(u => u.userId?.toString() === userId)?.count || 0,
+  lastMessageAt: p.Id_Conversation.lastMessageAt,
+  participants: [p.Id_User],
+  
+  // ✅ AJOUTEZ CES 3 LIGNES !
+  isMessageRequest: p.Id_Conversation.isMessageRequest || false,
+  messageRequestFor: p.Id_Conversation.messageRequestFor || null,
+  messageRequestFrom: p.Id_Conversation.messageRequestFrom || null,
+}));
 
     console.log(
       `✅ ${conversations.length} conversations non archivées trouvées`
@@ -345,50 +373,55 @@ router.get("/", protact, async (req, res) => {
       `🔍 DEBUG - Conversations non archivées: ${validParticipants.length}`
     );
 
-    const formattedConversations = await Promise.all(
-      validParticipants.map(async (participant) => {
-        const conv = participant.Id_Conversation;
+const formattedConversations = await Promise.all(
+  validParticipants.map(async (participant) => {
+    const conv = participant.Id_Conversation;
 
-        // 🎯 RÉCUPÉRER TOUS LES PARTICIPANTS DE CETTE CONVERSATION
-        const allParticipants = await Participants.find({
-          Id_Conversation: conv._id,
-        }).populate("Id_User", "username profilePicture");
+    // 🎯 RÉCUPÉRER TOUS LES PARTICIPANTS
+    const allParticipants = await Participants.find({
+      Id_Conversation: conv._id,
+    }).populate("Id_User", "username profilePicture");
 
-        const userUnread = conv.unreadCounts?.find(
-          (u) => u.userId && u.userId.toString() === userId.toString()
-        );
-
-        let conversationName = null;
-        if (conv.type === "private") {
-          // 🎯 TROUVER L'AUTRE USER DANS LES PARTICIPANTS
-          const otherParticipant = allParticipants.find(
-            (p) => p.Id_User._id.toString() !== userId.toString()
-          );
-          conversationName =
-            otherParticipant?.Id_User?.username || "Utilisateur";
-        } else {
-          conversationName = conv.groupName;
-        }
-
-        return {
-          _id: conv._id,
-          type: conv.type,
-          name: conversationName,
-          unreadCount: userUnread?.count || 0,
-          lastMessageAt: conv.lastMessageAt,
-          participants: allParticipants.map((p) => p.Id_User), // 🎯 TOUS LES PARTICIPANTS
-          createdAt: conv.createdAt,
-          myRole: participant.Role, // 🎯 TON RÔLE DANS CETTE CONVERSATION
-          isMessageRequest: conv.isMessageRequest || false,
-          messageRequestFor: conv.messageRequestFor || null,
-          messageRequestFrom: conv.messageRequestFrom || null,
-        };
-      })
+    const userUnread = conv.unreadCounts?.find(
+      (u) => u.userId && u.userId.toString() === userId.toString()
     );
 
-    console.log(
-      `✅ ${formattedConversations.length} conversations non archivées trouvées`
-    );
+    let conversationName = null;
+    if (conv.type === "private") {
+      const otherParticipant = allParticipants.find(
+        (p) => p.Id_User._id.toString() !== userId.toString()
+      );
+      conversationName = otherParticipant?.Id_User?.username || "Utilisateur";
+    } else {
+      conversationName = conv.groupName;
+    }
+
+    return {
+      _id: conv._id,
+      type: conv.type,
+      name: conversationName,
+      unreadCount: userUnread?.count || 0,
+      lastMessageAt: conv.lastMessageAt,
+      participants: allParticipants.map((p) => p.Id_User),
+      createdAt: conv.createdAt,
+      myRole: participant.Role,
+      
+      // 🔥 AJOUTER CES 3 LIGNES !
+      isMessageRequest: conv.isMessageRequest || false,
+      messageRequestFor: conv.messageRequestFor || null,
+      messageRequestFrom: conv.messageRequestFrom || null,
+    };
+  })
+);
+
+
+console.log('📋 Conversations formatées:', formattedConversations.map(c => ({
+  _id: c._id,
+  name: c.name,
+  isMessageRequest: c.isMessageRequest,
+  messageRequestFor: c.messageRequestFor,
+  messageRequestFrom: c.messageRequestFrom
+})));
 
     res.json({
       success: true,

@@ -235,68 +235,60 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
   }
 
   // === AJOUT : GESTION INVITATION PAR MESSAGE (Message Request) ===
-  let relation = await Relation.findOne({
-    $or: [
-      { userId: Id_sender, contactId: receiverId },
-      { userId: receiverId, contactId: Id_sender },
-    ],
-  });
+const relation = await Relation.findOne({
+  $or: [
+    { userId: Id_sender, contactId: receiverId, status: 'accepted' },
+    { userId: receiverId, contactId: Id_sender, status: 'accepted' }
+  ]
+});
 
-  let isMessageRequest = false;
-  let requestStatus = "accepted"; // "pending" ou "accepted"
+const isContact = !!relation;
+const isMessageRequest = !isContact;
 
-  if (!relation) {
-    // Première fois → on crée une relation pending
-    relation = await Relation.create({
-      userId: Id_sender,
-      contactId: receiverId,
-      status: "pending",
-    });
-    isMessageRequest = true;
-    requestStatus = "pending";
-  } else if (relation.status === "pending") {
-    // Déjà une demande en cours
-    if (relation.userId.toString() === Id_sender.toString()) {
-      // C'est moi qui ai déjà demandé
-      isMessageRequest = true;
-      requestStatus = "pending";
-    } else {
-      // L'autre m'avait déjà demandé → acceptation automatique
-      await Relation.findByIdAndUpdate(relation._id, {
-        status: "accepted",
-        acceptedAt: new Date(),
-      });
-      requestStatus = "accepted";
-    }
-  }
+console.log('🤝 Relation check:', { 
+  senderId: Id_sender.toString(), 
+  receiverId: receiverId.toString(), 
+  relationExists: !!relation,
+  isContact, 
+  isMessageRequest 
+});
+
   // === FIN AJOUT ===
 
-  let finalConversationId = conversationId;
-  if (!conversationId) {
-    const conv = await conversationController.getOrCreateConversation(
-      Id_sender,
-      receiverId
-    );
-    finalConversationId = conv._id;
-  }
+let finalConversationId = conversationId;
+if (!conversationId) {
+  const conv = await conversationController.getOrCreateConversation(
+    Id_sender,
+    receiverId
+  );
+  finalConversationId = conv._id;
+}
 
-  // Marquer la conversation comme demande si besoin
-  if (isMessageRequest) {
-    await Conversation.findByIdAndUpdate(finalConversationId, {
+if (isMessageRequest) {
+  // C'est une demande de message → garder les flags
+  await Conversation.findByIdAndUpdate(finalConversationId, {
+    $set: {
       isMessageRequest: true,
-      messageRequestFor: receiverId,
       messageRequestFrom: Id_sender,
-    });
-    
-  } else {
-    await Conversation.findByIdAndUpdate(finalConversationId, {
-      $set: { isMessageRequest: false, messageRequestFor: null, messageRequestFrom: null },
-    });
-  }
+      messageRequestFor: receiverId
+    }
+  });
+  console.log('📨 Message Request activé pour conv:', finalConversationId);
+} else {
+  // Relation accepted → retirer les flags
+  await Conversation.findByIdAndUpdate(finalConversationId, {
+    $set: { isMessageRequest: false },
+    $unset: { messageRequestFrom: "", messageRequestFor: "" }
+  });
+  console.log('✅ Conversation normale (contacts)');
+}
+
 
   
 
-  const encryptedContent = typeMessage === 'text' ? encryptContent(content.trim()) : content;
+const encryptedContent = typeMessage === 'text' 
+  ? encryptContent(content.trim()) 
+  : content;
 
     // CORRIGÉ : On sauvegarde aussi les métadonnées image/video/file dans la BDD
   const message = new Message({
@@ -304,76 +296,81 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     Id_sender,
     content: encryptedContent,
     typeMessage,
-    status: requestStatus === "accepted" ? "sent" : "pending",
-    isPendingRequest: requestStatus !== "accepted", // ← ajoute cette ligne
+    status: "sent",
     time: new Date(),
     readBy: [],
     unreadFor: [],
 
     // AJOUT CRUCIAL : sauvegarde des infos multimédia dans MongoDB
-    ...(typeMessage === 'image' && additionalData.imageInfo && { imageInfo: additionalData.imageInfo }),
-    ...(typeMessage === 'video' && additionalData.videoInfo && { videoInfo: additionalData.videoInfo }),
-    ...(typeMessage === 'file' && additionalData.fileInfo && { fileInfo: additionalData.fileInfo })
-
+  ...(typeMessage === 'image' && additionalData.imageInfo && { 
+    imageInfo: additionalData.imageInfo 
+  }),
+  ...(typeMessage === 'video' && additionalData.videoInfo && { 
+    videoInfo: additionalData.videoInfo 
+  }),
+  ...(typeMessage === 'file' && additionalData.fileInfo && { 
+    fileInfo: additionalData.fileInfo 
+  })
   });
+
   const savedMessage = await message.save();
+console.log('💾 Message sauvegardé:', savedMessage._id);
 
     
 
   // === AJOUT : Mise à jour unreadCounts SEULEMENT si la relation est acceptée ===
-  if (requestStatus === "accepted") {
-    try {
-      const participants = await Participants.find({
-        Id_Conversation: finalConversationId,
+try {
+  const participants = await Participants.find({
+    Id_Conversation: finalConversationId,
+  });
+
+  const bulkOperations = [];
+  const participantsToNotify = [];
+
+  for (const participant of participants) {
+    if (participant.Id_User.toString() !== Id_sender.toString()) {
+      participantsToNotify.push(participant.Id_User);
+      bulkOperations.push({
+        updateOne: {
+          filter: {
+            _id: finalConversationId,
+            "unreadCounts.userId": participant.Id_User,
+          },
+          update: {
+            $inc: { "unreadCounts.$.count": 1 },
+            $set: { lastMessageAt: new Date() },
+          },
+        },
       });
-      const bulkOperations = [];
-      const participantsToNotify = [];
-
-      for (const participant of participants) {
-        if (participant.Id_User.toString() !== Id_sender.toString()) {
-          participantsToNotify.push(participant.Id_User);
-          bulkOperations.push({
-            updateOne: {
-              filter: {
-                _id: finalConversationId,
-                "unreadCounts.userId": participant.Id_User,
-              },
-              update: {
-                $inc: { "unreadCounts.$.count": 1 },
-                $set: { lastMessageAt: new Date() },
-              },
-            },
-          });
-        }
-      }
-
-      if (bulkOperations.length > 0) {
-        await Conversation.bulkWrite(bulkOperations);
-        const conv = await Conversation.findById(finalConversationId);
-        const missing = [];
-        for (const uid of participantsToNotify) {
-          if (
-            !conv.unreadCounts?.some(
-              (u) => u.userId.toString() === uid.toString()
-            )
-          ) {
-            missing.push({
-              updateOne: {
-                filter: { _id: finalConversationId },
-                update: {
-                  $push: { unreadCounts: { userId: uid, count: 1 } },
-                  $set: { lastMessageAt: new Date() },
-                },
-              },
-            });
-          }
-        }
-        if (missing.length > 0) await Conversation.bulkWrite(missing);
-      }
-    } catch (error) {
-      console.error("Erreur mise à jour compteurs:", error.message);
     }
   }
+
+  if (bulkOperations.length > 0) {
+    await Conversation.bulkWrite(bulkOperations);
+    
+    // Vérif utilisateurs manquants dans unreadCounts
+    const conv = await Conversation.findById(finalConversationId);
+    const missing = [];
+    
+    for (const uid of participantsToNotify) {
+      if (!conv.unreadCounts?.some(u => u.userId.toString() === uid.toString())) {
+        missing.push({
+          updateOne: {
+            filter: { _id: finalConversationId },
+            update: {
+              $push: { unreadCounts: { userId: uid, count: 1 } },
+              $set: { lastMessageAt: new Date() },
+            },
+          },
+        });
+      }
+    }
+    
+    if (missing.length > 0) await Conversation.bulkWrite(missing);
+  }
+} catch (error) {
+  console.error("❌ Erreur mise à jour compteurs:", error.message);
+}
   // === FIN AJOUT ===
 
   try {
