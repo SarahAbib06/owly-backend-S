@@ -48,64 +48,72 @@ export const configureChatSockets = (io) => {
 
     let presenceInterval = null;
     
-// ==================== 📞 APPELS VIDÉO AGORA ====================
+// ==================== 📞 SYSTEME D'APPELS UNIFIE (AUDIO + VIDEO) ====================
 
-// Configuration Agora
 const AGORA_APP_ID = process.env.AGORA_APP_ID;
 
-socket.on("initiate-video-call", async (data) => {
+// 🔁 INITIER UN APPEL (audio ou vidéo)
+socket.on("initiate-call", async (data) => {
   try {
-    const { chatId, channelName, callerId, callerName, recipientId } = data;
+    const { chatId, channelName, callerId, callerName, recipientId, callType } = data;
     const currentUserId = socket.userId;
 
-    console.log(`📞 Appel vidéo initié: ${callerId} -> ${recipientId}`, {
-      channelName,
-      chatId,
-      callerName
+    console.log(`📞 Appel ${callType} initié: ${callerId} -> ${recipientId}`, {
+      channelName, chatId, callerName
     });
 
-    // Vérifier que l'appelant est bien l'utilisateur authentifié
+    // Validation du type d'appel
+    if (!["audio", "video"].includes(callType)) {
+      return socket.emit("call-error", {
+        error: "Invalid call type",
+        code: "TYPE_ERROR"
+      });
+    }
+
+    // Vérification d'authentification
     if (currentUserId !== callerId) {
-      console.warn(`⚠️ Tentative d'appel frauduleuse: ${currentUserId} essaie d'émettre comme ${callerId}`);
+      console.warn(`⚠️ Tentative d'appel frauduleuse: ${currentUserId} -> ${callerId}`);
       return socket.emit("call-error", {
         error: "Authentication mismatch",
         code: "AUTH_ERROR"
       });
     }
 
-    // Vérifier si le destinataire est connecté
-    const recipientSockets = Array.from(io.sockets.sockets.values())
-      .filter(s => s.userId === recipientId);
-
-    if (recipientSockets.length === 0) {
+    // Vérifier si le destinataire est en ligne
+    const recipientSockets = getSocketsByUserId(recipientId);
+    
+    if (!recipientSockets.length) {
       console.log(`❌ ${recipientId} est hors ligne`);
       return socket.emit("call-failed", {
         reason: "user_offline",
         recipientId,
         channelName,
+        callType,
         timestamp: new Date().toISOString()
       });
     }
 
-    // Émettre à tous les sockets du destinataire (multi-appareils)
+    // Notifier tous les appareils du destinataire
     recipientSockets.forEach(recipientSocket => {
-      recipientSocket.emit("incoming-video-call", {
+      recipientSocket.emit("incoming-call", {
         chatId,
         channelName,
         callerId,
         callerName,
         callerSocketId: socket.id,
-        timestamp: new Date().toISOString(),
-        agoraAppId: AGORA_APP_ID
+        callType,
+        agoraAppId: AGORA_APP_ID,
+        timestamp: new Date().toISOString()
       });
     });
 
-    console.log(`📱 Notification envoyée à ${recipientId} (${recipientSockets.length} appareils)`);
+    console.log(`📱 Notification ${callType} envoyée à ${recipientId} (${recipientSockets.length} appareils)`);
     
     // Confirmation à l'appelant
     socket.emit("call-initiated", {
       channelName,
       recipientId,
+      callType,
       timestamp: new Date().toISOString()
     });
 
@@ -118,15 +126,17 @@ socket.on("initiate-video-call", async (data) => {
   }
 });
 
-socket.on("accept-video-call", (data) => {
+// ✅ ACCEPTER UN APPEL
+socket.on("accept-call", (data) => {
   try {
-    const { channelName, callerId, callerSocketId } = data;
+    const { channelName, callerSocketId, callType } = data;
     const acceptorId = socket.userId;
 
-    console.log(`✅ Appel accepté: ${acceptorId} -> ${callerId}`, { channelName });
+    console.log(`✅ Appel ${callType} accepté par: ${acceptorId}`, { channelName });
 
     // Trouver le socket de l'appelant
-    const callerSocket = io.sockets.sockets.get(callerSocketId);
+    const callerSocket = getSocketById(callerSocketId);
+    
     if (!callerSocket) {
       console.warn(`❌ Socket appelant ${callerSocketId} non trouvé`);
       return socket.emit("call-error", {
@@ -136,25 +146,26 @@ socket.on("accept-video-call", (data) => {
     }
 
     // Notifier l'appelant
-    callerSocket.emit("video-call-accepted", {
+    callerSocket.emit("call-accepted", {
       channelName,
       acceptorId,
       acceptorSocketId: socket.id,
+      callType,
       timestamp: new Date().toISOString()
     });
 
     // Confirmation à l'accepteur
     socket.emit("call-accepted-success", {
       channelName,
-      callerId,
+      callType,
       timestamp: new Date().toISOString()
     });
 
-    // Les deux utilisateurs rejoignent la room du canal
-    socket.join(channelName);
-    callerSocket.join(channelName);
+    // Rejoindre la room du canal
+    joinCallRoom(socket, channelName);
+    joinCallRoom(callerSocket, channelName);
     
-    console.log(`👥 ${callerId} et ${acceptorId} ont rejoint ${channelName}`);
+    console.log(`👥 Participants dans ${channelName}: ${acceptorId}, ${callerSocket.userId}`);
 
   } catch (error) {
     console.error("💥 Erreur acceptation appel:", error);
@@ -165,27 +176,29 @@ socket.on("accept-video-call", (data) => {
   }
 });
 
-socket.on("reject-video-call", (data) => {
+// ❌ REFUSER UN APPEL
+socket.on("reject-call", (data) => {
   try {
-    const { channelName, callerId, callerSocketId, reason } = data;
+    const { channelName, callerSocketId, callType, reason } = data;
     const rejectorId = socket.userId;
 
-    console.log(`❌ Appel refusé: ${rejectorId} -> ${callerId}`, { reason });
+    console.log(`❌ Appel ${callType} refusé par: ${rejectorId}`, { reason });
 
-    // Trouver le socket de l'appelant
-    const callerSocket = io.sockets.sockets.get(callerSocketId);
+    const callerSocket = getSocketById(callerSocketId);
+    
     if (callerSocket) {
-      callerSocket.emit("video-call-rejected", {
+      callerSocket.emit("call-rejected", {
         channelName,
         rejectorId,
         reason: reason || "busy",
+        callType,
         timestamp: new Date().toISOString()
       });
     }
 
     socket.emit("call-rejected-success", {
       channelName,
-      callerId,
+      callType,
       timestamp: new Date().toISOString()
     });
 
@@ -198,41 +211,28 @@ socket.on("reject-video-call", (data) => {
   }
 });
 
-socket.on("end-video-call", (data) => {
+// 📞 TERMINER UN APPEL
+socket.on("end-call", (data) => {
   try {
-    const { channelName, recipientIds } = data;
+    const { channelName, callType } = data;
     const endedBy = socket.userId;
 
-    console.log(`📞 Appel terminé par ${endedBy} dans ${channelName}`);
-
-    // Notifier tous les participants spécifiques
-    if (Array.isArray(recipientIds)) {
-      recipientIds.forEach(recipientId => {
-        const recipientSockets = Array.from(io.sockets.sockets.values())
-          .filter(s => s.userId === recipientId);
-        
-        recipientSockets.forEach(recipientSocket => {
-          recipientSocket.emit("video-call-ended", {
-            channelName,
-            endedBy,
-            timestamp: new Date().toISOString()
-          });
-        });
-      });
-    }
+    console.log(`📞 Appel ${callType} terminé par ${endedBy} dans ${channelName}`);
 
     // Notifier tous les membres de la room
-    io.to(channelName).emit("video-call-ended", {
+    io.to(channelName).emit("call-ended", {
       channelName,
       endedBy,
+      callType,
       timestamp: new Date().toISOString()
     });
 
     // Quitter la room
-    socket.leave(channelName);
+    leaveCallRoom(socket, channelName);
 
     socket.emit("call-ended-success", {
       channelName,
+      callType,
       timestamp: new Date().toISOString()
     });
 
@@ -245,51 +245,38 @@ socket.on("end-video-call", (data) => {
   }
 });
 
-socket.on("join-call-room", (roomId) => {
-  try {
-    socket.join(roomId);
-    console.log(`👤 ${socket.userId} a rejoint la room d'appel: ${roomId}`);
+// ==================== 🎯 FONCTIONS UTILITAIRES ====================
 
-    // Notifier les autres dans la room
-    socket.to(roomId).emit("user-joined-call-room", {
-      userId: socket.userId,
-      roomId,
-      socketId: socket.id,
-      timestamp: new Date().toISOString()
-    });
+function getSocketsByUserId(userId) {
+  return Array.from(io.sockets.sockets.values())
+    .filter(socket => socket.userId === userId);
+}
 
-    socket.emit("room-joined", {
-      roomId,
-      timestamp: new Date().toISOString()
-    });
+function getSocketById(socketId) {
+  return io.sockets.sockets.get(socketId);
+}
 
-  } catch (error) {
-    console.error("💥 Erreur join room:", error);
-    socket.emit("call-error", {
-      error: error.message,
-      code: "JOIN_ERROR"
-    });
-  }
-});
+function joinCallRoom(socket, roomId) {
+  socket.join(roomId);
+  socket.to(roomId).emit("user-joined-call", {
+    userId: socket.userId,
+    roomId,
+    socketId: socket.id,
+    timestamp: new Date().toISOString()
+  });
+}
 
-socket.on("leave-call-room", (roomId) => {
-  try {
-    socket.leave(roomId);
-    console.log(`👤 ${socket.userId} a quitté la room d'appel: ${roomId}`);
+function leaveCallRoom(socket, roomId) {
+  socket.leave(roomId);
+  socket.to(roomId).emit("user-left-call", {
+    userId: socket.userId,
+    roomId,
+    timestamp: new Date().toISOString()
+  });
+}
 
-    // Notifier les autres dans la room
-    socket.to(roomId).emit("user-left-call-room", {
-      userId: socket.userId,
-      roomId,
-      timestamp: new Date().toISOString()
-    });
+// ==================== 📡 SIGNALISATION WEBRTC (Commun) ====================
 
-  } catch (error) {
-    console.error("💥 Erreur leave room:", error);
-  }
-});
-
-// Signalisation WebRTC pour les données d'appel
 socket.on("webrtc-signal", (data) => {
   try {
     const { toUserId, signal, type, channelName } = data;
@@ -297,11 +284,7 @@ socket.on("webrtc-signal", (data) => {
 
     console.log(`📡 Signal ${type} de ${fromUserId} vers ${toUserId}`);
 
-    // Trouver les sockets du destinataire
-    const recipientSockets = Array.from(io.sockets.sockets.values())
-      .filter(s => s.userId === toUserId);
-
-    recipientSockets.forEach(recipientSocket => {
+    getSocketsByUserId(toUserId).forEach(recipientSocket => {
       recipientSocket.emit("webrtc-signal", {
         fromUserId,
         signal,
@@ -316,14 +299,24 @@ socket.on("webrtc-signal", (data) => {
   }
 });
 
-// Ping/pong pour vérifier la connexion pendant l'appel
+// ==================== 🔧 GESTION APPEL EN COURS ====================
+
+socket.on("call-status-change", (data) => {
+  const { channelName, statusType, statusValue } = data;
+  
+  socket.to(channelName).emit("user-call-status-changed", {
+    userId: socket.userId,
+    channelName,
+    statusType, // 'audio', 'video', 'screen'
+    statusValue, // true/false
+    timestamp: new Date().toISOString()
+  });
+});
+
 socket.on("call-ping", (data) => {
   const { toUserId, channelName } = data;
   
-  const recipientSockets = Array.from(io.sockets.sockets.values())
-    .filter(s => s.userId === toUserId);
-
-  recipientSockets.forEach(recipientSocket => {
+  getSocketsByUserId(toUserId).forEach(recipientSocket => {
     recipientSocket.emit("call-pong", {
       fromUserId: socket.userId,
       channelName,
@@ -332,67 +325,17 @@ socket.on("call-ping", (data) => {
   });
 });
 
-// Changement de statut pendant l'appel (micro, caméra, etc.)
-socket.on("call-status-change", (data) => {
-  const { channelName, statusType, statusValue, toUserIds } = data;
-  
-  // Émettre aux utilisateurs spécifiques
-  if (Array.isArray(toUserIds)) {
-    toUserIds.forEach(toUserId => {
-      const recipientSockets = Array.from(io.sockets.sockets.values())
-        .filter(s => s.userId === toUserId);
-
-      recipientSockets.forEach(recipientSocket => {
-        recipientSocket.emit("user-call-status-changed", {
-          userId: socket.userId,
-          channelName,
-          statusType, // 'audio', 'video', 'screen'
-          statusValue, // true/false
-          timestamp: new Date().toISOString()
-        });
-      });
-    });
-  }
-  
-  // Émettre aussi à toute la room
-  socket.to(channelName).emit("user-call-status-changed", {
-    userId: socket.userId,
-    channelName,
-    statusType,
-    statusValue,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Gestion des erreurs techniques
-socket.on("call-technical-issue", (data) => {
-  const { channelName, issue, details } = data;
-  
-  console.warn(`⚠️ Problème technique dans ${channelName}: ${issue}`, details);
-  
-  // Loguer pour le debug
-  socket.to(channelName).emit("call-technical-notification", {
-    userId: socket.userId,
-    channelName,
-    issue,
-    timestamp: new Date().toISOString()
-  });
-});
-
 // Récupérer les participants d'un appel
 socket.on("get-call-participants", async (data) => {
   try {
     const { channelName } = data;
-    
-    // Récupérer tous les sockets dans la room
-    const roomSockets = io.sockets.adapter.rooms.get(channelName);
+    const room = io.sockets.adapter.rooms.get(channelName);
     const participants = [];
     
-    if (roomSockets) {
-      for (const socketId of roomSockets) {
-        const socket = io.sockets.sockets.get(socketId);
-        if (socket && socket.userId) {
-          // Récupérer les infos utilisateur
+    if (room) {
+      for (const socketId of room) {
+        const socket = getSocketById(socketId);
+        if (socket?.userId) {
           const user = await User.findById(socket.userId).select('username avatar status');
           if (user) {
             participants.push({
@@ -422,358 +365,30 @@ socket.on("get-call-participants", async (data) => {
     });
   }
 });
-// ==================== 🎧 APPELS AUDIO AGORA ====================
 
-socket.on("initiate-audio-call", async (data) => {
+// ==================== 📍 GESTION DES ROOMS ====================
+
+socket.on("join-call-room", (roomId) => {
   try {
-    const { chatId, channelName, callerId, callerName, recipientId } = data;
-    const currentUserId = socket.userId;
-
-    console.log(`🎧 Appel audio initié: ${callerId} -> ${recipientId}`, {
-      channelName,
-      chatId,
-      callerName,
-      type: 'audio'
-    });
-
-    // Vérifier que l'appelant est bien l'utilisateur authentifié
-    if (currentUserId !== callerId) {
-      console.warn(`⚠️ Tentative d'appel audio frauduleuse: ${currentUserId} essaie d'émettre comme ${callerId}`);
-      return socket.emit("audio-call-error", {
-        error: "Authentication mismatch",
-        code: "AUTH_ERROR"
-      });
-    }
-
-    // Vérifier si le destinataire est connecté
-    const recipientSockets = Array.from(io.sockets.sockets.values())
-      .filter(s => s.userId === recipientId);
-
-    if (recipientSockets.length === 0) {
-      console.log(`❌ ${recipientId} est hors ligne (appel audio)`);
-      return socket.emit("audio-call-failed", {
-        reason: "user_offline",
-        recipientId,
-        channelName,
-        type: 'audio',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    // Émettre à tous les sockets du destinataire
-    recipientSockets.forEach(recipientSocket => {
-      recipientSocket.emit("incoming-audio-call", {
-        chatId,
-        channelName,
-        callerId,
-        callerName,
-        callerSocketId: socket.id,
-        timestamp: new Date().toISOString(),
-        agoraAppId: AGORA_APP_ID,
-        type: 'audio'
-      });
-    });
-
-    console.log(`📱 Notification audio envoyée à ${recipientId} (${recipientSockets.length} appareils)`);
-    
-    // Confirmation à l'appelant
-    socket.emit("audio-call-initiated", {
-      channelName,
-      recipientId,
-      type: 'audio',
+    joinCallRoom(socket, roomId);
+    socket.emit("room-joined", {
+      roomId,
       timestamp: new Date().toISOString()
     });
-
   } catch (error) {
-    console.error("💥 Erreur initiation appel audio:", error);
-    socket.emit("audio-call-error", {
+    console.error("💥 Erreur join room:", error);
+    socket.emit("call-error", {
       error: error.message,
-      code: "INIT_ERROR",
-      type: 'audio'
+      code: "JOIN_ERROR"
     });
   }
 });
 
-socket.on("accept-audio-call", (data) => {
+socket.on("leave-call-room", (roomId) => {
   try {
-    const { channelName, callerId, callerSocketId } = data;
-    const acceptorId = socket.userId;
-
-    console.log(`✅ Appel audio accepté: ${acceptorId} -> ${callerId}`, { 
-      channelName,
-      type: 'audio'
-    });
-
-    // Trouver le socket de l'appelant
-    const callerSocket = io.sockets.sockets.get(callerSocketId);
-    if (!callerSocket) {
-      console.warn(`❌ Socket appelant ${callerSocketId} non trouvé (audio)`);
-      return socket.emit("audio-call-error", {
-        error: "Caller not connected",
-        code: "CALLER_OFFLINE",
-        type: 'audio'
-      });
-    }
-
-    // Notifier l'appelant
-    callerSocket.emit("audio-call-accepted", {
-      channelName,
-      acceptorId,
-      acceptorSocketId: socket.id,
-      type: 'audio',
-      timestamp: new Date().toISOString()
-    });
-
-    // Confirmation à l'accepteur
-    socket.emit("audio-call-accepted-success", {
-      channelName,
-      callerId,
-      type: 'audio',
-      timestamp: new Date().toISOString()
-    });
-
-    // Les deux utilisateurs rejoignent la room du canal
-    socket.join(channelName);
-    callerSocket.join(channelName);
-    
-    console.log(`👥 ${callerId} et ${acceptorId} ont rejoint ${channelName} (audio)`);
-
+    leaveCallRoom(socket, roomId);
   } catch (error) {
-    console.error("💥 Erreur acceptation appel audio:", error);
-    socket.emit("audio-call-error", {
-      error: error.message,
-      code: "ACCEPT_ERROR",
-      type: 'audio'
-    });
-  }
-});
-
-socket.on("reject-audio-call", (data) => {
-  try {
-    const { channelName, callerId, callerSocketId, reason } = data;
-    const rejectorId = socket.userId;
-
-    console.log(`❌ Appel audio refusé: ${rejectorId} -> ${callerId}`, { 
-      reason,
-      type: 'audio'
-    });
-
-    // Trouver le socket de l'appelant
-    const callerSocket = io.sockets.sockets.get(callerSocketId);
-    if (callerSocket) {
-      callerSocket.emit("audio-call-rejected", {
-        channelName,
-        rejectorId,
-        reason: reason || "busy",
-        type: 'audio',
-        timestamp: new Date().toISOString()
-      });
-    }
-
-    socket.emit("audio-call-rejected-success", {
-      channelName,
-      callerId,
-      type: 'audio',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error("💥 Erreur rejet appel audio:", error);
-    socket.emit("audio-call-error", {
-      error: error.message,
-      code: "REJECT_ERROR",
-      type: 'audio'
-    });
-  }
-});
-
-socket.on("end-audio-call", (data) => {
-  try {
-    const { channelName, recipientIds } = data;
-    const endedBy = socket.userId;
-
-    console.log(`🎧 Appel audio terminé par ${endedBy} dans ${channelName}`);
-
-    // Notifier tous les participants spécifiques
-    if (Array.isArray(recipientIds)) {
-      recipientIds.forEach(recipientId => {
-        const recipientSockets = Array.from(io.sockets.sockets.values())
-          .filter(s => s.userId === recipientId);
-        
-        recipientSockets.forEach(recipientSocket => {
-          recipientSocket.emit("audio-call-ended", {
-            channelName,
-            endedBy,
-            type: 'audio',
-            timestamp: new Date().toISOString()
-          });
-        });
-      });
-    }
-
-    // Notifier tous les membres de la room
-    io.to(channelName).emit("audio-call-ended", {
-      channelName,
-      endedBy,
-      type: 'audio',
-      timestamp: new Date().toISOString()
-    });
-
-    // Quitter la room
-    socket.leave(channelName);
-
-    socket.emit("audio-call-ended-success", {
-      channelName,
-      type: 'audio',
-      timestamp: new Date().toISOString()
-    });
-
-  } catch (error) {
-    console.error("💥 Erreur fin d'appel audio:", error);
-    socket.emit("audio-call-error", {
-      error: error.message,
-      code: "END_ERROR",
-      type: 'audio'
-    });
-  }
-});
-
-// ==================== 🎯 ÉVÉNEMENTS COMMUNS (audio/vidéo) ====================
-
-// Signalisation WebRTC pour les données d'appel (commun audio/vidéo)
-socket.on("webrtc-signal-audio", (data) => {
-  try {
-    const { toUserId, signal, type, channelName } = data;
-    const fromUserId = socket.userId;
-
-    console.log(`📡 Signal audio ${type} de ${fromUserId} vers ${toUserId}`);
-
-    // Trouver les sockets du destinataire
-    const recipientSockets = Array.from(io.sockets.sockets.values())
-      .filter(s => s.userId === toUserId);
-
-    recipientSockets.forEach(recipientSocket => {
-      recipientSocket.emit("webrtc-signal-audio", {
-        fromUserId,
-        signal,
-        type,
-        channelName,
-        timestamp: new Date().toISOString()
-      });
-    });
-
-  } catch (error) {
-    console.error("💥 Erreur signal WebRTC audio:", error);
-  }
-});
-
-// Ping/pong pour vérifier la connexion pendant l'appel audio
-socket.on("audio-call-ping", (data) => {
-  const { toUserId, channelName } = data;
-  
-  const recipientSockets = Array.from(io.sockets.sockets.values())
-    .filter(s => s.userId === toUserId);
-
-  recipientSockets.forEach(recipientSocket => {
-    recipientSocket.emit("audio-call-pong", {
-      fromUserId: socket.userId,
-      channelName,
-      timestamp: new Date().toISOString()
-    });
-  });
-});
-
-// Changement de statut pendant l'appel audio (micro, etc.)
-socket.on("audio-call-status-change", (data) => {
-  const { channelName, statusType, statusValue, toUserIds } = data;
-  
-  // Émettre aux utilisateurs spécifiques
-  if (Array.isArray(toUserIds)) {
-    toUserIds.forEach(toUserId => {
-      const recipientSockets = Array.from(io.sockets.sockets.values())
-        .filter(s => s.userId === toUserId);
-
-      recipientSockets.forEach(recipientSocket => {
-        recipientSocket.emit("user-audio-call-status-changed", {
-          userId: socket.userId,
-          channelName,
-          statusType, // 'audio', 'speaker'
-          statusValue, // true/false
-          timestamp: new Date().toISOString()
-        });
-      });
-    });
-  }
-  
-  // Émettre aussi à toute la room
-  socket.to(channelName).emit("user-audio-call-status-changed", {
-    userId: socket.userId,
-    channelName,
-    statusType,
-    statusValue,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Gestion des erreurs techniques audio
-socket.on("audio-call-technical-issue", (data) => {
-  const { channelName, issue, details } = data;
-  
-  console.warn(`⚠️ Problème technique audio dans ${channelName}: ${issue}`, details);
-  
-  // Loguer pour le debug
-  socket.to(channelName).emit("audio-call-technical-notification", {
-    userId: socket.userId,
-    channelName,
-    issue,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Récupérer les participants d'un appel audio
-socket.on("get-audio-call-participants", async (data) => {
-  try {
-    const { channelName } = data;
-    
-    // Récupérer tous les sockets dans la room
-    const roomSockets = io.sockets.adapter.rooms.get(channelName);
-    const participants = [];
-    
-    if (roomSockets) {
-      for (const socketId of roomSockets) {
-        const socket = io.sockets.sockets.get(socketId);
-        if (socket && socket.userId) {
-          // Récupérer les infos utilisateur
-          const user = await User.findById(socket.userId).select('username avatar status');
-          if (user) {
-            participants.push({
-              userId: socket.userId,
-              username: user.username,
-              avatar: user.avatar,
-              status: user.status,
-              socketId: socket.id,
-              callType: 'audio'
-            });
-          }
-        }
-      }
-    }
-    
-    socket.emit("audio-call-participants-list", {
-      channelName,
-      participants,
-      count: participants.length,
-      callType: 'audio',
-      timestamp: new Date().toISOString()
-    });
-    
-  } catch (error) {
-    console.error("💥 Erreur récupération participants audio:", error);
-    socket.emit("audio-call-error", {
-      error: error.message,
-      code: "PARTICIPANTS_ERROR",
-      callType: 'audio'
-    });
+    console.error("💥 Erreur leave room:", error);
   }
 });
 
