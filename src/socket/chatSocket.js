@@ -47,7 +47,6 @@ export const configureChatSockets = (io) => {
     console.log("🔗 User connecté:", socket.userId, "- Socket:", socket.id);
 
     let presenceInterval = null;
-    
 
     // ==================== 🎯 RÉACTIONS EN TEMPS RÉEL ====================
 

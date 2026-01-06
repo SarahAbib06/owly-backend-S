@@ -6,7 +6,6 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import path from "path";
 import { fileURLToPath } from "url";
-import jwt from "jsonwebtoken";
 
 // 🔹 DB & Models
 import connectDB from "./src/config/db.js";
@@ -24,6 +23,8 @@ import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutes from "./src/routes/relation.js";
 
 // 🔹 Sockets
+import setupVideoCall from "./src/socket/videoCall.js";
+//import setupGroupVideoCall from "./src/socket/groupVideoCall.js";
 import { configureChatSockets } from "./src/socket/chatSocket.js";
 
 // 🔹 Participants
@@ -37,7 +38,7 @@ const __dirname = path.dirname(__filename);
 console.log("🔍 MONGODB_URI:", process.env.MONGODB_URI ? "✅ Chargé" : "❌ Non défini");
 console.log("🔍 JWT_SECRET:", process.env.JWT_SECRET ? "✅ Chargé" : "❌ Non défini");
 
-// 🔹 Initialisation d'Express
+// 🔹 Initialisation d’Express
 const app = express();
 const httpServer = createServer(app);
 
@@ -83,45 +84,13 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e8,
 });
 
-// 🔹 Middleware d'authentification global pour Socket.IO
-io.use(async (socket, next) => {
-  try {
-    console.log("🔑 Tentative auth WebSocket...");
-    
-    const token = socket.handshake.auth.token || 
-                  socket.handshake.headers.authorization;
-    
-    if (!token) {
-      console.log("❌ Token manquant dans handshake");
-      return next(new Error("Token manquant"));
-    }
-
-    const cleanToken = token.replace("Bearer ", "");
-    const decoded = jwt.verify(cleanToken, process.env.JWT_SECRET);
-    
-    const user = await User.findById(decoded.id);
-    if (!user) {
-      console.log("❌ Utilisateur non trouvé:", decoded.id);
-      return next(new Error("Utilisateur non trouvé"));
-    }
-
-    socket.userId = user._id.toString();
-    socket.username = user.username;
-    
-    console.log("✅ User authentifié:", socket.userId, socket.username);
-    next();
-    
-  } catch (error) {
-    console.error("❌ Auth WebSocket failed:", error.message);
-    next(new Error("Authentication failed"));
-  }
-});
+// 🔹 Attacher io à l’app pour y avoir accès partout
+app.set("io", io);
 
 // 🔹 Configurer les sockets
-configureChatSockets(io);                     // Chat instantané
-
-// 🔹 Attacher io à l'app pour y avoir accès partout
-app.set("io", io);
+setupVideoCall(io);        // Appels vidéo 1-to-1
+//setupGroupVideoCall(io);  //  Appels vidéo de groupe
+configureChatSockets(io);  // Chat instantané
 
 // 🔹 Nettoyage des participants orphelins
 (async () => {
@@ -145,38 +114,6 @@ app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
 app.use("/api", searchRelationsRoutes);
 
-// 🔹 Route pour vérifier l'état des appels (pour debug)
-app.get("/api/calls/active", (req, res) => {
-  try {
-    const activeCalls = videoCallHandler?.getActiveCalls ? 
-      videoCallHandler.getActiveCalls() : [];
-    res.json({
-      success: true,
-      count: activeCalls.length,
-      calls: activeCalls
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// 🔹 Gestion des erreurs 404
-app.use((req, res, next) => {
-  res.status(404).json({ error: "Route non trouvée" });
-});
-
-// 🔹 Gestion des erreurs globales
-app.use((err, req, res, next) => {
-  console.error("💥 Erreur serveur:", err.stack);
-  res.status(err.status || 500).json({
-    error: process.env.NODE_ENV === "development" ? err.message : "Erreur serveur"
-  });
-});
-
 // 🔹 Démarrage du serveur
 const PORT = process.env.PORT || 5000;
-httpServer.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🌐 WebSocket: ws://localhost:${PORT}`);
-  console.log(`📞 Système d'appels: ACTIF`);
-});
+httpServer.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
