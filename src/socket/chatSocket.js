@@ -51,6 +51,8 @@ export const configureChatSockets = (io) => {
 // ==================== 📞 SYSTEME D'APPELS UNIFIE (AUDIO + VIDEO) ====================
 
 const AGORA_APP_ID = process.env.AGORA_APP_ID;
+// Après la déclaration d'AGORA_APP_ID
+const activeCalls = new Map();
 
 // 🔁 INITIER UN APPEL (audio ou vidéo)
 socket.on("initiate-call", async (data) => {
@@ -134,7 +136,6 @@ socket.on("accept-call", (data) => {
 
     console.log(`✅ Appel ${callType} accepté par: ${acceptorId}`, { channelName });
 
-    // Trouver le socket de l'appelant
     const callerSocket = getSocketById(callerSocketId);
     
     if (!callerSocket) {
@@ -145,7 +146,15 @@ socket.on("accept-call", (data) => {
       });
     }
 
-    // Notifier l'appelant
+    // ✅ ENREGISTRER LE DÉBUT DE L'APPEL
+    activeCalls.set(channelName, {
+      startedAt: Date.now(),
+      callType,
+      callerId: callerSocket.userId,
+      recipientId: acceptorId,
+      channelName
+    });
+
     callerSocket.emit("call-accepted", {
       channelName,
       acceptorId,
@@ -154,14 +163,12 @@ socket.on("accept-call", (data) => {
       timestamp: new Date().toISOString()
     });
 
-    // Confirmation à l'accepteur
     socket.emit("call-accepted-success", {
       channelName,
       callType,
       timestamp: new Date().toISOString()
     });
 
-    // Rejoindre la room du canal
     joinCallRoom(socket, channelName);
     joinCallRoom(callerSocket, channelName);
     
@@ -177,9 +184,9 @@ socket.on("accept-call", (data) => {
 });
 
 // ❌ REFUSER UN APPEL
-socket.on("reject-call", (data) => {
+socket.on("reject-call", async (data) => {
   try {
-    const { channelName, callerSocketId, callType, reason } = data;
+    const { channelName, callerSocketId, callType, reason, chatId } = data;
     const rejectorId = socket.userId;
 
     console.log(`❌ Appel ${callType} refusé par: ${rejectorId}`, { reason });
@@ -194,6 +201,18 @@ socket.on("reject-call", (data) => {
         callType,
         timestamp: new Date().toISOString()
       });
+
+      // 📩 MESSAGE D'APPEL REFUSÉ
+      if (chatId) {
+        io.to(channelName).emit("save-call-message", {
+  chatId,
+  callType,
+  callResult: "rejected",
+  duration: 0,
+  senderId: callerSocket.userId
+});
+
+      }
     }
 
     socket.emit("call-rejected-success", {
@@ -212,43 +231,59 @@ socket.on("reject-call", (data) => {
 });
 
 // 📞 TERMINER UN APPEL
-socket.on("end-call", () => {
+// 📞 TERMINER UN APPEL
+socket.on("end-call", async ({ chatId, channelName }) => {
   try {
     const endedBy = socket.userId;
 
-    // 🔍 retrouver toutes les rooms d'appel du socket
-    const callRooms = [...socket.rooms].filter(r => r.startsWith("call_"));
+    if (!channelName) return;
 
-    callRooms.forEach(channelName => {
-      console.log(`📞 Appel terminé par ${endedBy} dans ${channelName}`);
+    const call = activeCalls.get(channelName);
+    if (!call) {
+      console.warn("⚠️ end-call ignoré (déjà terminé)", channelName);
+      return;
+    }
 
-      // 🔔 notifier TOUS les participants (appelant + receiver)
-      io.to(channelName).emit("call-ended", {
-        channelName,
-        endedBy,
-        timestamp: new Date().toISOString()
+    // 🔒 LOCK — empêcher double exécution
+    activeCalls.delete(channelName);
+
+    const duration = Math.floor(
+      (Date.now() - call.startedAt) / 1000
+    );
+
+    io.to(channelName).emit("call-ended", {
+      channelName,
+      endedBy,
+      duration,
+      timestamp: new Date().toISOString()
+    });
+
+    // 📩 Message UNE SEULE FOIS
+    if (chatId) {
+      io.to(channelName).emit("save-call-message", {
+        chatId,
+        callType: call.callType,
+        callResult: duration < 2 ? "missed" : "ended",
+        duration,
+        senderId: endedBy
       });
+    }
 
-      // 🚪 forcer tout le monde à quitter la room
-      const socketsInRoom = io.sockets.adapter.rooms.get(channelName);
-      if (socketsInRoom) {
-        socketsInRoom.forEach(socketId => {
-          const s = io.sockets.sockets.get(socketId);
-          if (s) {
-            leaveCallRoom(s, channelName);
-          }
-        });
-      }
-    });
+    // 🚪 Force leave
+    const sockets = io.sockets.adapter.rooms.get(channelName);
+    if (sockets) {
+      sockets.forEach(id => {
+        const s = io.sockets.sockets.get(id);
+        s?.leave(channelName);
+      });
+    }
 
-  } catch (error) {
-    console.error("💥 Erreur fin d'appel:", error);
-    socket.emit("call-error", {
-      error: error.message,
-      code: "END_ERROR"
-    });
+  } catch (err) {
+    console.error("💥 end-call error:", err);
   }
 });
+
+
 
 
 // ==================== 🎯 FONCTIONS UTILITAIRES ====================
@@ -466,7 +501,7 @@ socket.on("call-quality-report", (data) => {
     issues
   });
   
-  // Tu peux stocker ces données dans une base pour analyse
+  // Tu peux stocker ces données dans une base pour analysef
   // Par exemple: db.collection('call_metrics').insertOne({...})
 });
 
