@@ -212,41 +212,33 @@ socket.on("reject-call", (data) => {
 });
 
 // 📞 TERMINER UN APPEL
-socket.on("end-call", (data) => {
+socket.on("end-call", () => {
   try {
-    const { channelName, callType, recipientIds = [] } = data;
     const endedBy = socket.userId;
 
-    console.log(`📞 Appel ${callType} terminé par ${endedBy} dans ${channelName}`);
+    // 🔍 retrouver toutes les rooms d'appel du socket
+    const callRooms = [...socket.rooms].filter(r => r.startsWith("call_"));
 
-    // 1️⃣ Notifier la room (sécurité)
-    io.to(channelName).emit("call-ended", {
-      channelName,
-      endedBy,
-      callType,
-      timestamp: new Date().toISOString()
-    });
+    callRooms.forEach(channelName => {
+      console.log(`📞 Appel terminé par ${endedBy} dans ${channelName}`);
 
-    // 2️⃣ Notifier EXPLICITEMENT les autres participants
-    recipientIds.forEach(userId => {
-      const userSocketId = getSocketIdByUserId(userId); // ⚠️ mapping userId -> socketId
-      if (userSocketId) {
-        io.to(userSocketId).emit("call-ended", {
-          channelName,
-          endedBy,
-          callType,
-          timestamp: new Date().toISOString()
+      // 🔔 notifier TOUS les participants (appelant + receiver)
+      io.to(channelName).emit("call-ended", {
+        channelName,
+        endedBy,
+        timestamp: new Date().toISOString()
+      });
+
+      // 🚪 forcer tout le monde à quitter la room
+      const socketsInRoom = io.sockets.adapter.rooms.get(channelName);
+      if (socketsInRoom) {
+        socketsInRoom.forEach(socketId => {
+          const s = io.sockets.sockets.get(socketId);
+          if (s) {
+            leaveCallRoom(s, channelName);
+          }
         });
       }
-    });
-
-    // 3️⃣ Quitter la room APRÈS notification
-    leaveCallRoom(socket, channelName);
-
-    socket.emit("call-ended-success", {
-      channelName,
-      callType,
-      timestamp: new Date().toISOString()
     });
 
   } catch (error) {
