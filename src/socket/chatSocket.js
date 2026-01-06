@@ -4,6 +4,7 @@ import Participants from "../models/Participants.js";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Reaction from "../models/Reaction.js";
+import Call from "../models/Call.js"; // 🆕 IMPORT DU MODÈLE CALL
 import jwt from "jsonwebtoken";
 import { archiveSocketService } from "../services/archiveSocketService.js";
 
@@ -42,6 +43,49 @@ export const configureChatSockets = (io) => {
       next(new Error("Authentication failed"));
     }
   });
+
+  // 🆕 FONCTION POUR SAUVEGARDER UN APPEL DANS LA BDD
+  const saveCallToDB = async (callData) => {
+    try {
+      const { conversationId, callerId, receiverId, callType, status, duration, startTime } = callData;
+      
+      const callRecord = new Call({
+        conversationId,
+        callerId,
+        receiverId,
+        callType,
+        startTime: startTime || new Date(),
+        endTime: new Date(),
+        duration: duration || 0,
+        status
+      });
+      
+      await callRecord.save();
+      console.log(`✅ Appel sauvegardé dans la BDD: ${callRecord._id} (${callType}, ${status}, ${duration}s)`);
+      return callRecord;
+    } catch (error) {
+      console.error('❌ Erreur sauvegarde appel:', error);
+      return null;
+    }
+  };
+
+  // 🆕 FONCTION POUR TROUVER LE RECEIVER ID DANS UNE CONVERSATION
+  const findReceiverId = async (conversationId, callerId) => {
+    try {
+      const participants = await Participants.find({
+        Id_Conversation: conversationId
+      }).lean();
+      
+      const otherParticipant = participants.find(
+        p => p.Id_User.toString() !== callerId.toString()
+      );
+      
+      return otherParticipant?.Id_User || null;
+    } catch (error) {
+      console.error('❌ Erreur recherche receiverId:', error);
+      return null;
+    }
+  };
 
   io.on("connection", (socket) => {
     console.log("🔗 User connecté:", socket.userId, "- Socket:", socket.id);
@@ -563,12 +607,12 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // ==================== 📞 ÉVÉNEMENTS D'APPEL (MANQUÉ ET TERMINÉ) ====================
+    // ==================== 📞 ÉVÉNEMENTS D'APPEL (MANQUÉ ET TERMINÉ) AVEC SAUVEGARDE BDD ====================
 
     // Événement quand un appel est refusé ou manqué
     socket.on("call-missed", async (data) => {
       try {
-        const { conversationId, callType } = data;
+        const { conversationId, callType, reason = 'missed', startTime } = data;
         const callerId = socket.userId;
 
         if (!conversationId || !callType) {
@@ -576,7 +620,21 @@ export const configureChatSockets = (io) => {
           return;
         }
 
-        console.log(`📞 Appel ${callType} manqué - Création message`);
+        console.log(`📞 Appel ${callType} manqué (${reason}) - Création message`);
+
+        // 🆕 SAUVEGARDER L'APPEL MANQUÉ DANS LA BDD
+        const receiverId = await findReceiverId(conversationId, callerId);
+        if (receiverId) {
+          await saveCallToDB({
+            conversationId,
+            callerId,
+            receiverId,
+            callType,
+            status: reason,
+            duration: 0,
+            startTime
+          });
+        }
 
         // Créer un message d'appel manqué
         const result = await messageController.createCallMessage(
@@ -604,7 +662,7 @@ export const configureChatSockets = (io) => {
     // Événement quand un appel se termine (après acceptation)
     socket.on("call-ended", async (data) => {
       try {
-        const { conversationId, callType, duration, initiatorId } = data;
+        const { conversationId, callType, duration, initiatorId, startTime } = data;
         // Utiliser initiatorId s'il est fourni, sinon utiliser socket.userId
         const callerId = initiatorId || socket.userId;
 
@@ -614,6 +672,20 @@ export const configureChatSockets = (io) => {
         }
 
         console.log(`📞 Appel ${callType} terminé - Durée: ${duration}s - Création message par: ${callerId}`);
+
+        // 🆕 SAUVEGARDER L'APPEL TERMINÉ DANS LA BDD
+        const receiverId = await findReceiverId(conversationId, callerId);
+        if (receiverId) {
+          await saveCallToDB({
+            conversationId,
+            callerId,
+            receiverId,
+            callType,
+            status: 'completed',
+            duration,
+            startTime
+          });
+        }
 
         // Créer un message d'appel terminé avec la durée
         const result = await messageController.createCallMessage(
