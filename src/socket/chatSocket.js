@@ -563,6 +563,82 @@ export const configureChatSockets = (io) => {
       }
     });
 
+    // ==================== 📞 ÉVÉNEMENTS D'APPEL (MANQUÉ ET TERMINÉ) ====================
+
+    // Événement quand un appel est refusé ou manqué
+    socket.on("call-missed", async (data) => {
+      try {
+        const { conversationId, callType } = data;
+        const callerId = socket.userId;
+
+        if (!conversationId || !callType) {
+          socket.emit("call-message-error", { error: "Données d'appel incomplètes" });
+          return;
+        }
+
+        console.log(`📞 Appel ${callType} manqué - Création message`);
+
+        // Créer un message d'appel manqué
+        const result = await messageController.createCallMessage(
+          {
+            conversationId,
+            callerId,
+            callType,
+            status: "missed",
+          },
+          io
+        );
+
+        if (result) {
+          socket.emit("call-message-sent", {
+            success: true,
+            message: result,
+          });
+        }
+      } catch (error) {
+        console.error("❌ Erreur création message appel manqué:", error.message);
+        socket.emit("call-message-error", { error: error.message });
+      }
+    });
+
+    // Événement quand un appel se termine (après acceptation)
+    socket.on("call-ended", async (data) => {
+      try {
+        const { conversationId, callType, duration, initiatorId } = data;
+        // Utiliser initiatorId s'il est fourni, sinon utiliser socket.userId
+        const callerId = initiatorId || socket.userId;
+
+        if (!conversationId || !callType || duration === undefined) {
+          socket.emit("call-message-error", { error: "Données d'appel incomplètes" });
+          return;
+        }
+
+        console.log(`📞 Appel ${callType} terminé - Durée: ${duration}s - Création message par: ${callerId}`);
+
+        // Créer un message d'appel terminé avec la durée
+        const result = await messageController.createCallMessage(
+          {
+            conversationId,
+            callerId,
+            callType,
+            status: "completed",
+            duration,
+          },
+          io
+        );
+
+        if (result) {
+          socket.emit("call-message-sent", {
+            success: true,
+            message: result,
+          });
+        }
+      } catch (error) {
+        console.error("❌ Erreur création message appel terminé:", error.message);
+        socket.emit("call-message-error", { error: error.message });
+      }
+    });
+
     // ==================== VOTRE CODE EXISTANT ====================
 
     // 🆕 JOIN NOTIFICATIONS AVEC USERID DU TOKEN

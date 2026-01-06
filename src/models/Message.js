@@ -111,6 +111,27 @@ fileInfo: {
   originalFilename: String,
   bytes: Number
 },
+
+// 🆕 CHAMPS POUR LES MESSAGES D'APPEL (appel manqué ou appel terminé)
+isCallMessage: {
+  type: Boolean,
+  default: false,
+  index: true,
+},
+callType: {
+  type: String,
+  enum: ["audio", "video"],
+  default: null,
+},
+callStatus: {
+  type: String,
+  enum: ["missed", "completed"],
+  default: null,
+},
+callDuration: {
+  type: Number, // durée en secondes
+  default: null,
+},
     
   },
   {
