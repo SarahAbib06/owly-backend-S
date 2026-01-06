@@ -214,12 +214,12 @@ socket.on("reject-call", (data) => {
 // 📞 TERMINER UN APPEL
 socket.on("end-call", (data) => {
   try {
-    const { channelName, callType } = data;
+    const { channelName, callType, recipientIds = [] } = data;
     const endedBy = socket.userId;
 
     console.log(`📞 Appel ${callType} terminé par ${endedBy} dans ${channelName}`);
 
-    // Notifier tous les membres de la room
+    // 1️⃣ Notifier la room (sécurité)
     io.to(channelName).emit("call-ended", {
       channelName,
       endedBy,
@@ -227,7 +227,20 @@ socket.on("end-call", (data) => {
       timestamp: new Date().toISOString()
     });
 
-    // Quitter la room
+    // 2️⃣ Notifier EXPLICITEMENT les autres participants
+    recipientIds.forEach(userId => {
+      const userSocketId = getSocketIdByUserId(userId); // ⚠️ mapping userId -> socketId
+      if (userSocketId) {
+        io.to(userSocketId).emit("call-ended", {
+          channelName,
+          endedBy,
+          callType,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    // 3️⃣ Quitter la room APRÈS notification
     leaveCallRoom(socket, channelName);
 
     socket.emit("call-ended-success", {
@@ -244,6 +257,7 @@ socket.on("end-call", (data) => {
     });
   }
 });
+
 
 // ==================== 🎯 FONCTIONS UTILITAIRES ====================
 
@@ -392,6 +406,60 @@ socket.on("leave-call-room", (roomId) => {
   }
 });
 
+// ==================== message appel dans le chat ====================
+
+// AJOUTER CET ÉVÉNEMENT APRÈS LES AUTRES ÉVÉNEMENTS D'APPEL
+socket.on("call-message", async (data) => {
+  try {
+    const { chatId, callType, callResult, duration, senderId } = data;
+
+    console.log("📞 Message d'appel reçu:", data);
+
+    const { default: Message } = await import("../models/Message.js");
+
+    const message = await Message.create({
+      conversationId: chatId,
+      Id_sender: senderId,
+      typeMessage: "call",
+      content: generateCallMessage(callResult, callType, duration),
+      callType,
+      callResult,
+      duration,
+      status: "sent",
+      callStartedAt: callResult === "ended" ? new Date(Date.now() - duration * 1000) : null,
+      callEndedAt: callResult === "ended" ? new Date() : null
+    });
+
+    await message.populate("Id_sender", "username avatar");
+
+    io.to(chatId).emit("new-message", message);
+
+    console.log("✅ Message d'appel diffusé:", message._id);
+
+  } catch (error) {
+    console.error("❌ Erreur message appel:", error);
+  }
+});
+
+
+// FONCTION HELPER POUR GÉNÉRER LE TEXTE DU MESSAGE
+function generateCallMessage(result, type, duration) {
+  const callTypeText = type === 'audio' ? 'audio' : 'vidéo';
+  
+  switch(result) {
+    case 'missed':
+      return `❌ Appel ${callTypeText} manqué`;
+    case 'rejected':
+      return `🚫 Appel ${callTypeText} refusé`;
+    case 'ended':
+      const mins = Math.floor(duration / 60);
+      const secs = duration % 60;
+      const durationText = `${mins}:${secs.toString().padStart(2, '0')}`;
+      return `📞 Appel ${callTypeText} terminé (${durationText})`;
+    default:
+      return `📞 Appel ${callTypeText}`;
+  }
+}
 // ==================== 📊 STATISTIQUES & MONITORING ====================
 
 // Log des appels pour monitoring
