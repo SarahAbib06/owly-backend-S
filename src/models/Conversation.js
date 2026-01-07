@@ -1,5 +1,4 @@
-import mongoose from 'mongoose';
-
+import mongoose from "mongoose";
 
 const { Schema, model } = mongoose;
 
@@ -9,7 +8,7 @@ const conversationSchema = new Schema(
     Id_participant: [
       {
         type: Schema.Types.ObjectId,
-        ref: 'Participants',    // ou 'User' si tu n'as pas de table Participants séparée
+        ref: "Participants", // ou 'User' si tu n'as pas de table Participants séparée
         required: true,
       },
     ],
@@ -19,7 +18,7 @@ const conversationSchema = new Schema(
       {
         userId: {
           type: Schema.Types.ObjectId,
-          ref: 'User',
+          ref: "User",
           required: true,
         },
         count: {
@@ -28,6 +27,21 @@ const conversationSchema = new Schema(
           min: 0,
         },
         _id: false, // pas d'_id inutile sur chaque entrée
+      },
+    ],
+    // 🆕 NOUVEAU : Archivage par utilisateur
+    archivedBy: [
+      {
+        userId: {
+          type: Schema.Types.ObjectId,
+          ref: "User",
+          required: true,
+        },
+        archivedAt: {
+          type: Date,
+          default: Date.now,
+        },
+        _id: false,
       },
     ],
 
@@ -41,7 +55,7 @@ const conversationSchema = new Schema(
     groupName: {
       type: String,
       required: function () {
-        return this.type === 'group';
+        return this.type === "group";
       },
       default: null,
     },
@@ -55,16 +69,16 @@ const conversationSchema = new Schema(
     // Créateur de la conversation
     createdBy: {
       type: Schema.Types.ObjectId,
-      ref: 'User',
+      ref: "User",
       required: true,
     },
 
     // Type de conversation
     type: {
       type: String,
-      enum: ['private', 'group'],
+      enum: ["private", "group"],
       required: true,
-      default: 'private',
+      default: "private",
     },
   },
   {
@@ -74,15 +88,15 @@ const conversationSchema = new Schema(
 );
 
 // Index très importants pour les performances d’un chat
-conversationSchema.index({ lastMessageAt: -1 });                    // tri des conversations récentes
-conversationSchema.index({ 'Id_participant': 1 });                  // recherche rapide par participant
-conversationSchema.index({ 'unreadCounts.userId': 1 });             // trouver les unread d’un user
+conversationSchema.index({ lastMessageAt: -1 }); // tri des conversations récentes
+conversationSchema.index({ Id_participant: 1 }); // recherche rapide par participant
+conversationSchema.index({ "unreadCounts.userId": 1 }); // trouver les unread d’un user
+conversationSchema.index({ "archivedBy.userId": 1 }); // 🆕 Index pour l'archivage
 conversationSchema.index({ type: 1 });
 conversationSchema.index({ createdBy: 1 });
-conversationSchema.index({ 'Id_participant': 1, lastMessageAt: -1 }); // combo gagnant pour pagination
+conversationSchema.index({ Id_participant: 1, lastMessageAt: -1 }); // combo gagnant pour pagination
 
 // Modèle
-const Conversation = model('Conversation', conversationSchema);
+const Conversation = model("Conversation", conversationSchema);
 
 export default Conversation;
-

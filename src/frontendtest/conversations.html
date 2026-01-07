@@ -191,11 +191,41 @@
                     <input type="text" id="globalSearch" placeholder="Rechercher une conversation..." autocomplete="off">
                 </div>
             </div>
+        <!-- Barre de recherche -->
+        <div class="search-container">
+          <div class="search-box">
+            <i class="fas fa-search"></i>
+            <input
+              type="text"
+              id="globalSearch"
+              placeholder="Rechercher une conversation..."
+            />
+          </div>
+        </div>
 
             <div class="sidebar-actions">
                 <button class="action-btn" id="newConversationBtn" onclick="showNewConversationModal()"><i class="fas fa-comment-medical"></i> Nouvelle discussion</button>
                 <button class="action-btn" id="createGroupBtn" onclick="showCreateGroupModal()"><i class="fas fa-users"></i> Créer un groupe</button>
             </div>
+        <!-- Actions rapides -->
+        <div class="sidebar-actions">
+          <button
+            class="action-btn"
+            id="newConversationBtn"
+            title="Nouvelle discussion"
+          >
+            <i class="fas fa-comment-medical"></i>
+            <span>Nouvelle discussion</span>
+          </button>
+          <button
+            class="action-btn"
+            id="createGroupBtn"
+            title="Créer un groupe"
+          >
+            <i class="fas fa-users"></i>
+            <span>Créer un groupe</span>
+          </button>
+        </div>
 
             <div class="contacts-list" id="contactsList">
                 <div class="contacts-header">
@@ -439,7 +469,7 @@
         <div class="modal-content reactions-modal">
             <div class="modal-header">
                 <h3><i class="fas fa-smile"></i> Réagir au message</h3>
-                <button class="modal-close" id="closeReactionsModal" onclick="closeReactionsModal()">
+                <button class="modal-close" id="closeReactionsModal">
                     <i class="fas fa-times"></i>
                 </button>
             </div>
@@ -449,6 +479,67 @@
                 </div>
             </div>
         </div>
+    </div>
+
+    <!-- Modal Transfert de Message -->
+    <div id="forwardModal" class="modal-overlay" style="display: none">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3><i class="fas fa-share"></i> Transférer le message</h3>
+          <button class="modal-close" id="closeForwardModal">
+            <i class="fas fa-times"></i>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div
+            class="forward-info"
+            id="forwardMessagePreview"
+            style="
+              margin-bottom: 15px;
+              padding: 10px;
+              background: #252525;
+              border-radius: 8px;
+              display: none;
+            "
+          >
+            <div style="font-size: 12px; color: #f9ee34; margin-bottom: 5px">
+              Message à transférer :
+            </div>
+            <div
+              id="forwardPreviewContent"
+              style="font-size: 13px; color: #ccc"
+            ></div>
+          </div>
+
+          <div class="search-box-modal">
+            <i class="fas fa-search"></i>
+            <input
+              type="text"
+              id="searchForwardInput"
+              placeholder="Rechercher une conversation..."
+            />
+          </div>
+
+          <div
+            id="forwardConversationsList"
+            class="conversations-list"
+            style="max-height: 400px; overflow-y: auto; margin-top: 15px"
+          >
+            <div class="empty-state">
+              <i class="fas fa-comments"></i>
+              <p>Chargement de vos conversations...</p>
+            </div>
+          </div>
+        </div>
+        <div
+          class="modal-footer"
+          style="padding: 15px; border-top: 1px solid #333; text-align: right"
+        >
+          <button class="action-btn secondary" id="cancelForwardBtn">
+            <i class="fas fa-times"></i> Annuler
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- Modal Profil Utilisateur -->
@@ -587,25 +678,25 @@
                     </div>
                 </div>
 
-                <div class="settings-section">
-                    <h4>Fichiers</h4>
-                    <div class="setting-item">
-                        <label>Téléchargement automatique</label>
-                        <label class="switch">
-                            <input type="checkbox" id="autoDownloadToggle" checked>
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                    <div class="setting-item">
-                        <label>Compression des images</label>
-                        <label class="switch">
-                            <input type="checkbox" id="imageCompressionToggle" checked>
-                            <span class="slider"></span>
-                        </label>
-                    </div>
-                </div>
+          <div class="settings-section">
+            <h4>Fichiers</h4>
+            <div class="setting-item">
+              <label>Téléchargement automatique</label>
+              <label class="switch">
+                <input type="checkbox" id="autoDownloadToggle" checked />
+                <span class="slider"></span>
+              </label>
             </div>
+            <div class="setting-item">
+              <label>Compression des images</label>
+              <label class="switch">
+                <input type="checkbox" id="imageCompressionToggle" checked />
+                <span class="slider"></span>
+              </label>
+            </div>
+          </div>
         </div>
+      </div>
     </div>
 
     <!-- Toasts & badges -->

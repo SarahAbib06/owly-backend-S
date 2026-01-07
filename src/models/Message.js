@@ -1,3 +1,4 @@
+// src/models/Message.js
 import mongoose from "mongoose";
 
 const { Schema, model } = mongoose;
@@ -16,7 +17,7 @@ const messageSchema = new Schema(
       required: true,
     },
 
-    // Système simplifié de gestion des lectures
+    // Système de gestion des lectures
     readBy: [
       {
         userId: {
@@ -49,24 +50,86 @@ const messageSchema = new Schema(
       default: "sent",
     },
 
-    // 🆕 AJOUT : CHAMP RÉACTIONS
-    reactions: [{
+    isPinned: { type: Boolean, default: false },
+    pinnedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+    pinnedAt: { type: Date },
+
+    // AJOUT : Réactions aux messages
+    reactions: [
+      {
+        type: Schema.Types.ObjectId,
+        ref: "Reaction",
+      },
+    ],
+
+    // NOUVEAUX CHAMPS POUR LE TRANSFERT (FORWARD) DE MESSAGE
+    isForwarded: {
+      type: Boolean,
+      default: false,
+      index: true, // Très utile pour filtrer rapidement les messages transférés
+    },
+    forwardedFrom: {
       type: Schema.Types.ObjectId,
-      ref: "Reaction"
-    }]
+      ref: "Message", // Référence au message original
+      default: null,
+      index: true,
+    },
+    originalSender: {
+      type: Schema.Types.ObjectId,
+      ref: "User", // Qui a envoyé le message à l'origine
+      default: null,
+    },
+    forwardedAt: {
+      type: Date,
+      default: Date.now,
+    },
+    // Optionnel : on peut ajouter un champ pour savoir combien de fois il a été transféré
+    forwardCount: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+     
+
+    // Ajoute ça dans ton messageSchema, juste avant timestamps
+imageInfo: {
+  url: String,
+  publicId: String,
+  width: Number,
+  height: Number
+},
+videoInfo: {
+  url: String,
+  publicId: String,
+  duration: Number,
+  width: Number,
+  height: Number
+},
+fileInfo: {
+  url: String,
+  publicId: String,
+  originalFilename: String,
+  bytes: Number
+},
+    
   },
   {
     timestamps: true,
   }
 );
 
-// Indexes pour les performances
-messageSchema.index({ conversationId: 1, createdAt: -1 });
+// INDEXES POUR LES PERFORMANCES
+messageSchema.index({ conversationId: 1, createdAt: -1 }); // Pagination des messages
 messageSchema.index({ Id_sender: 1 });
 messageSchema.index({ "readBy.userId": 1 });
 messageSchema.index({ createdAt: -1 });
-// 🆕 AJOUT : Index pour les réactions
-messageSchema.index({ "reactions": 1 });
+messageSchema.index({ reactions: 1 });
+messageSchema.index({ isForwarded: 1 }); // Recherche rapide des messages transférés
+messageSchema.index({ forwardedFrom: 1 }); // Tracer la chaîne de transfert
+messageSchema.index({ originalSender: 1 }); // Afficher "Transféré de @user"
+
+// Index composé utile pour l'affichage des messages transférés dans une conversation
+messageSchema.index({ conversationId: 1, isForwarded: 1, createdAt: -1 });
 
 const Message = model("Message", messageSchema);
 

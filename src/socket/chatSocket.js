@@ -5,6 +5,7 @@ import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Reaction from "../models/Reaction.js";
 import jwt from "jsonwebtoken";
+import { archiveSocketService } from "../services/archiveSocketService.js";
 
 export const configureChatSockets = (io) => {
   console.log("🔧 WebSocket Chat configuré");
@@ -269,6 +270,340 @@ export const configureChatSockets = (io) => {
       }
     });
 
+    // ==================== 🔊 MESSAGES VOCAUX EN TEMPS RÉEL ====================
+
+    socket.on("audio_stream_start", (data) => {
+      const { conversationId, userId } = data;
+      console.log("🎤 Début enregistrement audio - User:", userId);
+
+      socket.to(conversationId).emit("user_recording_audio", {
+        userId: userId,
+        userName: socket.username || "Utilisateur",
+        conversationId: conversationId,
+        timestamp: new Date(),
+      });
+    });
+
+    socket.on("audio_stream_stop", (data) => {
+      const { conversationId, userId } = data;
+      console.log("⏹️ Fin enregistrement audio - User:", userId);
+
+      socket.to(conversationId).emit("user_stopped_recording", {
+        userId: userId,
+        conversationId: conversationId,
+        timestamp: new Date(),
+      });
+    });
+
+    socket.on("audio_message_played", (data) => {
+      const { messageId, userId, conversationId } = data;
+      console.log("🔊 Message audio joué:", messageId);
+
+      socket.to(conversationId).emit("audio_message_status", {
+        messageId: messageId,
+        userId: userId,
+        status: "played",
+        timestamp: new Date(),
+      });
+    });
+
+    socket.on("audio_message_download", (data) => {
+      const { messageId, userId } = data;
+      console.log("📥 Téléchargement message audio:", messageId);
+
+      socket.emit("audio_download_started", {
+        messageId: messageId,
+        timestamp: new Date(),
+      });
+    });
+
+    socket.on("audio_upload_success", (data) => {
+      const { conversationId, message } = data;
+      console.log("✅ Upload audio réussi - Diffusion en temps réel");
+
+      io.to(conversationId).emit("new_audio_message", {
+        type: "audio",
+        message: message,
+        conversationId: conversationId,
+        timestamp: new Date(),
+      });
+    });
+
+    // ==================== TRANSFERT DE MESSAGE (FORWARD) EN TEMPS RÉEL ====================
+    // Événement déclenché depuis le frontend quand l'utilisateur clique sur "Transférer"
+    socket.on("forward_message", async (data) => {
+      try {
+        const { messageId, targetConversationId } = data;
+        const userId = socket.userId;
+
+        console.log("Message transféré via Socket.IO:", {
+          messageId,
+          targetConversationId,
+          userId,
+        });
+
+        if (!messageId || !targetConversationId) {
+          throw new Error("messageId et targetConversationId sont requis");
+        }
+
+        // Vérifie que l'utilisateur a accès à la conversation cible
+        const hasAccess = await Participants.findOne({
+          Id_Conversation: targetConversationId,
+          Id_User: userId,
+        });
+
+        if (!hasAccess) {
+          throw new Error("Vous n'êtes pas membre de la conversation cible");
+        }
+
+        // On passe io et req.user dans la requête simulée
+        const fakeReq = {
+          params: { messageId },
+          body: { targetConversationId },
+          user: { id: userId, username: socket.username },
+          io: io, // Très important : on donne accès à io
+        };
+
+        const fakeRes = {
+          json: (obj) => {
+            // Si succès → on émet directement le nouveau message transféré
+            if (obj.success) {
+              console.log(
+                "Message transféré avec succès → diffusion en temps réel"
+              );
+
+              // On émet le message dans la conversation cible
+              io.to(targetConversationId.toString()).emit("new_message", {
+                message: obj.forwardedMessage,
+                forwarded: true,
+                originalMessageId: messageId,
+              });
+
+              // On notifie aussi l'émetteur que tout s'est bien passé
+              socket.emit("forward_success", {
+                success: true,
+                message: "Message transféré !",
+                forwardedMessage: obj.forwardedMessage,
+                targetConversationId,
+              });
+            } else {
+              throw new Error(obj.error || "Échec du transfert");
+            }
+          },
+          status: (code) => ({
+            json: (obj) => {
+              socket.emit("forward_error", {
+                success: false,
+                error: obj.error || "Erreur lors du transfert",
+                statusCode: code,
+              });
+            },
+          }),
+        };
+
+        // Appelle directement la méthode du controller (elle gère tout : chiffrement, sauvegarde, socket, etc.)
+        await messageController.forwardMessage(fakeReq, fakeRes);
+      } catch (error) {
+        console.error("Erreur transfert de message (socket):", error.message);
+        socket.emit("forward_error", {
+          success: false,
+          error: error.message || "Impossible de transférer le message",
+        });
+      }
+    });
+    // ==================== 🗃️ ARCHIVAGE DES CONVERSATIONS EN TEMPS RÉEL ====================
+
+    socket.on("archive_conversation", async (data) => {
+      try {
+        const { conversationId } = data;
+        const userId = socket.userId;
+
+        console.log("🗃️ Archivage conversation via socket:", {
+          conversationId,
+          userId,
+        });
+
+        if (!conversationId) {
+          throw new Error("ID conversation requis");
+        }
+
+        // Vérifier que l'utilisateur a accès à la conversation
+        const hasAccess = await Participants.findOne({
+          Id_Conversation: conversationId,
+          Id_User: userId,
+        });
+
+        if (!hasAccess) {
+          throw new Error("Vous n'êtes pas membre de cette conversation");
+        }
+
+        // Simuler une requête pour le controller d'archivage
+        const fakeReq = {
+          params: { conversationId },
+          user: { _id: userId },
+        };
+
+        const fakeRes = {
+          json: (obj) => {
+            if (obj.success) {
+              // Notifier l'utilisateur que l'archivage a réussi
+              socket.emit("conversation_archived", {
+                success: true,
+                conversationId: conversationId,
+                archivedAt: new Date(),
+              });
+
+              // Notifier tous les clients de cet utilisateur pour mettre à jour l'interface
+              io.to(`user_${userId}`).emit("conversation_archived_update", {
+                type: "archived",
+                conversationId: conversationId,
+                timestamp: new Date(),
+              });
+
+              console.log(
+                `✅ Conversation ${conversationId} archivée par ${userId}`
+              );
+            } else {
+              throw new Error(obj.error || "Échec de l'archivage");
+            }
+          },
+          status: (code) => ({
+            json: (obj) => {
+              socket.emit("archive_error", {
+                success: false,
+                error: obj.error || "Erreur lors de l'archivage",
+                statusCode: code,
+              });
+            },
+          }),
+        };
+
+        // Utiliser le controller d'archivage (vous devrez l'importer)
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        await archiveController.archiveConversation(userId, conversationId);
+
+        // Émettre les événements de succès
+        socket.emit("conversation_archived", {
+          success: true,
+          conversationId: conversationId,
+          archivedAt: new Date(),
+        });
+
+        io.to(`user_${userId}`).emit("conversation_archived_update", {
+          type: "archived",
+          conversationId: conversationId,
+          timestamp: new Date(),
+        });
+      } catch (error) {
+        console.error("💥 Erreur archivage socket:", error);
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    socket.on("unarchive_conversation", async (data) => {
+      try {
+        const { conversationId } = data;
+        const userId = socket.userId;
+
+        console.log("🗃️ Désarchivage conversation via socket:", {
+          conversationId,
+          userId,
+        });
+
+        if (!conversationId) {
+          throw new Error("ID conversation requis");
+        }
+
+        // Utiliser le controller d'archivage
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        await archiveController.unarchiveConversation(userId, conversationId);
+
+        // Notifier l'utilisateur que le désarchivage a réussi
+        socket.emit("conversation_unarchived", {
+          success: true,
+          conversationId: conversationId,
+        });
+
+        // Notifier tous les clients de cet utilisateur pour mettre à jour l'interface
+        io.to(`user_${userId}`).emit("conversation_archived_update", {
+          type: "unarchived",
+          conversationId: conversationId,
+          timestamp: new Date(),
+        });
+
+        console.log(
+          `✅ Conversation ${conversationId} désarchivée par ${userId}`
+        );
+      } catch (error) {
+        console.error("💥 Erreur désarchivage socket:", error);
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    socket.on("get_archived_conversations", async () => {
+      try {
+        const userId = socket.userId;
+
+        console.log(
+          "🗃️ Récupération conversations archivées via socket:",
+          userId
+        );
+
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        const archivedConversations =
+          await archiveController.getArchivedConversations(userId);
+
+        socket.emit("archived_conversations_data", {
+          success: true,
+          conversations: archivedConversations,
+          count: archivedConversations.length,
+        });
+
+        console.log(
+          `✅ ${archivedConversations.length} conversations archivées envoyées`
+        );
+      } catch (error) {
+        console.error("💥 Erreur récupération archivées socket:", error);
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
+    socket.on("get_archived_count", async () => {
+      try {
+        const userId = socket.userId;
+
+        const { archiveController } = await import(
+          "../controllers/archiveController.js"
+        );
+        const archivedCount = await archiveController.getArchivedCount(userId);
+
+        socket.emit("archived_count_data", {
+          success: true,
+          archivedCount: archivedCount,
+        });
+      } catch (error) {
+        socket.emit("archive_error", {
+          success: false,
+          error: error.message,
+        });
+      }
+    });
+
     // ==================== VOTRE CODE EXISTANT ====================
 
     socket.on("join_notifications", async () => {
@@ -430,7 +765,7 @@ export const configureChatSockets = (io) => {
       try {
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
-            socket.userId, 
+            socket.userId,
             data.conversationId
           );
         }
@@ -438,29 +773,32 @@ export const configureChatSockets = (io) => {
         const messageData = {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
-          typeMessage: 'image'
+          typeMessage: "image",
         };
 
         let fileBuffer;
-        if (typeof data.file === 'string' && data.file.startsWith('data:image')) {
-          const base64Data = data.file.split(',')[1];
-          fileBuffer = Buffer.from(base64Data, 'base64');
+        if (
+          typeof data.file === "string" &&
+          data.file.startsWith("data:image")
+        ) {
+          const base64Data = data.file.split(",")[1];
+          fileBuffer = Buffer.from(base64Data, "base64");
         } else if (data.fileBuffer) {
           fileBuffer = Buffer.from(data.fileBuffer);
         } else {
-          throw new Error('Format de fichier image non reconnu');
+          throw new Error("Format de fichier image non reconnu");
         }
 
         const file = { 
           buffer: fileBuffer,
-          originalname: data.fileName || 'image',
-          mimetype: data.fileType || 'image/jpeg'
+          originalname: data.fileName || "image",
+          mimetype: data.fileType || "image/jpeg",
         };
 
         const savedMessage = await messageController.uploadImageMessage(
-          file, 
-          messageData, 
-          io, 
+          file,
+          messageData,
+          io,
           socket.userId
         );
 
@@ -469,17 +807,16 @@ export const configureChatSockets = (io) => {
         socket.emit('image_message_sent', {
           success: true,
           data: savedMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        console.log('🖼️ Message image traité - ID:', savedMessage._id);
-
+        console.log("🖼️ Message image traité - ID:", savedMessage._id);
       } catch (error) {
-        console.error('💥 Erreur traitement image message:', error.message);
-        socket.emit('image_message_error', {
+        console.error("💥 Erreur traitement image message:", error.message);
+        socket.emit("image_message_error", {
           success: false,
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     });
@@ -490,7 +827,7 @@ export const configureChatSockets = (io) => {
       try {
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
-            socket.userId, 
+            socket.userId,
             data.conversationId
           );
         }
@@ -502,24 +839,24 @@ export const configureChatSockets = (io) => {
           fileType: data.fileType,
           fileSize: data.fileSize,
           originalName: data.originalName,
-          typeMessage: 'file'
+          typeMessage: "file",
         };
 
         let fileBuffer;
-        if (typeof data.file === 'string' && data.file.startsWith('data:')) {
-          const base64Data = data.file.split(',')[1];
-          fileBuffer = Buffer.from(base64Data, 'base64');
+        if (typeof data.file === "string" && data.file.startsWith("data:")) {
+          const base64Data = data.file.split(",")[1];
+          fileBuffer = Buffer.from(base64Data, "base64");
         } else if (data.fileBuffer) {
           fileBuffer = Buffer.from(data.fileBuffer);
         } else {
-          throw new Error('Format de fichier non reconnu');
+          throw new Error("Format de fichier non reconnu");
         }
 
         const file = { 
           buffer: fileBuffer,
-          originalname: data.fileName || data.originalName || 'file',
-          mimetype: data.fileType || 'application/octet-stream',
-          size: data.fileSize
+          originalname: data.fileName || data.originalName || "file",
+          mimetype: data.fileType || "application/octet-stream",
+          size: data.fileSize,
         };
 
         const savedMessage = await messageController.uploadFileMessage(
@@ -536,7 +873,7 @@ export const configureChatSockets = (io) => {
           conversationId: savedMessage.conversationId,
           Id_sender: savedMessage.Id_sender,
           Id_receiver: data.Id_receiver,
-          typeMessage: savedMessage.typeMessage || 'file',
+          typeMessage: savedMessage.typeMessage || "file",
           content: savedMessage.content,
           fileUrl: savedMessage.fileUrl,
           fileName: savedMessage.fileName || data.fileName,
@@ -545,23 +882,22 @@ export const configureChatSockets = (io) => {
           originalName: savedMessage.originalName || data.originalName,
           status: savedMessage.status,
           time: savedMessage.time || savedMessage.timestamp,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
 
         socket.emit('file_message_sent', {
           success: true,
           data: formattedMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        console.log('📎 Message fichier traité - ID:', savedMessage._id);
-
+        console.log("📎 Message fichier traité - ID:", savedMessage._id);
       } catch (error) {
-        console.error('💥 Erreur traitement fichier message:', error.message);
-        socket.emit('file_message_error', {
+        console.error("💥 Erreur traitement fichier message:", error.message);
+        socket.emit("file_message_error", {
           success: false,
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     });
@@ -571,12 +907,12 @@ export const configureChatSockets = (io) => {
       
       try {
         if (!data.file) {
-          throw new Error('Aucun fichier vidéo reçu');
+          throw new Error("Aucun fichier vidéo reçu");
         }
 
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
-            socket.userId, 
+            socket.userId,
             data.conversationId
           );
         }
@@ -587,21 +923,21 @@ export const configureChatSockets = (io) => {
           fileName: data.fileName,
           fileType: data.fileType,
           fileSize: data.fileSize,
-          typeMessage: 'video'
+          typeMessage: "video",
         };
 
         const fileBuffer = Buffer.from(new Uint8Array(data.file));
 
         const file = { 
           buffer: fileBuffer,
-          originalname: data.fileName || 'video',
-          mimetype: data.fileType || 'video/mp4',
-          size: data.fileSize
+          originalname: data.fileName || "video",
+          mimetype: data.fileType || "video/mp4",
+          size: data.fileSize,
         };
 
         const savedMessage = await messageController.uploadVideoMessage(
           file,
-          messageData, 
+          messageData,
           io,
           socket.userId
         );
@@ -613,7 +949,7 @@ export const configureChatSockets = (io) => {
           conversationId: savedMessage.conversationId,
           Id_sender: savedMessage.Id_sender,
           Id_receiver: data.Id_receiver,
-          typeMessage: savedMessage.typeMessage || 'video',
+          typeMessage: savedMessage.typeMessage || "video",
           content: savedMessage.content,
           fileUrl: savedMessage.fileUrl,
           fileName: savedMessage.fileName || data.fileName,
@@ -621,23 +957,22 @@ export const configureChatSockets = (io) => {
           fileType: savedMessage.fileType || data.fileType,
           status: savedMessage.status,
           time: savedMessage.time || savedMessage.timestamp,
-          timestamp: new Date()
+          timestamp: new Date(),
         };
 
         socket.emit('video_message_sent', {
           success: true,
           data: formattedMessage,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
 
-        console.log('🎥 Message vidéo traité - ID:', savedMessage._id);
-
+        console.log("🎥 Message vidéo traité - ID:", savedMessage._id);
       } catch (error) {
-        console.error('💥 Erreur traitement vidéo message:', error.message);
-        socket.emit('video_message_error', {
+        console.error("💥 Erreur traitement vidéo message:", error.message);
+        socket.emit("video_message_error", {
           success: false,
           error: error.message,
-          timestamp: new Date()
+          timestamp: new Date(),
         });
       }
     });

@@ -47,6 +47,13 @@ router.post("/verify-otp-reset", verifyOtpReset);
 // ========================================
 router.get("/me", authMiddleware, getMe);
 
+//bloqer un user 
+router.get("/blocked", authMiddleware, getBlockedUsers);
+
+// Débloquer utilisateur
+router.put("/unblock/:contactId", authMiddleware, unblockUser);
+router.put("/change-password", authMiddleware, changePassword);
+
 router.post(
   "/upload-profile",
   authMiddleware,

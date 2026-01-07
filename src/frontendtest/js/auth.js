@@ -49,6 +49,7 @@ function initLoginPage() {
         showForm("register");
     });
 
+    // Vérifier l'authentification existante
     checkExistingAuth();
 }
 
@@ -280,7 +281,7 @@ async function handleSuccessfulAuth(authData) {
                     // Sauvegarder le playerId si déjà abonné
                     const playerId = await OneSignal.getUserId();
                     if (playerId && state.token) {
-                        await fetch('http://localhost:5000/api/notifications/save-playerid', {
+                        await fetch(`${CONFIG.BACKEND_URL}/api/notifications/save-playerid`, {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -302,20 +303,46 @@ async function handleSuccessfulAuth(authData) {
     }, 1500);
 }
 
-function checkExistingAuth() {
+async function checkExistingAuth() {
     const token = localStorage.getItem("owly_token");
     const userData = localStorage.getItem("owly_user");
 
-    if (token && userData) {
-        state.token = token;
-        state.user = JSON.parse(userData);
+    if (!token || !userData) {
+        return;
+    }
 
-        if (window.location.pathname.includes("login.html")) {
-            window.location.href = "conversations.html";
+    // S'il y a déjà un token ET qu'on est sur login.html → vérifier si valide
+    if (window.location.pathname.includes("login.html")) {
+        try {
+            const response = await fetch(`${CONFIG.BACKEND_URL}/api/auth/me`, {
+                method: "GET",
+                headers: {
+                    "Authorization": `Bearer ${token}`
+                }
+            });
+
+            if (response.ok) {
+                // Token valide → rediriger vers conversations
+                window.location.href = "conversations.html";
+            } else {
+                // Token invalide → nettoyer et rester sur login
+                forceLogout();
+            }
+        } catch (err) {
+            console.error("Erreur vérification auth:", err);
+            // En cas d'erreur réseau, on reste sur login
         }
     }
+}
+
+function forceLogout() {
+    localStorage.removeItem("owly_token");
+    localStorage.removeItem("owly_user");
+    sessionStorage.clear();
+    showMessage("Session expirée. Veuillez vous reconnecter.", "warning");
 }
 
 // Export
 window.initLoginPage = initLoginPage;
 window.handleSuccessfulAuth = handleSuccessfulAuth;
+window.checkExistingAuth = checkExistingAuth;

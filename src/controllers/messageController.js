@@ -8,8 +8,8 @@ import { conversationController } from "./conversationController.js";
 import { sendPushToUser } from '../utils/pushNotification.js';
 import mongoose from "mongoose";
 import crypto from "crypto";
-import cloudinary from '../config/cloudinary.js';
-import streamifier from 'streamifier';
+import cloudinary from "../config/cloudinary.js";
+import streamifier from "streamifier";
 
 // CLÉ SECRÈTE — METS ÇA DANS TON .env (64 caractères hex = 32 bytes)
 const ENCRYPTION_KEY = process.env.MESSAGE_ENCRYPTION_KEY || "a".repeat(64);
@@ -59,44 +59,54 @@ function decryptContent(stored) {
   }
 }
 
+
+
 let userPresence = new Map();
 
 // 🆕 CONFIGURATION DES FICHIERS
 const FILE_CONFIG = {
   image: {
-    allowedTypes: ['image/jpeg', 'image/png', 'image/gif', 'image/webp'],
+    allowedTypes: ["image/jpeg", "image/png", "image/gif", "image/webp"],
     maxSize: 10 * 1024 * 1024, // 10MB
-    folder: 'chat_images'
+    folder: "chat_images",
   },
   video: {
-    allowedTypes: ['video/mp4', 'video/mkv', 'video/avi', 'video/mov', 'video/webm'],
+    allowedTypes: [
+      "video/mp4",
+      "video/mkv",
+      "video/avi",
+      "video/mov",
+      "video/webm",
+    ],
     maxSize: 50 * 1024 * 1024, // 50MB
-    folder: 'chat_videos'
+    folder: "chat_videos",
   },
   file: {
     allowedTypes: [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      'application/vnd.ms-excel',
-      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      'text/plain',
-      'application/zip',
-      'application/x-rar-compressed'
+      "application/pdf",
+      "application/msword",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.ms-excel",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "text/plain",
+      "application/zip",
+      "application/x-rar-compressed",
     ],
     maxSize: 20 * 1024 * 1024, // 20MB
-    folder: 'chat_files'
-  }
+    folder: "chat_files",
+  },
 };
 
 // 🆕 VALIDATION DES FICHIERS
 const validateFile = (file, allowedTypes, maxSize) => {
   if (!file || !file.buffer) {
-    throw new Error('Fichier manquant');
+    throw new Error("Fichier manquant");
   }
 
   if (file.size > maxSize) {
-    throw new Error(`Fichier trop volumineux (max: ${maxSize / 1024 / 1024}MB)`);
+    throw new Error(
+      `Fichier trop volumineux (max: ${maxSize / 1024 / 1024}MB)`
+    );
   }
 
   if (!allowedTypes.includes(file.mimetype)) {
@@ -113,39 +123,37 @@ const uploadToCloudinary = async (file, resourceType, folder) => {
       {
         folder: folder,
         resource_type: resourceType,
-        ...(resourceType === 'image' && {
-          quality: 'auto',
-          format: 'jpg'
+        ...(resourceType === "image" && {
+          quality: "auto",
+          format: "jpg",
         }),
-        ...(resourceType === 'video' && {
-          chunk_size: 6000000
-        })
+        ...(resourceType === "video" && {
+          chunk_size: 6000000,
+        }),
       },
       (error, result) => {
         if (error) reject(error);
         else resolve(result);
       }
     );
-    
+
     streamifier.createReadStream(file.buffer).pipe(uploadStream);
   });
 };
 
 // 🆕 VALIDATION ET CONVERSION ID UTILISATEUR
-const validateAndConvertUserId = (userId, fieldName = 'ID utilisateur') => {
+const validateAndConvertUserId = (userId, fieldName = "ID utilisateur") => {
   if (!userId) {
     throw new Error(`${fieldName} manquant`);
   }
 
-  // Convertir en string si c'est un ObjectId
   let userIdString = userId;
-  if (typeof userId === 'object' && userId.toString) {
+  if (typeof userId === "object" && userId.toString) {
     userIdString = userId.toString();
   }
 
-  // Nettoyer et valider le format
   userIdString = userIdString.trim();
-  
+
   if (!mongoose.Types.ObjectId.isValid(userIdString)) {
     throw new Error(`${fieldName} invalide: "${userIdString}"`);
   }
@@ -154,8 +162,8 @@ const validateAndConvertUserId = (userId, fieldName = 'ID utilisateur') => {
 };
 
 // 🆕 FONCTION UNIFIÉE POUR LA GESTION DES MESSAGES
+
 const handleMessageCreation = async (messageData, io = null, userIdFromToken = null, additionalData = {}) => {
-  // RÉCUPÉRATION Id_sender SÉCURISÉ
   const Id_sender = userIdFromToken;
 
   const {
@@ -165,48 +173,56 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     typeMessage = "text",
   } = messageData;
 
-  // VÉRIFICATIONS
   if (!mongoose.Types.ObjectId.isValid(Id_sender)) {
-    throw new Error('ID expéditeur invalide');
+    throw new Error("ID expéditeur invalide");
   }
   if (Id_receiver && !mongoose.Types.ObjectId.isValid(Id_receiver)) {
-    throw new Error('ID destinataire invalide');
+    throw new Error("ID destinataire invalide");
   }
   if (conversationId && !mongoose.Types.ObjectId.isValid(conversationId)) {
-    throw new Error('ID conversation invalide');
+    throw new Error("ID conversation invalide");
   }
   if (!content) {
-    throw new Error('Le contenu du message est requis');
+    throw new Error("Le contenu du message est requis");
   }
-  if (typeof content === 'string' && content.trim().length === 0) {
-    throw new Error('Le message ne peut pas être vide');
+  if (typeof content === "string" && content.trim().length === 0) {
+    throw new Error("Le message ne peut pas être vide");
   }
-  if (typeof content === 'string' && content.length > 1000) {
-    throw new Error('Le message est trop long (max 1000 caractères)');
+  if (typeof content === "string" && content.length > 1000) {
+    throw new Error("Le message est trop long (max 1000 caractères)");
   }
-  const allowedTypes = ['text', 'image', 'video', 'file', 'emojis'];
-  if (!allowedTypes.includes(typeMessage)) throw new Error(`Type non supporté: ${typeMessage}`);
+  const allowedTypes = ["text", "image", "video", "file", "emojis"];
+  if (!allowedTypes.includes(typeMessage))
+    throw new Error(`Type non supporté: ${typeMessage}`);
 
-  // DÉTERMINER LE DESTINATAIRE
   let receiverId = Id_receiver ? Id_receiver.toString() : null;
   if (!receiverId && conversationId) {
-    const participants = await Participants.find({ Id_Conversation: conversationId })
-      .select('Id_User')
+    const participants = await Participants.find({
+      Id_Conversation: conversationId,
+    })
+      .select("Id_User")
       .lean();
     if (participants.length < 2) {
-      throw new Error('Conversation invalide (doit avoir au moins 2 participants)');
+      throw new Error(
+        "Conversation invalide (doit avoir au moins 2 participants)"
+      );
     }
-    const otherParticipant = participants.find(p => p.Id_User.toString() !== Id_sender.toString());
+    const otherParticipant = participants.find(
+      (p) => p.Id_User.toString() !== Id_sender.toString()
+    );
     if (!otherParticipant) {
-      throw new Error('Impossible de trouver le destinataire dans cette conversation');
+      throw new Error(
+        "Impossible de trouver le destinataire dans cette conversation"
+      );
     }
     receiverId = otherParticipant.Id_User.toString();
   }
   if (!receiverId) {
-    throw new Error('Destinataire introuvable – Id_receiver ou conversationId requis');
+    throw new Error(
+      "Destinataire introuvable – Id_receiver ou conversationId requis"
+    );
   }
 
-  // VÉRIFICATION BLOCAGE
   const blockExists = await Relation.findOne({
     status: "blocked",
     $or: [
@@ -220,7 +236,6 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     );
   }
 
-  // CONVERSATION
   let finalConversationId = conversationId;
   if (!conversationId) {
     const conv = await conversationController.getOrCreateConversation(
@@ -230,9 +245,9 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     finalConversationId = conv._id;
   }
 
-  // CHIFFREMENT UNIQUEMENT POUR LES MESSAGES TEXTES
   const encryptedContent = typeMessage === 'text' ? encryptContent(content.trim()) : content;
 
+    // CORRIGÉ : On sauvegarde aussi les métadonnées image/video/file dans la BDD
   const message = new Message({
     conversationId: finalConversationId,
     Id_sender,
@@ -241,7 +256,13 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     status: "sent",
     time: new Date(),
     readBy: [],
-    unreadFor: []
+    unreadFor: [],
+
+    // AJOUT CRUCIAL : sauvegarde des infos multimédia dans MongoDB
+    ...(typeMessage === 'image' && additionalData.imageInfo && { imageInfo: additionalData.imageInfo }),
+    ...(typeMessage === 'video' && additionalData.videoInfo && { videoInfo: additionalData.videoInfo }),
+    ...(typeMessage === 'file' && additionalData.fileInfo && { fileInfo: additionalData.fileInfo })
+
   });
   const savedMessage = await message.save();
 
@@ -272,13 +293,17 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
         });
       }
     }
-    
+
     if (bulkOperations.length > 0) {
       await Conversation.bulkWrite(bulkOperations);
       const conv = await Conversation.findById(finalConversationId);
       const missing = [];
       for (const uid of participantsToNotify) {
-        if (!conv.unreadCounts?.some((u) => u.userId.toString() === uid.toString())) {
+        if (
+          !conv.unreadCounts?.some(
+            (u) => u.userId.toString() === uid.toString()
+          )
+        ) {
           missing.push({
             updateOne: {
               filter: { _id: finalConversationId },
@@ -346,120 +371,155 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     // On ne bloque pas l'envoi du message même si la push échoue
   }
 
-  // DIFFUSION WEBSOCKET
   if (io) {
     const messageToEmit = {
       _id: savedMessage._id,
       conversationId: finalConversationId,
       Id_sender: Id_sender,
-      content: typeMessage === 'text' ? content.trim() : content, // EN CLAIR
+
+      content: typeMessage === 'text' ? content.trim() : content,
       typeMessage: typeMessage,
       status: "sent",
       timestamp: new Date(),
       isGroup: (await Conversation.findById(finalConversationId))?.type === "group",
-      ...additionalData // Inclure les données supplémentaires (infos image, fichier, etc.)
+      ...additionalData
+
     };
-    
-    io.to(finalConversationId.toString()).emit('new_message', messageToEmit);
+
+    io.to(finalConversationId.toString()).emit("new_message", messageToEmit);
   }
 
-  // RETURN
   return {
     _id: savedMessage._id,
     conversationId: finalConversationId,
     Id_sender,
-    content: typeMessage === 'text' ? content.trim() : content, // EN CLAIR
+
+    content: typeMessage === 'text' ? content.trim() : content,
+
     typeMessage,
     status: "sent",
     timestamp: new Date(),
-    isGroup: (await Conversation.findById(finalConversationId))?.type === "group",
-    ...additionalData
+    isGroup:
+      (await Conversation.findById(finalConversationId))?.type === "group",
+    ...additionalData,
   };
 };
 
 export const messageController = {
-  // 🆕 CREATE MESSAGE UNIFIÉ
   createMessage: async (messageData, io = null, userIdFromToken = null) => {
     return await handleMessageCreation(messageData, io, userIdFromToken);
   },
+  // TRADUIRE UN MESSAGE
+  translateMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const { targetLang = "fr" } = req.body;
+      const userId = req.user.id;
 
-  // 🆕 UPLOAD IMAGE MESSAGE - SIMPLIFIÉ
+      const message = await Message.findById(messageId);
+      if (!message || message.typeMessage !== "text") {
+        return res.status(400).json({ success: false, error: "Message invalide" });
+      }
+
+      const hasAccess = await Participants.findOne({
+        Id_Conversation: message.conversationId,
+        Id_User: userId
+      });
+      if (!hasAccess) return res.status(403).json({ success: false });
+
+      const original = decryptContent(message.content);
+      const translated = await translateText(original, targetLang);
+
+      res.json({
+        success: true,
+        translated,
+        original,
+        targetLang
+      });
+    } catch (error) {
+      res.status(500).json({ success: false });
+    }
+  },
+
+  // IMAGE
   uploadImageMessage: async (file, messageData, io = null, userIdFromToken = null) => {
     try {
-      console.log('🖼️ Début upload image - DEBUG:', {
-        userIdFromToken,
-        hasFile: !!file,
-        messageData
-      });
-
-      // VALIDATION DE L'ID UTILISATEUR
-      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      
-      const { conversationId, Id_receiver } = messageData;
-
-      // VALIDATION DU FICHIER
+      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
       validateFile(file, FILE_CONFIG.image.allowedTypes, FILE_CONFIG.image.maxSize);
 
-      console.log('✅ ID expéditeur validé:', senderObjectId);
-
-      // UPLOAD IMAGE VERS CLOUDINARY
       const uploadResult = await uploadToCloudinary(file, 'image', FILE_CONFIG.image.folder);
 
-      console.log('✅ Image uploadée sur Cloudinary:', uploadResult.secure_url);
-
-      // 🆕 UTILISER LA FONCTION UNIFIÉE
       const messageDataForCreate = {
-        conversationId,
-        Id_receiver,
+        conversationId: messageData.conversationId,
+        Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
-        typeMessage: 'image'
+        typeMessage: "image",
       };
 
       const additionalData = {
         imageInfo: {
           url: uploadResult.secure_url,
           publicId: uploadResult.public_id,
-          width: uploadResult.width,
-          height: uploadResult.height
+          width: uploadResult.width || 0,
+          height: uploadResult.height || 0
         }
       };
 
       return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-
     } catch (error) {
-      console.error('💥 Erreur upload image:', error);
+      console.error('Erreur upload image:', error);
+
       throw new Error(`Échec upload image: ${error.message}`);
     }
   },
 
-  // 🆕 UPLOAD FILE MESSAGE - SIMPLIFIÉ
+
+  // VIDÉO
+  uploadVideoMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+    try {
+      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+      validateFile(file, FILE_CONFIG.video.allowedTypes, FILE_CONFIG.video.maxSize);
+
+      const uploadResult = await uploadToCloudinary(file, 'video', FILE_CONFIG.video.folder);
+
+
+      const messageDataForCreate = {
+        conversationId: messageData.conversationId,
+        Id_receiver: messageData.Id_receiver,
+        content: uploadResult.secure_url,
+        typeMessage: "video",
+      };
+
+      const additionalData = {
+        videoInfo: {
+          url: uploadResult.secure_url,
+          publicId: uploadResult.public_id,
+          duration: uploadResult.duration || 0,
+          width: uploadResult.width || 0,
+          height: uploadResult.height || 0,
+          bytes: uploadResult.bytes
+        }
+      };
+
+      return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
+    } catch (error) {
+      console.error('Erreur upload vidéo:', error);
+
+      throw new Error(`Échec upload vidéo: ${error.message}`);
+    }
+  },
+
+  // FICHIER
   uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
     try {
-      console.log('📎 Début upload fichier - DEBUG:', {
-        userIdFromToken,
-        hasFile: !!file,
-        messageData
-      });
-
-      // VALIDATION DE L'ID UTILISATEUR
-      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      
-      const { conversationId, Id_receiver, fileName, fileType, fileSize, originalName } = messageData;
-
-      // VALIDATION DU FICHIER
+      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
       validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
 
-      console.log('✅ ID expéditeur validé:', senderObjectId);
-
-      // UPLOAD FICHIER VERS CLOUDINARY
       const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
 
-      console.log('✅ Fichier uploadé sur Cloudinary:', uploadResult.secure_url);
-
-      // 🆕 UTILISER LA FONCTION UNIFIÉE
       const messageDataForCreate = {
-        conversationId,
-        Id_receiver,
+        conversationId: messageData.conversationId,
+        Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
         typeMessage: 'file'
       };
@@ -468,105 +528,125 @@ export const messageController = {
         fileInfo: {
           url: uploadResult.secure_url,
           publicId: uploadResult.public_id,
-          originalFilename: uploadResult.original_filename,
-          format: uploadResult.format,
-          bytes: uploadResult.bytes,
-          fileName: fileName,
-          fileType: fileType,
-          fileSize: fileSize,
-          originalName: originalName
+          originalFilename: uploadResult.original_filename || messageData.originalName || 'fichier',
+          bytes: uploadResult.bytes
         }
       };
 
       return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-
     } catch (error) {
-      console.error('💥 Erreur upload fichier:', error);
+      console.error('Erreur upload fichier:', error);
       throw new Error(`Échec upload fichier: ${error.message}`);
     }
   },
 
-  // 🆕 UPLOAD VIDEO MESSAGE - SIMPLIFIÉ
-  uploadVideoMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+  // 🆕 NOUVELLE FONCTION DEMANDÉE : CONTENU MULTIMÉDIA COMME MESSENGER
+  getConversationMedia: async (req, res) => {
     try {
-      console.log('🎥 Début upload vidéo - DEBUG:', {
-        userIdFromToken,
-        hasFile: !!file,
-        messageData
-      });
+      const { conversationId } = req.params;
+      const page = parseInt(req.query.page) || 1;
+      const limit = parseInt(req.query.limit) || 50;
 
-      // VALIDATION DE L'ID UTILISATEUR
-      const senderObjectId = validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      
-      const { conversationId, Id_receiver, fileName, fileType, fileSize } = messageData;
+      if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+        return res.status(400).json({ success: false, error: "ID conversation invalide" });
+      }
 
-      // VALIDATION DU FICHIER
-      validateFile(file, FILE_CONFIG.video.allowedTypes, FILE_CONFIG.video.maxSize);
+      const skip = (page - 1) * limit;
 
-      console.log('✅ ID expéditeur validé:', senderObjectId);
-
-      // UPLOAD VIDÉO VERS CLOUDINARY
-      const uploadResult = await uploadToCloudinary(file, 'video', FILE_CONFIG.video.folder);
-
-      console.log('✅ Vidéo uploadée sur Cloudinary:', uploadResult.secure_url);
-
-      // 🆕 UTILISER LA FONCTION UNIFIÉE
-      const messageDataForCreate = {
+      // Récupère TOUS les messages médias (image + vidéo + fichier)
+      const messages = await Message.find({
         conversationId,
-        Id_receiver,
-        content: uploadResult.secure_url,
-        typeMessage: 'video'
-      };
+        typeMessage: { $in: ['image', 'video', 'file'] }
+      })
+        .sort({ time: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
 
-      const additionalData = {
-        videoInfo: {
-          url: uploadResult.secure_url,
-          publicId: uploadResult.public_id,
-          format: uploadResult.format,
-          bytes: uploadResult.bytes,
-          fileName: fileName,
-          fileType: fileType,
-          fileSize: fileSize
+      // Sépare images/vidéos et fichiers
+      const media = [];
+      const files = [];
+
+      for (const msg of messages) {
+        const sender = await User.findById(msg.Id_sender).select('username').lean();
+        const senderName = sender?.username || "Inconnu";
+
+        const base = {
+          messageId: msg._id.toString(),
+          senderId: msg.Id_sender.toString(),
+          senderName,
+          timestamp: msg.time || msg.createdAt,
+          url: msg.content
+        };
+
+        if (msg.typeMessage === 'image') {
+          media.push({ ...base, type: 'image', width: msg.imageInfo?.width, height: msg.imageInfo?.height });
+        } else if (msg.typeMessage === 'video') {
+          media.push({ ...base, type: 'video', duration: msg.videoInfo?.duration });
+        } else if (msg.typeMessage === 'file') {
+          files.push({
+            ...base,
+            type: 'file',
+            fileName: msg.fileInfo?.originalFilename || msg.fileInfo?.fileName || 'Fichier',
+            size: msg.fileInfo?.bytes || msg.fileInfo?.fileSize || 0,
+            format: msg.fileInfo?.format || ''
+          });
         }
-      };
+      }
 
-      return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-
+      res.json({
+        success: true,
+        media: { // Onglet "Médias" (images + vidéos)
+          items: media,
+          hasMore: media.length === limit
+        },
+        files: { // Onglet "Fichiers"
+          items: files,
+          hasMore: files.length === limit
+        },
+        page,
+        limit
+      });
     } catch (error) {
-      console.error('💥 Erreur upload vidéo:', error);
-      throw new Error(`Échec upload vidéo: ${error.message}`);
+      console.error("Erreur getConversationMedia:", error);
+      res.status(500).json({ success: false, error: error.message });
     }
   },
 
   // RÉCUPÉRER LES MESSAGES → DÉCHIFFRE À LA VOLÉE
   getConversationMessages: async (conversationId, page = 1, limit = 50) => {
     try {
-      console.log(`Récupération messages conversation ${conversationId}, page ${page}`);
+      console.log(
+        `Récupération messages conversation ${conversationId}, page ${page}`
+      );
 
       if (!mongoose.Types.ObjectId.isValid(conversationId)) {
         throw new Error("ID conversation invalide");
       }
       const skip = (page - 1) * limit;
-const messages = await Message.find({ conversationId: conversationId })
-  .sort({ createdAt: -1 })
-  .skip(skip)
-  .limit(limit)
-  .populate({
-    path: 'reactions',
-    populate: {
-      path: 'id_user',
-      select: 'username'
-    }
-  })
-  .lean();
+      const messages = await Message.find({ conversationId: conversationId })
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .populate({
+          path: 'reactions',
+          populate: {
+            path: 'id_user',
+            select: 'username'
+          }
 
-      // DÉCHIFFRE TOUS LES MESSAGES AVANT DE LES RENVOYER
+        })
+        .lean();
+
       const decryptedMessages = messages.map((msg) => ({
         ...msg,
         _id: msg._id.toString(),
         conversationId: msg.conversationId.toString(),
         Id_sender: msg.Id_sender.toString(),
-        content: msg.typeMessage === 'text' ? decryptContent(msg.content) : msg.content,
+        content:
+          msg.typeMessage === "text"
+            ? decryptContent(msg.content)
+            : msg.content,
         timestamp: msg.time || msg.createdAt,
       }));
 
@@ -582,7 +662,13 @@ const messages = await Message.find({ conversationId: conversationId })
     userPresence = presenceMap;
   },
 
-  sendGroupMessage: async (groupId, senderId, content, typeMessage = "text", io = null) => {
+  sendGroupMessage: async (
+    groupId,
+    senderId,
+    content,
+    typeMessage = "text",
+    io = null
+  ) => {
     const messageData = {
       conversationId: groupId,
       content: content,
@@ -590,23 +676,240 @@ const messages = await Message.find({ conversationId: conversationId })
     };
     return await handleMessageCreation(messageData, io, senderId);
   },
-};
+
+  pinMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const userId = req.user.id;
+      const io = req.io;
+
+      const message = await Message.findById(messageId);
+      if (!message)
+        return res
+          .status(404)
+          .json({ success: false, error: "Message non trouvé" });
+
+      const conv = await Conversation.findById(message.conversationId);
+      const isParticipant =
+        conv?.participants?.some((p) => p.toString() === userId) ||
+        (await Participants.findOne({
+          Id_Conversation: message.conversationId,
+          Id_User: userId,
+        }));
+      if (!isParticipant)
+        return res.status(403).json({ success: false, error: "Non autorisé" });
+
+      message.isPinned = true;
+      message.pinnedBy = userId;
+      message.pinnedAt = new Date();
+      await message.save();
+
+      if (io) {
+        io.to(message.conversationId.toString()).emit("message:pinned", {
+          messageId: message._id,
+          pinnedBy: userId,
+          pinnedAt: message.pinnedAt,
+          content:
+            message.typeMessage === "text"
+              ? decryptContent(message.content)
+              : message.content,
+          typeMessage: message.typeMessage,
+        });
+      }
+
+      res.json({ success: true, message: "Message épinglé" });
+    } catch (error) {
+      console.error("Erreur pin:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  },
+
+  unpinMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const io = req.io;
+
+      const message = await Message.findByIdAndUpdate(
+        messageId,
+        { $unset: { isPinned: "", pinnedBy: "", pinnedAt: "" } },
+        { new: true }
+      );
+
+      if (!message)
+        return res.status(404).json({ error: "Message non trouvé" });
+
+      if (io) {
+        io.to(message.conversationId.toString()).emit("message:unpinned", {
+          messageId: message._id,
+        });
+      }
+
+      res.json({ success: true, message: "Message désépinglé" });
+    } catch (error) {
+      console.error("Erreur unpin:", error);
+      res.status(500).json({ error: error.message });
+    }
+  },
+
+  getPinnedMessages: async (req, res) => {
+    try {
+      const { conversationId } = req.params;
+      const messages = await Message.find({ conversationId, isPinned: true })
+        .sort({ pinnedAt: -1 })
+        .lean();
+
+      const decrypted = messages.map((m) => ({
+        ...m,
+        content:
+          m.typeMessage === "text" ? decryptContent(m.content) : m.content,
+      }));
+
+      res.json({ success: true, pinnedMessages: decrypted });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  },
+  // TRANSFERT DE MESSAGE (FORWARD) — FONCTIONNE À 100%
+  forwardMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const { targetConversationId } = req.body;
+      const userId = req.user.id;
+      const io = req.io;
+
+      if (
+        !mongoose.Types.ObjectId.isValid(messageId) ||
+        !mongoose.Types.ObjectId.isValid(targetConversationId)
+      ) {
+        return res.status(400).json({ success: false, error: "ID invalide" });
+      }
+
+      const original = await Message.findById(messageId);
+      if (!original)
+        return res
+          .status(404)
+          .json({ success: false, error: "Message non trouvé" });
+
+      // Vérif accès source
+      const sourceConv = await Conversation.findById(original.conversationId);
+      const inSource =
+        sourceConv?.Id_participant?.some((p) => p.toString() === userId) ||
+        (await Participants.findOne({
+          Id_Conversation: original.conversationId,
+          Id_User: userId,
+        }));
+      if (!inSource)
+        return res
+          .status(403)
+          .json({ success: false, error: "Accès refusé (source)" });
+
+      // Vérif accès cible
+      const targetConv = await Conversation.findById(targetConversationId);
+      const inTarget =
+        targetConv?.Id_participant?.some((p) => p.toString() === userId) ||
+        (await Participants.findOne({
+          Id_Conversation: targetConversationId,
+          Id_User: userId,
+        }));
+      if (!inTarget)
+        return res
+          .status(403)
+          .json({ success: false, error: "Accès refusé (cible)" });
+
+      // Re-chiffrement si texte
+      let newContent = original.content;
+      if (original.typeMessage === "text") {
+        newContent = encryptContent(decryptContent(original.content));
+      }
+
+      const forwarded = new Message({
+        conversationId: targetConversationId,
+        Id_sender: userId,
+        content: newContent,
+        typeMessage: original.typeMessage,
+        status: "sent",
+        isForwarded: true,
+        forwardedFrom: original._id,
+        originalSender: original.Id_sender,
+        forwardedAt: new Date(),
+        forwardCount: (original.forwardCount || 0) + 1,
+        readBy: [{ userId, readAt: new Date() }],
+      });
+
+      await forwarded.save();
+
+      // Mise à jour unreadCounts
+      await Conversation.findByIdAndUpdate(
+        targetConversationId,
+        {
+          lastMessageAt: new Date(),
+          $inc: { "unreadCounts.$[e].count": 1 },
+        },
+        { arrayFilters: [{ "e.userId": { $ne: userId } }] }
+      );
+
+      // Socket.io
+      if (io) {
+        const originalSender = await User.findById(original.Id_sender).select(
+          "username"
+        );
+        const toEmit = {
+          ...forwarded.toObject(),
+          content:
+            forwarded.typeMessage === "text"
+              ? decryptContent(newContent)
+              : newContent,
+          Id_sender: { _id: userId, username: req.user.username },
+          originalSender: {
+            _id: originalSender._id,
+            username: originalSender.username,
+          },
+        };
+        io.to(targetConversationId.toString()).emit("new_message", {
+          message: toEmit,
+          conversationId: targetConversationId,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Message transféré avec succès",
+        forwardedMessage: forwarded,
+      });
+    } catch (error) {
+      console.error("Erreur forwardMessage:", error);
+      return res.status(500).json({ success: false, error: error.message });
+    }
+  },
+}; // ← Fermeture CORRECTE de l’objet messageController
+
 
 // FONCTIONS ANNEXES
 async function isUserOnlineAdvanced(io, userId) {
   try {
     if (userPresence && userPresence.has(userId)) {
       const presence = userPresence.get(userId);
-      const isOnline = presence.status === 'online' && presence.sessions && presence.sessions.length > 0;
-      console.log(`🔍 Présence mémoire ${userId}: ${isOnline} (${presence.sessions?.length} sessions)`);
+      const isOnline =
+        presence.status === "online" &&
+        presence.sessions &&
+        presence.sessions.length > 0;
+      console.log(
+        `🔍 Présence mémoire ${userId}: ${isOnline} (${presence.sessions?.length} sessions)`
+      );
       return isOnline;
     }
     const user = await User.findById(userId);
-    const isOnlineDB = user && user.status === 'online' && user.activeSessions && user.activeSessions.length > 0;
-    console.log(`🔍 Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`);
+    const isOnlineDB =
+      user &&
+      user.status === "online" &&
+      user.activeSessions &&
+      user.activeSessions.length > 0;
+    console.log(
+      `🔍 Présence BDD ${userId}: ${isOnlineDB} (${user?.activeSessions?.length} sessions)`
+    );
     return isOnlineDB;
   } catch (error) {
-    console.log('⚠️ Erreur vérification présence avancée:', error.message);
+    console.log("⚠️ Erreur vérification présence avancée:", error.message);
     const userRoom = io?.sockets?.adapter?.rooms?.get(`user_${userId}`);
     const isOnlineWS = userRoom && userRoom.size > 0;
     console.log(`🔍 Présence WebSocket ${userId}: ${isOnlineWS}`);
@@ -614,16 +917,91 @@ async function isUserOnlineAdvanced(io, userId) {
   }
 }
 
+    translateMessage: async (req, res) => {
+    try {
+      const { messageId } = req.params;
+      const { targetLang = "fr" } = req.body || {};
+      const userId = req.user?.id;
+
+      console.log("TRADUCTION DEMANDÉE :", { messageId, targetLang, userId });
+
+      // 1. Récupérer le message
+      const message = await Message.findById(messageId);
+      if (!message) {
+        console.log("Message non trouvé :", messageId);
+        return res.status(404).json({ success: false, error: "Message introuvable" });
+      }
+      if (message.typeMessage !== "text") {
+        return res.status(400).json({ success: false, error: "Seuls les messages texte peuvent être traduits" });
+      }
+
+      const originalText = decryptContent(message.content).trim();
+      console.log("Texte original :", originalText);
+
+      // 2. Si on demande le français → on renvoie direct
+      if (!targetLang || targetLang.toLowerCase() === "fr") {
+        return res.json({
+          success: true,
+          original: originalText,
+          translated: originalText,
+          targetLang: "fr"
+        });
+      }
+
+      // 3. TRADUCTION MYMEMORY (fonctionne toujours en 2025)
+      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(originalText)}&langpair=auto|${targetLang.toLowerCase()}`;
+
+      console.log("Appel API traduction :", url);
+
+      const apiRes = await fetch(url, {
+        headers: {
+          "User-Agent": "OwlyApp/1.0"
+        }
+      });
+
+      if (!apiRes.ok) {
+        console.log("API MyMemory a répondu avec status :", apiRes.status);
+        throw new Error(`HTTP ${apiRes.status}`);
+      }
+
+      const data = await apiRes.json();
+      console.log("Réponse MyMemory :", data);
+
+      const translated = data.responseStatus === 200 
+        ? data.responseData.translatedText 
+        : originalText;
+
+      console.log("Traduction réussie :", translated);
+
+      return res.json({
+        success: true,
+        original: originalText,
+        translated,
+        targetLang
+      });
+
+    } catch (error) {
+      console.error("ERREUR COMPLÈTE TRADUCTION :", error);
+      return res.status(500).json({
+        success: false,
+        error: "Traduction impossible pour le moment",
+        debug: error.message  // tu verras le vrai problème dans la console
+      });
+    }
+  },
 async function areNotificationsEnabled(userId) {
   try {
     const user = await User.findById(userId);
     if (!user) return true;
-    if (user.notificationPreferences && user.notificationPreferences.pushEnabled === false) {
+    if (
+      user.notificationPreferences &&
+      user.notificationPreferences.pushEnabled === false
+    ) {
       return false;
     }
     return true;
   } catch (error) {
-    console.log('⚠️ Erreur vérification notifications:', error.message);
+    console.log("⚠️ Erreur vérification notifications:", error.message);
     return true;
   }
 }
@@ -631,29 +1009,43 @@ async function areNotificationsEnabled(userId) {
 async function shouldSendPushNotification(userId) {
   try {
     const user = await User.findById(userId);
-    
+
     if (!user) return true;
-    
-    if (user.notificationPreferences && user.notificationPreferences.pushEnabled === false) {
+
+    if (
+      user.notificationPreferences &&
+      user.notificationPreferences.pushEnabled === false
+    ) {
       console.log(`🔕 Notifications désactivées pour: ${user.username}`);
       return false;
     }
-    
-    if (user.notificationPreferences && user.notificationPreferences.quietHours && user.notificationPreferences.quietHours.enabled) {
+
+    if (
+      user.notificationPreferences &&
+      user.notificationPreferences.quietHours &&
+      user.notificationPreferences.quietHours.enabled
+    ) {
       const now = new Date();
-      const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+      const currentTime =
+        now.getHours().toString().padStart(2, "0") +
+        ":" +
+        now.getMinutes().toString().padStart(2, "0");
       const { start, end } = user.notificationPreferences.quietHours;
-      
+
       if (currentTime >= start || currentTime <= end) {
-        console.log(`🌙 Heures silencieuses pour: ${user.username} (${start}-${end})`);
+        console.log(
+          `🌙 Heures silencieuses pour: ${user.username} (${start}-${end})`
+        );
         return false;
       }
     }
-    
+
     return true;
-    
   } catch (error) {
-    console.log('⚠️ Erreur vérification push:', error.message);
+    console.log("⚠️ Erreur vérification push:", error.message);
     return true;
   }
 }
+
+
+  

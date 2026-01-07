@@ -125,7 +125,6 @@ router.get("/unread-counts/:userId", protact, async (req, res) => {
           conversationId: conversation._id,
           unreadCount: count,
           conversationType: conversation.type,
-
           conversationName:
             conversation.type === "group" ? conversation.groupName : null,
         });
@@ -149,7 +148,6 @@ router.get("/unread-counts/:userId", protact, async (req, res) => {
 });
 
 // 🆕 ROUTE POUR MARQUER UNE CONVERSATION COMME LUE
-
 router.post("/mark-as-read/:conversationId", protact, async (req, res) => {
   try {
     const { conversationId } = req.params;
@@ -198,7 +196,6 @@ router.post("/mark-as-read/:conversationId", protact, async (req, res) => {
 });
 
 // 🆕 ROUTE POUR RÉCUPÉRER LES CONVERSATIONS D'UN USER
-
 router.get("/user/:userId", protact, async (req, res) => {
   try {
     const { userId } = req.params;
@@ -222,13 +219,22 @@ router.get("/user/:userId", protact, async (req, res) => {
     const userConversations = await Participants.find({
       Id_User: userId,
     })
-      .populate("Id_Conversation")
+      .populate({
+        path: "Id_Conversation",
+        match: {
+          "archivedBy.userId": { $ne: userId }, // 🆕 EXCLURE LES CONVERSATIONS ARCHIVÉES
+        },
+      })
       .populate("Id_User", "username profilePicture");
 
-    const conversations = userConversations.map((p) => ({
+    // 🆕 FILTRER LES CONVERSATIONS NULL (ARCHIVÉES)
+    const filteredConversations = userConversations.filter(
+      (p) => p.Id_Conversation !== null
+    );
+
+    const conversations = filteredConversations.map((p) => ({
       _id: p.Id_Conversation._id,
       type: p.Id_Conversation.type,
-
       name:
         p.Id_Conversation.type === "group" ? p.Id_Conversation.groupName : null,
       unreadCount:
@@ -239,7 +245,9 @@ router.get("/user/:userId", protact, async (req, res) => {
       participants: [p.Id_User],
     }));
 
-    console.log(`✅ ${conversations.length} conversations trouvées`);
+    console.log(
+      `✅ ${conversations.length} conversations non archivées trouvées`
+    );
 
     res.json({
       success: true,
@@ -265,26 +273,27 @@ router.get("/", protact, async (req, res) => {
     const userParticipants = await Participants.find({
       Id_User: userId,
     })
-      .populate("Id_Conversation")
+      .populate({
+        path: "Id_Conversation",
+        match: {
+          "archivedBy.userId": { $ne: userId }, // 🆕 EXCLURE LES CONVERSATIONS ARCHIVÉES
+        },
+      })
       .populate("Id_User", "username profilePicture");
 
     console.log("🔍 DEBUG - Participants trouvés:", userParticipants.length);
 
-    const formattedConversations = await Promise.all(
-      userParticipants.map(async (participant) => {
-        // 🎯 VÉRIFICATION RENFORCÉE
-        if (
-          !participant ||
-          !participant.Id_Conversation ||
-          !participant.Id_Conversation._id
-        ) {
-          console.log(
-            "⚠️ Participant ou conversation invalide:",
-            participant?._id
-          );
-          return null;
-        }
+    // 🆕 FILTRER D'ABORD LES PARTICIPANTS AVEC CONVERSATIONS NON NULL
+    const validParticipants = userParticipants.filter(
+      (p) => p.Id_Conversation !== null
+    );
 
+    console.log(
+      `🔍 DEBUG - Conversations non archivées: ${validParticipants.length}`
+    );
+
+    const formattedConversations = await Promise.all(
+      validParticipants.map(async (participant) => {
         const conv = participant.Id_Conversation;
 
         // 🎯 RÉCUPÉRER TOUS LES PARTICIPANTS DE CETTE CONVERSATION
@@ -321,18 +330,13 @@ router.get("/", protact, async (req, res) => {
       })
     );
 
-    // FILTRER LES CONVERSATIONS NULLES
-    const validConversations = formattedConversations.filter(
-      (conv) => conv !== null
-    );
-
     console.log(
-      `✅ ${validConversations.length} conversations valides trouvées`
+      `✅ ${formattedConversations.length} conversations non archivées trouvées`
     );
 
     res.json({
       success: true,
-      conversations: validConversations,
+      conversations: formattedConversations,
     });
   } catch (error) {
     console.error("❌ Erreur récupération conversations:", error);
