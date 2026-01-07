@@ -30,6 +30,13 @@ const conversationSchema = new Schema(
         _id: false, // pas d'_id inutile sur chaque entrée
       },
     ],
+
+    deletedBy: [
+    {
+      userId: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
+      deletedAt: { type: Date, default: Date.now },
+    },
+  ],
     // 🆕 NOUVEAU : Archivage par utilisateur
     archivedBy: [
       {

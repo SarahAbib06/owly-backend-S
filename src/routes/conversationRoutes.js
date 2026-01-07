@@ -39,17 +39,7 @@ router.post("/private", protact, async (req, res) => {
 
     res.json({
       success: true,
-      conversation: {
-        _id: conversation._id,
-        type: conversation.type,
-        participants: conversation.participants || [], // ou ce que tu as
-        // ... autres champs que tu renvoies déjà
-
-        // AJOUTE ÇA
-        isMessageRequest: conversation.isMessageRequest || false,
-        messageRequestFor: conversation.messageRequestFor || null,
-        messageRequestFrom: conversation.messageRequestFrom || null,
-      },
+      conversation,
     });
   } catch (error) {
     console.error("❌ Erreur création conversation privée:", error);
@@ -249,68 +239,163 @@ router.post("/mark-as-read/:conversationId", protact, async (req, res) => {
 });
 
 // 🆕 ROUTE POUR RÉCUPÉRER LES CONVERSATIONS D'UN USER
+// 🆕 ROUTE POUR RÉCUPÉRER LES CONVERSATIONS ARCHIVÉES (avec vrai nom + avatar)
+// 🆕 ROUTE CORRIGÉE POUR LES ARCHIVES : même format que les conversations normales
 router.get("/user/:userId", protact, async (req, res) => {
   try {
     const { userId } = req.params;
+    const currentUserId = req.user._id.toString();
 
-    if (userId !== req.user._id.toString()) {
+    if (userId !== currentUserId) {
       return res.status(403).json({
         success: false,
-        error: "Non autorisé à voir les conversations d'un autre utilisateur",
+        error: "Non autorisé",
       });
     }
 
     if (!mongoose.Types.ObjectId.isValid(userId)) {
       return res.status(400).json({
         success: false,
-        error: "ID utilisateur invalide",
+        error: "ID invalide",
       });
     }
 
-    console.log(`📂 Récupération conversations pour user: ${userId}`);
+    console.log(`Récupération des conversations ARCHIVÉES pour ${userId}`);
 
-    const userConversations = await Participants.find({
+    // Même logique que la route principale GET /, mais on filtre sur les archivées
+    const userParticipants = await Participants.find({
       Id_User: userId,
     })
       .populate({
         path: "Id_Conversation",
         match: {
-          "archivedBy.userId": { $ne: userId }, // 🆕 EXCLURE LES CONVERSATIONS ARCHIVÉES
+          "archivedBy.userId": userId, // ← SEULEMENT les conversations archivées par cet utilisateur
+          "deletedBy.userId": { $ne: userId }, // optionnel : exclure les supprimées
         },
       })
       .populate("Id_User", "username profilePicture");
 
-    // 🆕 FILTRER LES CONVERSATIONS NULL (ARCHIVÉES)
-    const filteredConversations = userConversations.filter(
-      (p) => p.Id_Conversation !== null
+    const validParticipants = userParticipants.filter(p => p.Id_Conversation !== null);
+
+    const formattedConversations = await Promise.all(
+      validParticipants.map(async (participant) => {
+        const conv = participant.Id_Conversation;
+
+        // Récupérer tous les participants de la conversation
+        const allParticipants = await Participants.find({
+          Id_Conversation: conv._id,
+        }).populate("Id_User", "username profilePicture");
+
+        let conversationName = "Utilisateur";
+        let conversationAvatar = "/default-avatar.png";
+
+        if (conv.type === "private") {
+          const otherParticipant = allParticipants.find(
+            p => p.Id_User._id.toString() !== currentUserId
+          );
+          conversationName = otherParticipant?.Id_User?.username || "Utilisateur";
+          conversationAvatar = otherParticipant?.Id_User?.profilePicture || "/default-avatar.png";
+        } else if (conv.type === "group") {
+          conversationName = conv.groupName || "Groupe sans nom";
+          conversationAvatar = "/default-group-avatar.png";
+        }
+
+        const userUnread = conv.unreadCounts?.find(
+          u => u.userId?.toString() === currentUserId
+        );
+
+        return {
+          _id: conv._id,
+          type: conv.type,
+          name: conversationName,
+          avatar: conversationAvatar,
+          unreadCount: userUnread?.count || 0,
+          lastMessageAt: conv.lastMessageAt,
+          createdAt: conv.createdAt,
+          participants: allParticipants.map(p => p.Id_User),
+          isArchived: true, // très important pour l'UI
+          myRole: participant.Role,
+        };
+      })
     );
 
-    const conversations = filteredConversations.map((p) => ({
-      _id: p.Id_Conversation._id,
-      type: p.Id_Conversation.type,
-      name:
-        p.Id_Conversation.type === "group" ? p.Id_Conversation.groupName : null,
-      unreadCount:
-        p.Id_Conversation.unreadCounts?.find(
-          (u) => u.userId && u.userId.toString() === userId
-        )?.count || 0,
-      lastMessageAt: p.Id_Conversation.lastMessageAt,
-      participants: [p.Id_User],
-    }));
-
-    console.log(
-      `✅ ${conversations.length} conversations non archivées trouvées`
+    // Tri par date (plus récent en haut)
+    formattedConversations.sort((a, b) => 
+      new Date(b.lastMessageAt || b.createdAt) - new Date(a.lastMessageAt || a.createdAt)
     );
 
     res.json({
       success: true,
-      conversations: conversations,
+      conversations: formattedConversations,
+      count: formattedConversations.length,
     });
   } catch (error) {
-    console.error("❌ Erreur récupération conversations:", error);
+    console.error("Erreur récupération archives:", error);
     res.status(500).json({
       success: false,
       error: error.message,
+    });
+  }
+});
+
+// 🗑️ SUPPRIMER UNE CONVERSATION (UNIQUEMENT POUR MOI)
+router.delete("/:conversationId", protact, async (req, res) => {
+  try {
+    if (!req.user || !req.user._id) {
+      return res.status(401).json({
+        success: false,
+        error: "Utilisateur non authentifié (req.user manquant)"
+      });
+    }
+
+    const userId = req.user._id;
+    const { conversationId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({ success: false, error: "ID conversation invalide" });
+    }
+
+    console.log(`[DELETE] Tentative suppression conv ${conversationId} par user ${userId}`);
+
+    const participant = await Participants.findOne({
+      Id_User: userId,
+      Id_Conversation: conversationId
+    });
+
+    if (!participant) {
+      return res.status(403).json({
+        success: false,
+        error: "Vous ne participez pas à cette conversation"
+      });
+    }
+
+    // Soft delete : on supprime juste l’entrée participant
+    await Participants.deleteOne({
+      Id_User: userId,
+      Id_Conversation: conversationId
+    });
+
+    // Option : si plus personne dans la conv → supprimer tout (facultatif)
+    const remaining = await Participants.countDocuments({ Id_Conversation: conversationId });
+    if (remaining === 0) {
+      await Conversation.findByIdAndDelete(conversationId);
+      // await Message.deleteMany({ conversationId }); // ← à activer si tu veux
+      console.log(`Conv ${conversationId} supprimée totalement (plus de participants)`);
+    }
+
+    // Émission socket
+    req.io?.to(`user_${userId}`).emit("conversation_deleted", { conversationId });
+
+    res.json({
+      success: true,
+      message: "Conversation supprimée de votre liste"
+    });
+
+  } catch (error) {
+    console.error("[DELETE ERROR]", error);
+    res.status(500).json({
+      success: false,
+      error: error.message || "Erreur serveur interne"
     });
   }
 });
@@ -330,6 +415,7 @@ router.get("/", protact, async (req, res) => {
         path: "Id_Conversation",
         match: {
           "archivedBy.userId": { $ne: userId }, // 🆕 EXCLURE LES CONVERSATIONS ARCHIVÉES
+          "deletedBy.userId": { $ne: userId },
         },
       })
       .populate("Id_User", "username profilePicture");
@@ -379,9 +465,6 @@ router.get("/", protact, async (req, res) => {
           participants: allParticipants.map((p) => p.Id_User), // 🎯 TOUS LES PARTICIPANTS
           createdAt: conv.createdAt,
           myRole: participant.Role, // 🎯 TON RÔLE DANS CETTE CONVERSATION
-          isMessageRequest: conv.isMessageRequest || false,
-          messageRequestFor: conv.messageRequestFor || null,
-          messageRequestFrom: conv.messageRequestFrom || null,
         };
       })
     );

@@ -318,8 +318,13 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
   });
   const savedMessage = await message.save();
 
-    
 
+  // ────────────────────────────────────────────────────────────────
+// AJOUT : Récupérer le tempId envoyé par le frontend
+// ────────────────────────────────────────────────────────────────
+const tempId = messageData.tempId || null;
+
+    
   // === AJOUT : Mise à jour unreadCounts SEULEMENT si la relation est acceptée ===
   if (requestStatus === "accepted") {
     try {
@@ -484,6 +489,13 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     };
 
     io.to(finalConversationId.toString()).emit("new_message", messageToEmit);
+    if (tempId) {
+    io.to(`user_${Id_sender}`).emit("message_sent", {
+      success: true,
+      data: messageToEmit,
+      tempId,           // ← le frontend va s’en servir pour remplacer
+    });
+  }
   }
 
     const conversation = await Conversation.findById(finalConversationId);
