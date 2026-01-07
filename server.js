@@ -13,6 +13,7 @@ import connectDB from "./src/config/db.js";
 import User from "./src/models/User.js";
 import authRoutes from "./src/routes/auth.js";
 import { configureChatSockets } from "./src/socket/chatSocket.js";
+import { configurePadSockets } from "./src/socket/PadSocket.js";
 import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
@@ -77,6 +78,7 @@ connectDB();
 app.set('io', io); 
 
 // ✅ Configuration des sockets
+configurePadSockets(io);
 configureChatSockets(io);
 // 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
 const cleanupOrphans = async () => {
@@ -90,7 +92,7 @@ const cleanupOrphans = async () => {
 cleanupOrphans();
 
 app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+app.use("/public", express.static("public"));
 
 // ✅ 3. Routes
 app.get("/", (req, res) => {

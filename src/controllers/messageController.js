@@ -5,7 +5,7 @@ import Participants from "../models/Participants.js";
 import User from "../models/User.js";
 import Relation from "../models/Relation.js";
 import { conversationController } from "./conversationController.js";
-import { pushNotificationService } from "../services/pushNotificationService.js";
+import { sendPushToUser } from '../utils/pushNotification.js';
 import mongoose from "mongoose";
 import crypto from "crypto";
 import cloudinary from '../config/cloudinary.js';
@@ -245,13 +245,15 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
   });
   const savedMessage = await message.save();
 
+  // CORRECTION : participantsToNotify doit être déclaré ICI, AVANT le try
+  const participantsToNotify = [];
+
   // UN SEUL BLOC POUR LES COMPTEURS NON LUS
   try {
     const participants = await Participants.find({
       Id_Conversation: finalConversationId,
     });
     const bulkOperations = [];
-    const participantsToNotify = [];
     
     for (const participant of participants) {
       if (participant.Id_User.toString() !== Id_sender.toString()) {
@@ -294,89 +296,54 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     console.error("Erreur mise à jour compteurs:", error.message);
   }
 
-  // NOTIFICATIONS INTELLIGENTES
+  // NOTIFICATIONS PUSH (enfin activées !)
   try {
-    console.log("Gestion intelligente des notifications...");
+    // On récupère le nom + avatar de l'expéditeur une seule fois
+    const sender = await User.findById(Id_sender)
+      .select('username profilePicture')
+      .lean();
 
-    let participants = [];
-    const conversation = await Conversation.findById(finalConversationId);
-    if (conversation && conversation.type === "group") {
-      participants = conversation.Id_participant.map((userId) => ({
-        Id_User: { _id: userId },
-      }));
-    } else {
-      participants = await Participants.find({
-        Id_Conversation: finalConversationId,
-      }).populate("Id_User", "username");
-    }
-    
-    const sender = await User.findById(Id_sender);
-    const senderName = sender?.username || "Quelqu'un";
+    // On parcourt tous les participants qui doivent recevoir la notif
+    for (const participantId of participantsToNotify) {
+      const receiverId = participantId.toString();
 
-    // Préparer le contenu de notification selon le type
-    let notificationBody = "";
-    if (typeMessage === 'text') {
-      notificationBody = content.length > 30 ? content.substring(0, 30) + "..." : content;
-    } else if (typeMessage === 'image') {
-      notificationBody = "📷 Image partagée";
-    } else if (typeMessage === 'video') {
-      notificationBody = "🎥 Vidéo partagée";
-    } else if (typeMessage === 'file') {
-      notificationBody = "📎 Fichier partagé";
-    }
-
-    for (let participant of participants) {
-      const participantId = participant.Id_User._id.toString();
-      if (participantId !== Id_sender.toString()) {
-        const participantUser = await User.findById(participantId);
-        const participantName = participantUser?.username || "Utilisateur";
+      // Vérifie les préférences (push activé + heures silencieuses)
+      if (await shouldSendPushNotification(receiverId)) {
         
-        const notificationsEnabled = await areNotificationsEnabled(participantId);
-        if (!notificationsEnabled) {
-          console.log(`NOTIFICATIONS COMPLÈTEMENT DÉSACTIVÉES pour: ${participantName}`);
-          continue;
+        let body = 'Nouveau message';
+        if (typeMessage === 'text') {
+          body = content.trim().length > 100
+            ? content.trim().substring(0, 97) + '...'
+            : content.trim();
+        } else if (typeMessage === 'image') {
+          body = 'A envoyé une photo';
+        } else if (typeMessage === 'video') {
+          body = 'A envoyé une vidéo';
+        } else if (typeMessage === 'file') {
+          body = 'A envoyé un fichier';
         }
-        
-        const isUserOnline = await isUserOnlineAdvanced(io, participantId);
-        console.log(`${participantName}: En ligne=${isUserOnline}, Notifications=ACTIVÉES`);
-        
-        const notificationTitle = conversation?.type === "group"
-          ? `${conversation.groupName} - ${senderName}`
-          : `Nouveau message de ${senderName}`;
 
-        if (isUserOnline && io) {
-          console.log(`WebSocket à: ${participantName}`);
-          io.to(`user_${participantId}`).emit("new_message_alert", {
-            type: "new_message",
-            conversationId: finalConversationId,
-            senderId: savedMessage.Id_sender,
-            senderName: senderName,
-            messagePreview: notificationBody,
-            timestamp: new Date(),
-            messageId: savedMessage._id,
-            isGroup: conversation?.type === "group",
-            groupName: conversation?.groupName,
-          });
-        } else {
-          console.log(`Push notification à: ${participantName}`);
-          await pushNotificationService.sendToUser(
-            participantId,
-            notificationTitle,
-            notificationBody,
-            {
-              conversationId: finalConversationId.toString(),
-              messageId: savedMessage._id.toString(),
-              type: "new_message",
-              senderName: senderName,
-              isGroup: conversation?.type === "group",
-              groupName: conversation?.groupName,
-            }
-          );
-        }
+        const pushPayload = {
+          title: sender.username,
+          body: body,
+          icon: sender.profilePicture || 'https://res.cloudinary.com/dv9oqjulh/image/upload/v1764324539/photo_de_profil_par_defaut_j3qm1p.png',
+          badge: '/badge-72.png',
+          data: {
+            conversationId: finalConversationId.toString(),
+            url: `/chat/${finalConversationId}`
+          },
+          tag: `msg-${finalConversationId}`,
+          renotify: true,
+          vibrate: [200, 100, 200]
+        };
+
+        // ENVOI RÉEL DE LA NOTIFICATION PUSH
+        await sendPushToUser(receiverId, pushPayload);
       }
     }
   } catch (error) {
-    console.log("Erreur notifications:", error.message);
+    console.error('Erreur envoi notification push:', error.message);
+    // On ne bloque pas l'envoi du message même si la push échoue
   }
 
   // DIFFUSION WEBSOCKET

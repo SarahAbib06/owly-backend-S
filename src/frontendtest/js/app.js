@@ -495,24 +495,22 @@ function handleNewMessage(message) {
     // Mettre à jour la dernière conversation
     updateConversationLastMessage(message.conversationId, message);
     
-    // Mettre à jour les badges si pas la conversation active
-    if (!state.currentConversation || message.conversationId !== state.currentConversation._id) {
-        updateConversationBadge(message.conversationId);
-        
-        // Notification
-        let preview = message.content;
-        if (message.typeMessage === 'image') preview = '📷 Image';
-        if (message.typeMessage === 'video') preview = '🎥 Vidéo';
-        if (message.typeMessage === 'file') preview = '📁 Fichier';
-        if (message.typeMessage === 'audio') preview = '🎤 Message audio';
-        
-        showNotification({
-            type: 'new_message',
-            conversationId: message.conversationId,
-            senderName: message.Id_sender?.username || 'Quelqu\'un',
-            messagePreview: preview
-        });
-    }
+// Toast notification même si app ouverte (si onglet caché ou autre conversation)
+if (document.hidden || !state.currentConversation || message.conversationId !== state.currentConversation._id) {
+    updateConversationBadge(message.conversationId);
+
+    let preview = message.content;
+    if (message.typeMessage === 'image') preview = '📷 Image';
+    if (message.typeMessage === 'video') preview = '🎥 Vidéo';
+    if (message.typeMessage === 'file') preview = '📁 Fichier';
+    if (message.typeMessage === 'audio') preview = '🎤 Message vocal';
+
+    showToast({
+        senderName: message.Id_sender?.username || 'Quelqu\'un',
+        messagePreview: preview,
+        conversationId: message.conversationId
+    });
+}
     
     // Si c'est la conversation active, recharger les messages
     if (state.currentConversation && message.conversationId === state.currentConversation._id) {
@@ -584,9 +582,94 @@ function initMessagingPage() {
     
     // Démarrer WebSocket
     initWebSocket();
+    setTimeout(() => {
+    registerWebPush();
+}, 3000);
     PadSystem.init()
 }
+// === NOTIFICATIONS PUSH NAVIGATEUR (WEB PUSH) ===
+// === NOTIFICATIONS PUSH NAVIGATEUR (WEB PUSH) - VERSION FINALE ===
+async function registerWebPush() {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.log("⚠️ Push notifications non supportées par ce navigateur");
+        return;
+    }
 
+    try {
+        console.log("🚀 Démarrage enregistrement web push...");
+
+        // 1. Demander la permission
+        const permission = await Notification.requestPermission();
+        if (permission !== 'granted') {
+            console.log("❌ Permission refusée");
+            return;
+        }
+
+        // 2. Enregistrer le service worker (chemin adapté à ta structure)
+        const registration = await navigator.serviceWorker.register('/src/frontendtest/sw.js');
+
+        // 3. Récupérer la clé VAPID du backend (avec les nouvelles clés Firebase)
+        const res = await fetch(`${CONFIG.BACKEND_URL}/api/notifications/vapid-public-key`);
+        if (!res.ok) throw new Error("Impossible de récupérer la clé VAPID");
+        const data = await res.json();
+        const vapidPublicKey = data.publicKey;
+        const convertedVapidKey = urlBase64ToUint8Array(vapidPublicKey);
+
+        // 4. DÉSABONNER L'ANCIEN ABO (obligatoire pour changer de clé)
+        const existingSubscription = await registration.pushManager.getSubscription();
+        if (existingSubscription) {
+            console.log("🗑️ Désabonnement de l'ancien push...");
+            await existingSubscription.unsubscribe();
+            console.log("✅ Ancien abonnement supprimé");
+        }
+
+        // 5. S'ABONNER AVEC LES NOUVELLES CLÉS FIREBASE
+        const subscription = await registration.pushManager.subscribe({
+            userVisibleOnly: true,
+            applicationServerKey: convertedVapidKey
+        });
+        console.log("✅ Nouvelle subscription générée avec clés Firebase");
+
+        // 6. Envoyer au backend
+        const response = await fetch(`${CONFIG.BACKEND_URL}/api/notifications/register`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${state.token}`
+            },
+            body: JSON.stringify({
+                subscription: subscription,
+                userId: state.user.id || state.user._id
+            })
+        });
+
+        if (response.ok) {
+            console.log("✅ Nouveau token web push enregistré sur le serveur !");
+            showMessage("🔔 Notifications push activées avec succès !", "success");
+        } else {
+            console.error("❌ Erreur serveur");
+        }
+
+    } catch (error) {
+        console.error("❌ Erreur registration web push:", error);
+    }
+}
+
+// Fonction utilitaire pour convertir la clé VAPID
+function urlBase64ToUint8Array(base64String) {
+    const padding = '='.repeat((4 - base64String.length % 4) % 4);
+    const base64 = (base64String + padding)
+        .replace(/-/g, '+')
+        .replace(/_/g, '/');
+
+    const rawData = window.atob(base64);
+    const outputArray = new Uint8Array(rawData.length);
+
+    for (let i = 0; i < rawData.length; ++i) {
+        outputArray[i] = rawData.charCodeAt(i);
+    }
+    return outputArray;
+}
 function checkAuth() {
     const token = localStorage.getItem("owly_token");
     const userData = localStorage.getItem("owly_user");
@@ -712,26 +795,96 @@ window.loadInitialData = loadInitialData;
 window.owlyState = state;
 
 // ✅ Ajout des fonctions manquantes
-function showNotification(notificationData) {
-    console.log("🔔 Notification:", notificationData);
-    
-    // Vérifier si les notifications sont autorisées
-    if (!("Notification" in window)) {
-        console.log("❌ Ce navigateur ne supporte pas les notifications");
-        return;
-    }
-    
-    if (Notification.permission === "granted") {
-        createNotification(notificationData);
-    } else if (Notification.permission !== "denied") {
-        Notification.requestPermission().then(permission => {
-            if (permission === "granted") {
-                createNotification(notificationData);
+function showNotification(data) {
+    const popup = document.getElementById("notificationPopup");
+    const titleEl = document.getElementById("notificationTitle");
+    const contentEl = document.getElementById("notificationContent");
+
+    // Titre et contenu
+    titleEl.textContent = data.senderName ? `Nouveau message de ${data.senderName}` : "Nouveau message";
+    contentEl.textContent = data.messagePreview || "Vous avez un nouveau message";
+
+    // Afficher avec animation
+    popup.style.display = "block";
+    popup.classList.remove("show");
+    void popup.offsetWidth; // Force reflow pour relancer l'animation
+    popup.classList.add("show");
+
+    // Son "ding" discret
+    const audio = new Audio("https://www.soundjay.com/buttons/sounds/button-09.mp3"); // Son gratuit et léger
+    audio.volume = 0.5;
+    audio.play().catch(() => console.log("Son bloqué (normal si pas d'interaction préalable)"));
+
+    // Gestion des boutons
+    document.getElementById("notificationReplyBtn").onclick = () => {
+        if (data.conversationId) {
+            const conv = state.conversations.find(c => c._id === data.conversationId);
+            if (conv) {
+                selectConversation(conv);
+                document.getElementById("messageInput")?.focus();
             }
-        });
-    }
+        }
+        hideNotificationPopup();
+    };
+
+    document.getElementById("notificationOpenBtn").onclick = () => {
+        if (data.conversationId) {
+            const conv = state.conversations.find(c => c._id === data.conversationId);
+            if (conv) selectConversation(conv);
+        }
+        hideNotificationPopup();
+    };
+
+    document.getElementById("closeNotification").onclick = hideNotificationPopup;
+
+    // Auto-hide après 8 secondes
+    setTimeout(hideNotificationPopup, 8000);
 }
 
+function hideNotificationPopup() {
+    const popup = document.getElementById("notificationPopup");
+    popup.classList.remove("show");
+    setTimeout(() => {
+        popup.style.display = "none";
+    }, 300); // Temps de l'animation fade out
+}
+function showToast(data) {
+    const toast = document.getElementById("toastNotification");
+    const title = document.getElementById("toastTitle");
+    const message = document.getElementById("toastMessage");
+    const avatar = toast.querySelector(".toast-avatar");
+
+    title.textContent = data.senderName || "Nouveau message";
+    message.textContent = data.messagePreview || "Vous avez un nouveau message";
+    avatar.textContent = (data.senderName || "U").charAt(0).toUpperCase();
+
+    toast.classList.add("show");
+
+    // Son ding
+    const audio = new Audio("https://www.soundjay.com/buttons/sounds/button-09.mp3");
+    audio.volume = 0.6;
+    audio.play().catch(() => {});
+
+    // Clic sur le toast → ouvre la conversation
+    toast.onclick = () => {
+        if (data.conversationId) {
+            const conv = state.conversations.find(c => c._id === data.conversationId);
+            if (conv) {
+                selectConversation(conv);
+                document.getElementById("messageInput")?.focus();
+            }
+        }
+        hideToast();
+    };
+
+    // Disparaît après 6 secondes
+    setTimeout(hideToast, 6000);
+}
+
+function hideToast() {
+    const toast = document.getElementById("toastNotification");
+    toast.classList.remove("show");
+}
 function createNotification(data) {
     const options = {
         body: data.messagePreview || "Nouveau message",

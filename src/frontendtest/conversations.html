@@ -10,209 +10,139 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="test-style.css">
 
-    <!-- OneSignal SDK v16 (2025) - CONFIGURATION COMPLÈTE -->
-    <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
-    <script>
-        window.OneSignalDeferred = window.OneSignalDeferred || [];
-        
-        OneSignalDeferred.push(async function(OneSignal) {
-            try {
-                // Configuration optimisée pour le développement local
-                await OneSignal.init({
-                    appId: "961d2a5c-36e7-4db3-8c28-828e4ea30548",
-                    
-                    // Autoriser localhost
-                    allowLocalhostAsSecureOrigin: true,
-                    
-                    // Configuration des notifications
-                    notifyButton: {
-                        enable: true,
-                        position: "bottom-right",
-                        size: "medium", 
-                        theme: "default",
-                        showCredit: false,
-                        text: {
-                            'tip.state.unsubscribed': 'Activer les notifications Owly 🦉',
-                            'tip.state.subscribed': 'Notifications activées !',
-                            'message.prenotify': 'Cliquez pour activer les notifications',
-                            'dialog.main.title': 'Notifications Owly',
-                            'dialog.main.button.subscribe': 'ACTIVER',
-                            'dialog.main.button.unsubscribe': 'NON MERCI',
-                        }
-                    },
-                    
-                    // Désactiver les notifications de bienvenue
-                    welcomeNotification: {
-                        disable: true
-                    },
-                    
-                    // Configuration de la demande automatique
-                    promptOptions: {
-                        slidedown: {
-                            enabled: true,
-                            autoPrompt: true,
-                            timeDelay: 5,
-                            pageViews: 2
-                        }
-                    }
-                });
-                
-                console.log("✅ OneSignal initialisé avec succès");
-                
-                // Vérifier l'état actuel
-                const isSubscribed = await OneSignal.isPushNotificationsEnabled();
-                const permission = Notification.permission;
-                
-                console.log("📱 Statut notifications:", {
-                    abonné: isSubscribed,
-                    permission: permission,
-                    playerId: await OneSignal.getUserId()
-                });
-                
-                // Si l'utilisateur n'est pas encore abonné, afficher la demande
-                if (!isSubscribed && permission === 'default') {
-                    console.log("🎯 Affichage de la demande de permission...");
-                    setTimeout(() => {
-                        OneSignal.showSlidedownPrompt();
-                    }, 3000);
-                }
-                
-                // Sauvegarder le playerId si déjà abonné
-                if (isSubscribed) {
-                    await savePlayerIdToBackend();
-                }
-                
-                // Écouter les changements d'abonnement
-                OneSignal.on('subscriptionChange', async function(isSubscribed) {
-                    console.log("🔄 Changement d'abonnement:", isSubscribed);
-                    
-                    if (isSubscribed) {
-                        // Afficher le toast Owly
-                        showOwlyNotificationToast();
-                        
-                        // Sauvegarder le playerId
-                        await savePlayerIdToBackend();
-                    }
-                });
-                
-            } catch (error) {
-                console.error("❌ Erreur initialisation OneSignal:", error);
-            }
-        });
-
-        // Fonction pour sauvegarder le playerId
-        async function savePlayerIdToBackend() {
-            try {
-                if (window.OneSignalDeferred) {
-                    OneSignalDeferred.push(async function(OneSignal) {
-                        const playerId = await OneSignal.getUserId();
-                        const token = localStorage.getItem('owly_token');
-                        
-                        if (playerId && token) {
-                            console.log("💾 Sauvegarde du playerId:", playerId);
-                            
-                            const response = await fetch('http://localhost:5000/api/notifications/save-playerid', {
-                                method: 'POST',
-                                headers: {
-                                    'Content-Type': 'application/json',
-                                    'Authorization': `Bearer ${token}`
-                                },
-                                body: JSON.stringify({ playerId })
-                            });
-                            
-                            if (response.ok) {
-                                console.log("✅ PlayerId sauvegardé avec succès !");
-                            } else {
-                                console.warn("⚠️ Échec sauvegarde playerId");
-                            }
-                        }
-                    });
-                }
-            } catch (error) {
-                console.error("❌ Erreur sauvegarde playerId:", error);
-            }
-        }
-
-        // Fonction pour afficher le toast Owly
-        function showOwlyNotificationToast() {
-            const existingToast = document.querySelector('.owly-notification-toast');
-            if (existingToast) existingToast.remove();
-            
-            const toast = document.createElement('div');
-            toast.className = 'owly-notification-toast';
-            toast.innerHTML = `
-                <div style="
-                    position: fixed;
-                    bottom: 30px;
-                    left: 50%;
-                    transform: translateX(-50%);
-                    background: #f9ee34;
-                    color: #1c1c1c;
-                    padding: 18px 36px;
-                    border-radius: 60px;
-                    font-family: 'Poppins', sans-serif;
-                    font-weight: 700;
-                    font-size: 18px;
-                    box-shadow: 0 15px 40px rgba(0,0,0,0.3);
-                    z-index: 99999;
-                    display: flex;
-                    align-items: center;
-                    gap: 12px;
-                    animation: slideUp 0.7s ease;
-                ">
-                    <span>The owl delivers instantly</span>
-                    <span style="font-size: 36px;">Fast delivery</span>
-                </div>
-            `;
-            document.body.appendChild(toast);
-
-            // Disparition après 4 secondes
-            setTimeout(() => {
-                const el = toast.firstElementChild;
-                if (el) {
-                    el.style.transition = 'all 0.6s ease';
-                    el.style.opacity = '0';
-                    el.style.transform = 'translateX(-50%) translateY(100px)';
-                    setTimeout(() => toast.remove(), 600);
-                }
-            }, 4000);
-        }
-    </script>
-
+    <!-- CSS pour notifications -->
     <style>
-        @keyframes slideUp {
-            from { 
-                opacity: 0; 
-                transform: translateX(-50%) translateY(120px); 
-            }
-            to { 
-                opacity: 1; 
-                transform: translateX(-50%) translateY(0); 
-            }
-        }
-
-        /* Style pour le bouton de test manuel */
-        .notification-activation-btn {
-            background: #f9ee34;
-            color: #1c1c1c;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 25px;
-            font-family: 'Poppins', sans-serif;
-            font-weight: 600;
-            cursor: pointer;
-            box-shadow: 0 4px 15px rgba(249, 238, 52, 0.3);
-            transition: all 0.3s ease;
+        .notification-toast {
             position: fixed;
             top: 20px;
             right: 20px;
-            z-index: 10000;
+            background: #f9ee34;
+            color: #1c1c1c;
+            padding: 15px 25px;
+            border-radius: 10px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            z-index: 9999;
+            font-family: 'Poppins', sans-serif;
+            font-weight: 600;
+            display: none;
+            animation: slideIn 0.3s ease;
         }
 
-        .notification-activation-btn:hover {
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .notification-popup {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #2d2d2d;
+            border: 1px solid #444;
+            border-radius: 12px;
+            width: 300px;
+            z-index: 9999;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            display: none;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .popup-header {
+            padding: 15px;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #1c1c1c;
+            border-radius: 12px 12px 0 0;
+        }
+
+        .popup-title {
+            font-weight: 600;
+            color: #f9ee34;
+        }
+
+        .popup-close {
+            background: none;
+            border: none;
+            color: #888;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 24px;
+            height: 24px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .popup-content {
+            padding: 15px;
+        }
+
+        .popup-message {
+            color: #fff;
+            margin-bottom: 15px;
+            line-height: 1.4;
+        }
+
+        .popup-actions {
+            display: flex;
+            gap: 10px;
+        }
+
+        .popup-btn {
+            flex: 1;
+            padding: 8px 15px;
+            border-radius: 6px;
+            border: 1px solid #444;
+            background: #333;
+            color: #fff;
+            cursor: pointer;
+            font-family: 'Poppins', sans-serif;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .popup-btn:hover {
+            background: #444;
+        }
+
+        .popup-btn.primary {
+            background: #f9ee34;
+            color: #1c1c1c;
+            border-color: #f9ee34;
+        }
+
+        .popup-btn.primary:hover {
             background: #ffd700;
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(249, 238, 52, 0.4);
+        }
+
+        .notification-badge {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            background: #ff4444;
+            color: white;
+            border-radius: 50%;
+            width: 18px;
+            height: 18px;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
         }
     </style>
 </head>
@@ -354,11 +284,6 @@
         </div>
     </div>
 
-    <!-- Bouton de test manuel des notifications -->
-    <button id="testNotificationBtn" class="notification-activation-btn" onclick="requestNotificationPermission()">
-        🔔 Test Notifications
-    </button>
-
     <!-- Tous les inputs fichiers cachés -->
     <input type="file" id="imageInput" accept="image/*" multiple style="display: none;">
     <input type="file" id="videoInput" accept="video/*" multiple style="display: none;">
@@ -366,32 +291,30 @@
 
     <!-- ==================== MODALS ==================== -->
 
-    <!-- Modal Nouvelle Conversation (CORRIGÉ) -->
-<!-- Modal Nouvelle Conversation SIMPLIFIÉ (UN SEUL MODAL) -->
-<!-- Modal Nouvelle Conversation SIMPLIFIÉ (UN SEUL MODAL) -->
-<div id="newConversationModal" class="modal-overlay" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3><i class="fas fa-comment-medical"></i> Nouvelle discussion</h3>
-            <button class="modal-close" onclick="document.getElementById('newConversationModal').style.display='none'">
-                <i class="fas fa-times"></i>
-            </button>
-        </div>
-        <div class="modal-body">
-            <div class="search-box-modal">
-                <i class="fas fa-search"></i>
-                <input type="text" id="searchUserInput" placeholder="Rechercher un contact..." autocomplete="off" 
-                       oninput="searchUsersForConversation(event)">
+    <!-- Modal Nouvelle Conversation -->
+    <div id="newConversationModal" class="modal-overlay" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3><i class="fas fa-comment-medical"></i> Nouvelle discussion</h3>
+                <button class="modal-close" onclick="document.getElementById('newConversationModal').style.display='none'">
+                    <i class="fas fa-times"></i>
+                </button>
             </div>
-            <div id="searchResults" class="search-results">
-                <div class="empty-state">
+            <div class="modal-body">
+                <div class="search-box-modal">
                     <i class="fas fa-search"></i>
-                    <p>Recherchez un contact pour discuter</p>
+                    <input type="text" id="searchUserInput" placeholder="Rechercher un contact..." autocomplete="off" 
+                           oninput="searchUsersForConversation(event)">
+                </div>
+                <div id="searchResults" class="search-results">
+                    <div class="empty-state">
+                        <i class="fas fa-search"></i>
+                        <p>Recherchez un contact pour discuter</p>
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-</div>
 
     <!-- Modal Création Groupe -->
     <div id="createGroupModal" class="modal-overlay" style="display: none;">
@@ -435,11 +358,11 @@
         </div>
     </div>
 
-<!-- ==================== PAD COLLABORATIF - HTML 100% COMPATIBLE AVEC PadSystem v3 ==================== -->
+    <!-- Modal Pad Collaboratif -->
 <div id="padModal" class="modal-overlay" style="display:none;">
     <div class="modal-content pad-modal" style="width:96%; max-width:1300px; height:92vh; display:flex; flex-direction:column; background:#1e1e1e; border-radius:16px; overflow:hidden; box-shadow:0 30px 80px rgba(0,0,0,0.7);">
         
-        <!-- HEADER -->
+        <!-- HEADER SIMPLIFIÉ -->
         <div class="modal-header" style="background:#2d2d2d; color:#fff; padding:16px 28px; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #444;">
             <div style="display:flex; align-items:center; gap:20px;">
                 <h3 style="margin:0; font-size:26px; font-weight:600;">
@@ -447,76 +370,68 @@
                 </h3>
 
                 <!-- UTILISATEURS ACTIFS -->
-                <div id="padActiveUsers" style="display:flex; align-items:center; gap:12px; font-size:14px; opacity:0.95;">
-                    <!-- Rempli dynamiquement par updateActiveUsers() -->
+                <div style="display:flex; align-items:center; gap:8px; font-size:14px; opacity:0.95;">
+                    <div id="padActiveUsers" style="display:flex; align-items:center; gap:8px;">
+                        <!-- Rempli dynamiquement -->
+                    </div>
+                    <span id="activeUsersCount" style="background:#444; padding:2px 8px; border-radius:4px;">0</span>
                 </div>
             </div>
 
-            <div style="display:flex; align-items:center; gap:14px;">
-                <button class="action-btn" id="toggleModeBtn" title="Ctrl+M">
-                    Mode To-Do
-                </button>
-                <button class="action-btn" id="padHistoryBtn" title="Ctrl+H">
-                    Historique
-                </button>
-                <button class="action-btn" id="padPreferencesBtn" title="Préférences">
-                    Préférences
-                </button>
-                <button class="action-btn" id="padSearchBtn" title="Ctrl+F">
-                    Rechercher
-                </button>
-                <button class="action-btn" id="padSuggestionsBtn" title="Suggestions IA">
-                    Suggestions
-                </button>
+            <div style="display:flex; align-items:center; gap:12px;">
+                <!-- SUPPRIMÉ : Bouton Mode Text/Todo -->
+                
+                <!-- BOUTON VIDER -->
                 <button class="action-btn danger" id="clearPadBtn" title="Vider le pad">
                     Vider
                 </button>
-                <button class="modal-close" id="closePadModal" style="font-size:24px; width:44px; height:44px;">
-                    Fermer
+                
+                <!-- BOUTON FERMER -->
+                <button class="modal-close" id="closePadModal" style="font-size:24px; width:44px; height:44px; background:#444; border:none; color:#fff; border-radius:8px; cursor:pointer;">
+                    ×
                 </button>
             </div>
         </div>
 
-        <!-- BODY -->
-        <div style="flex:1; display:flex; flex-direction:column; position:relative;">
+        <!-- BODY SIMPLIFIÉ -->
+        <div style="flex:1; display:flex; flex-direction:column; position:relative; padding:20px;">
             
-            <!-- CONTENEUR POUR LES CURSEURS DISTANTS (OBLIGATOIRE) -->
-            <div class="pad-editor-container" style="position:relative; flex:1; margin:20px; background:#252526; border-radius:12px; overflow:hidden; box-shadow:0 6px 16px rgba(0,0,0,0.5);">
+            <!-- CONTENEUR POUR L'ÉDITEUR -->
+            <div class="pad-editor-container" style="position:relative; flex:1; background:#252526; border-radius:12px; overflow:hidden; box-shadow:0 6px 16px rgba(0,0,0,0.5); border:2px solid #3a3a3a;">
                 <textarea
                     id="padTextarea"
                     class="pad-textarea"
-                    placeholder="Commencez à écrire... @ pour mentionner • Ctrl+M mode • Ctrl+F recherche • Ctrl+H historique"
+                    placeholder="Commencez à écrire... (Collaboration en temps réel)"
                     spellcheck="true"
                     autocomplete="off"
-                    style="width:100%; height:100%; padding:28px; font-family:'Consolas','Courier New',monospace; font-size:16px; background:transparent; color:#e0e0e0; border:none; outline:none; resize:none; line-height:1.7; letter-spacing:0.3px;">
+                    style="width:100%; height:100%; padding:28px; font-family:'Consolas','Courier New',monospace; font-size:16px; background:transparent; color:#e0e0e0; border:none; outline:none; resize:none; line-height:1.7; letter-spacing:0.3px; box-sizing:border-box;">
                 </textarea>
             </div>
 
-            <!-- STATISTIQUES TODO -->
-            <div id="padStats" style="margin:0 20px 18px; padding:18px; background:#2d2d2d; border-radius:12px; color:#ccc; display:none; box-shadow:0 4px 12px rgba(0,0,0,0.3);">
-                <div style="display:flex; justify-content:space-around; flex-wrap:wrap; gap:16px; font-size:15px;">
-                    <div><strong><span id="completedCount">0</span></strong> terminées</div>
-                    <div>sur <strong><span id="totalCount">0</span></strong> tâches</div>
-                    <div>Assignées: <strong><span id="assignedCount">0</span></strong></div>
-                    <div>En retard: <strong><span id="overdueCount">0</span></strong></div>
-                </div>
-                <div style="margin-top:12px; width:100%; height:12px; background:#444; border-radius:6px; overflow:hidden;">
-                    <div id="progressFill" style="width:0%; height:100%; background:linear-gradient(90deg,#34a853,#66bb6a); transition:width 0.6s ease;"></div>
-                </div>
-            </div>
-
+            <!-- SUPPRIMÉ : Section statistiques TODO -->
+            
             <!-- INDICATEUR DE SAUVEGARDE -->
-            <div style="position:absolute; bottom:20px; right:28px; background:#2d2d2d; padding:8px 16px; border-radius:8px; font-size:13px; color:#aaa; box-shadow:0 4px 10px rgba(0,0,0,0.4);">
+            <div style="position:absolute; bottom:28px; right:28px; background:#2d2d2d; padding:8px 16px; border-radius:8px; font-size:13px; color:#aaa;">
                 <span id="padSaveStatus">Prêt</span>
             </div>
         </div>
     </div>
 </div>
 
-<!-- PANNEAU SUGGESTIONS (facultatif, caché par défaut) -->
-<div id="padSuggestionsPanel" style="position:fixed; top:100px; right:20px; width:320px; max-height:70vh; background:#2d2d2d; border-radius:12px; padding:16px; box-shadow:0 10px 30px rgba(0,0,0,0.5); z-index:9999; display:none; overflow-y:auto; color:#ddd;">
-    <h4 style="margin:0 0 12px; color:#4ECDC4;">Suggestions intelligentes</h4>
-    <div id="suggestionsContent">Aucune suggestion pour le moment</div>
+<!-- MODAL DE CONFIRMATION POUR VIDER -->
+<div id="clearConfirmModal" class="modal-overlay" style="display:none; z-index:10001;">
+    <div class="modal-content" style="width:400px; padding:30px; background:#2d2d2d; border-radius:12px;">
+        <h3 style="color:#fff; margin-bottom:20px;">Vider le Pad</h3>
+        <p style="color:#e1de25; margin-bottom:25px;">Voulez-vous vraiment supprimer tout le contenu du Pad ?</p>
+        <div style="display:flex; justify-content:flex-end; gap:12px;">
+            <button id="cancelClearBtn" style="padding:10px 20px; background:#444; color:#fff; border:none; border-radius:6px; cursor:pointer;">
+                Annuler
+            </button>
+            <button id="confirmClearBtn" style="padding:10px 20px; background:#f44336; color:#fff; border:none; border-radius:6px; cursor:pointer;">
+                Vider
+            </button>
+        </div>
+    </div>
 </div>
 
     <!-- Modal Réactions -->
@@ -729,87 +644,99 @@
     <script src="js/websocket.js"></script>
     <script src="js/features.js"></script>
     <script src="js/pad.js"></script>
-<script>
-// Fonction pour sélectionner un utilisateur (dans le modal)
-function selectUserForConversation(userId, username) {
-    if (typeof startConversationWithUser === 'function') {
-        startConversationWithUser(userId, username);
-    } else {
-        // Fallback si la fonction n'existe pas
-        showMessage(`Démarrage conversation avec ${username}`, "info");
-        document.getElementById('newConversationModal').style.display = 'none';
-    }
-}
-
-// Fonction de recherche d'utilisateurs (pour le modal)
-async function searchUsersForConversation(query) {
-    const searchResults = document.getElementById('searchResults');
+    <script src="/src/frontendtest/js/push.js"></script>
     
-    if (!query || query.length < 2) {
-        searchResults.innerHTML = `
-            <div class="empty-state">
-                <i class="fas fa-search"></i>
-                <p>Tapez au moins 2 caractères</p>
-            </div>`;
-        return;
-    }
-    
-    try {
-        const response = await fetch(
-            `${CONFIG.BACKEND_URL}/api/users/search?q=${encodeURIComponent(query)}`, 
-            {
-                headers: {'Authorization': `Bearer ${state.token}`}
+    <!-- Scripts utilitaires pour la page -->
+    <script>
+        // Fonction pour sélectionner un utilisateur (dans le modal)
+        function selectUserForConversation(userId, username) {
+            if (typeof startConversationWithUser === 'function') {
+                startConversationWithUser(userId, username);
+            } else {
+                // Fallback si la fonction n'existe pas
+                showMessage(`Démarrage conversation avec ${username}`, "info");
+                document.getElementById('newConversationModal').style.display = 'none';
             }
-        );
-        
-        const data = await response.json();
-        
-        if (response.ok && data.success && data.users.length > 0) {
-            // Filtrer l'utilisateur courant
-            const otherUsers = data.users.filter(user => user._id !== state.user.id);
+        }
+
+        // Fonction de recherche d'utilisateurs (pour le modal)
+        async function searchUsersForConversation(query) {
+            const searchResults = document.getElementById('searchResults');
             
-            if (otherUsers.length === 0) {
+            if (!query || query.length < 2) {
                 searchResults.innerHTML = `
                     <div class="empty-state">
-                        <i class="fas fa-user-slash"></i>
-                        <p>Aucun autre utilisateur trouvé</p>
+                        <i class="fas fa-search"></i>
+                        <p>Tapez au moins 2 caractères</p>
                     </div>`;
                 return;
             }
             
-            // Afficher les résultats avec la bonne fonction
-            searchResults.innerHTML = otherUsers.map(user => `
-                <div class="user-result" data-user-id="${user._id}">
-                    <div class="user-avatar">
-                        ${user.username.charAt(0).toUpperCase()}
-                    </div>
-                    <div class="user-info">
-                        <div class="user-name">${user.username}</div>
-                        <div class="user-details">${user.email}</div>
-                    </div>
-                    <button class="select-user-btn" onclick="selectUserForConversation('${user._id}', '${user.username}')">
-                        <i class="fas fa-comment"></i> Discuter
-                    </button>
-                </div>
-            `).join('');
-            
-        } else {
-            searchResults.innerHTML = `
-                <div class="empty-state">
-                    <i class="fas fa-search"></i>
-                    <p>${data.message || 'Aucun utilisateur trouvé'}</p>
-                </div>`;
+            try {
+                const response = await fetch(
+                    `${CONFIG.BACKEND_URL}/api/users/search?q=${encodeURIComponent(query)}`, 
+                    {
+                        headers: {'Authorization': `Bearer ${state.token}`}
+                    }
+                );
+                
+                const data = await response.json();
+                
+                if (response.ok && data.success && data.users.length > 0) {
+                    // Filtrer l'utilisateur courant
+                    const otherUsers = data.users.filter(user => user._id !== state.user.id);
+                    
+                    if (otherUsers.length === 0) {
+                        searchResults.innerHTML = `
+                            <div class="empty-state">
+                                <i class="fas fa-user-slash"></i>
+                                <p>Aucun autre utilisateur trouvé</p>
+                            </div>`;
+                        return;
+                    }
+                    
+                    // Afficher les résultats avec la bonne fonction
+                    searchResults.innerHTML = otherUsers.map(user => `
+                        <div class="user-result" data-user-id="${user._id}">
+                            <div class="user-avatar">
+                                ${user.username.charAt(0).toUpperCase()}
+                            </div>
+                            <div class="user-info">
+                                <div class="user-name">${user.username}</div>
+                                <div class="user-details">${user.email}</div>
+                            </div>
+                            <button class="select-user-btn" onclick="selectUserForConversation('${user._id}', '${user.username}')">
+                                <i class="fas fa-comment"></i> Discuter
+                            </button>
+                        </div>
+                    `).join('');
+                    
+                } else {
+                    searchResults.innerHTML = `
+                        <div class="empty-state">
+                            <i class="fas fa-search"></i>
+                            <p>${data.message || 'Aucun utilisateur trouvé'}</p>
+                        </div>`;
+                }
+                
+            } catch (error) {
+                console.error("❌ Erreur recherche:", error);
+                searchResults.innerHTML = `
+                    <div class="empty-state error">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <p>Erreur de recherche</p>
+                    </div>`;
+            }
         }
-        
-    } catch (error) {
-        console.error("❌ Erreur recherche:", error);
-        searchResults.innerHTML = `
-            <div class="empty-state error">
-                <i class="fas fa-exclamation-triangle"></i>
-                <p>Erreur de recherche</p>
-            </div>`;
-    }
-}
-</script>
+    </script>
+    <!-- Toast notification (belle et discrète) -->
+<div id="toastNotification" class="toast-notification">
+    <div class="toast-avatar">👤</div>
+    <div class="toast-content">
+        <div class="toast-title" id="toastTitle">Nouveau message</div>
+        <div class="toast-message" id="toastMessage">Vous avez un nouveau message</div>
+    </div>
+    <button class="toast-close" onclick="hideToast()">×</button>
+</div>
 </body>
 </html>
