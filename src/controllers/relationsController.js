@@ -61,3 +61,71 @@ export const getContacts = async (req, res) => {
     });
   }
 };
+
+export const acceptMessageRequest = async (req, res) => {
+  try {
+    const { conversationId } = req.body;
+    const userId = req.user.id;
+    
+    // Vérifie que c'est une message request pour cet user
+    const conversation = await Conversation.findById(conversationId)
+      .populate('messageRequestFrom', 'username');
+    if (!conversation || !conversation.isMessageRequest || 
+        conversation.messageRequestFor.toString() !== userId.toString()) {
+      return res.status(400).json({ error: 'Demande invalide' });
+    }
+    
+    // Accepte la relation
+    await Relation.findOneAndUpdate(
+      { 
+        $or: [
+          { userId: conversation.messageRequestFrom._id, contactId: userId },
+          { userId: userId, contactId: conversation.messageRequestFrom._id }
+        ]
+      },
+      { status: 'accepted', acceptedAt: new Date() }
+    );
+    
+    // Met à jour la conversation
+    await Conversation.findByIdAndUpdate(conversationId, {
+      isMessageRequest: false,
+      messageRequestFor: null,
+      messageRequestFrom: null
+    });
+    
+    // Émet via socket pour refresh frontend
+    req.io?.to(conversationId.toString()).emit('messagerequestaccepted', { 
+      conversationId, 
+      status: 'accepted' 
+    });
+    
+    res.json({ success: true, message: 'Contact ajouté' });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};
+
+export const rejectMessageRequest = async (req, res) => {
+  try {
+    const { conversationId } = req.body;
+    const userId = req.user.id;
+    
+    const conversation = await Conversation.findById(conversationId);
+    if (!conversation?.isMessageRequest || 
+        conversation.messageRequestFor.toString() !== userId.toString()) {
+      return res.status(400).json({ error: 'Demande invalide' });
+    }
+    
+    // Supprime la conversation message request
+    await Conversation.findByIdAndDelete(conversationId);
+    
+    // Émet via socket
+    req.io?.to(conversationId.toString()).emit('messagerequestdeleted', { 
+      conversationId 
+    });
+    
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+};

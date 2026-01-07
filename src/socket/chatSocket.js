@@ -51,6 +51,10 @@ export const configureChatSockets = (io) => {
   io.on("connection", (socket) => {
     console.log("🔗 User connecté:", socket.userId, "- Socket:", socket.id);
 
+      // 🔥 AJOUTEZ CE LOG
+  console.log('📋 userId type:', typeof socket.userId);
+  console.log('📋 userId value:', socket.userId);
+
     let presenceInterval = null;
     // 🖥️ GESTION DU VERRU DE PARTAGE D'ÉCRAN
 socket.on('call:screen-share-start', (data) => {
@@ -1090,21 +1094,26 @@ socket.on('call:screen-share-stop', (data) => {
 
     });
 // ==================== 📞 APPELS VIDÉO WEBRTC ====================
-  socket.on('call:initiate', async (data) => {
+socket.on('call:initiate', async (data) => {
   console.log('📞 call:initiate received:', data, 'from user:', socket.userId);
   try {
     const { conversationId, receiverId, callType = 'video' } = data;
     const callerId = socket.userId;
 
-    if (callerId === receiverId) return;
+    if (callerId === receiverId) {
+      socket.emit('call:error', { error: 'Impossible de s\'appeler soi-même' });
+      return;
+    }
 
-    // 1️⃣ Création DB AVANT TOUT
+    // 1️⃣ Création DB
     const dbCall = await callController.initiateCall(
       callerId,
       receiverId,
       conversationId,
       callType
     );
+
+    console.log('📞 Call created in DB:', dbCall._id);
 
     activeCalls.set(dbCall._id.toString(), {
       callId: dbCall._id.toString(),
@@ -1116,29 +1125,36 @@ socket.on('call:screen-share-stop', (data) => {
       startedAt: new Date()
     });
 
-    // 2️⃣ Rejoindre la salle d'appel (caller)
+    // 2️⃣ Rejoindre la salle d'appel
     socket.join(`call_${dbCall._id.toString()}`);
 
-    // 3️⃣ Trouver socket receiver
-    const receiverSocket = Array.from(io.sockets.sockets.values())
-      .find(s => s.userId === receiverId);
+    // 3️⃣ Trouver TOUS les sockets du receiver
+    const receiverSockets = Array.from(io.sockets.sockets.values())
+      .filter(s => s.userId === receiverId);
 
-    console.log('📞 Receiver socket found:', !!receiverSocket, 'for user:', receiverId);
+    console.log('🔍 Looking for receiver sockets:', receiverId);
+    console.log('📋 Found', receiverSockets.length, 'sockets for receiver');
 
-    if (!receiverSocket) {
+    if (receiverSockets.length === 0) {
+      console.log('❌ Receiver offline:', receiverId);
       socket.emit('call:error', { error: 'Utilisateur hors ligne' });
       return;
     }
 
-    // 4️⃣ Envoyer appel entrant AVEC callId DB
-    receiverSocket.emit('call:incoming', {
+    // 4️⃣ Envoyer à TOUS les sockets du receiver
+    const callData = {
       callId: dbCall._id.toString(),
       callerId,
       conversationId,
       callType
+    };
+
+    receiverSockets.forEach((receiverSocket, index) => {
+      receiverSocket.emit('call:incoming', callData);
+      console.log(`📞 Appel envoyé au socket ${index + 1}/${receiverSockets.length}`);
     });
 
-    console.log('📞 Appel initié DB:', dbCall._id, 'sent to receiver:', receiverId);
+    console.log('✅ Appel initié, envoyé à', receiverSockets.length, 'socket(s)');
 
   } catch (error) {
     console.error('❌ Erreur call:initiate:', error);
@@ -1146,89 +1162,52 @@ socket.on('call:screen-share-stop', (data) => {
   }
 });
 
-
-    
-    // Accepter un appel
-     socket.on('call:accept', async (data) => {
+socket.on('call:accept', async (data) => {
   console.log('📞 call:accept received:', data, 'from user:', socket.userId);
-  console.log('📞 Receiver socket ID:', socket.id, 'User ID:', socket.userId);
   try {
-    const { callId } = data;
+    const { callId, callerId } = data;
     const receiverId = socket.userId;
 
-    console.log('📞 Looking for call in DB:', callId);
+    // Vérifier autorisation
+    if (receiverId === callerId) {
+      return socket.emit('call:error', { error: 'Impossible de s\'appeler soi-même' });
+    }
 
-    // 1️⃣ Mettre à jour la base de données via le controller
+    // ✅ Mettre à jour DB UNIQUEMENT
     const acceptedCall = await callController.acceptCall(callId);
-
     if (!acceptedCall) {
-      console.log('❌ Call not found in DB:', callId);
-      socket.emit('call:error', { error: 'Appel non trouvé' });
-      return;
+      return socket.emit('call:error', { error: 'Appel non trouvé' });
     }
 
-    console.log('📞 Call found in DB:', acceptedCall._id, 'status:', acceptedCall.status);
+    // ✅ JOINDRE LA SALLE (ESSENTIEL)
+    socket.join(`call:${callId}`);
 
-    // 🔒 Vérifier que c'est bien le receiver qui accepte
-    if (acceptedCall.receiverId.toString() !== receiverId) {
-      console.log('❌ Unauthorized accept attempt:', acceptedCall.receiverId, 'vs', receiverId);
-      socket.emit('call:error', { error: 'Vous n\'êtes pas autorisé à accepter cet appel' });
-      return;
-    }
-
-    // 2️⃣ Mettre à jour la mémoire
-    activeCalls.set(callId, {
+    // ✅ ENVOYER À TOUTE LA SALLE (CALLER + RECEIVER)
+    const notificationData = {
       callId,
       callerId: acceptedCall.callerId.toString(),
       receiverId: acceptedCall.receiverId.toString(),
       conversationId: acceptedCall.conversationId.toString(),
       callType: acceptedCall.callType,
-      status: 'active',
-      startedAt: acceptedCall.startTime
-    });
-
-    console.log('📞 Active calls updated, joining room call_' + callId);
-
-    // 3️⃣ Rejoindre la salle d'appel
-    socket.join(`call_${callId}`); // Receiver rejoint
-
-    // 4️⃣ Notifier les deux parties
-    const notificationData = {
-      callId,
-      callerId: acceptedCall.callerId.toString(),
-      receiverId,
-      conversationId: acceptedCall.conversationId.toString(),
-      callType: acceptedCall.callType,
-      startTime: acceptedCall.startTime
+      status: 'active'
     };
 
-    console.log('📞 Notifying receiver:', receiverId);
-    // Notifier le receiver
-    socket.emit('call:accepted', notificationData);
+    io.to(`call:${callId}`).emit('call:accepted', notificationData);
+    console.log('✅ call:accepted envoyé à salle call:', callId);
 
-    // Notifier le caller
-    const callerSocket = Array.from(io.sockets.sockets.values())
-      .find(s => s.userId === acceptedCall.callerId.toString());
-
-    console.log('📞 Caller socket found:', !!callerSocket, 'for user:', acceptedCall.callerId.toString());
-
-    if (callerSocket) {
-      callerSocket.join(`call_${callId}`); // Caller rejoint
-      callerSocket.emit('call:accepted', notificationData);
-      console.log('📞 Caller notified successfully');
-    } else {
-      console.log('❌ Caller socket not found');
-    }
-
-    console.log('✅ call accepté → les deux parties notifiées et DB mise à jour');
+    // ✅ SUPPRIMEZ activeCalls.set() COMPLETEMENT !
 
   } catch (err) {
-    console.error('❌ call:accept error', err);
+    console.error('❌ call:accept error:', err);
     socket.emit('call:error', { error: err.message });
   }
 });
+
+
+
     // Rejeter un appel
     socket.on('call:reject', async (data) => {
+      console.log('📞 call:initiate received:', data, 'from user:', socket.userId);
       try {
         const { callId } = data;
         const receiverId = socket.userId;
@@ -1262,41 +1241,50 @@ socket.on('call:screen-share-stop', (data) => {
     });
 
     // Envoyer offre WebRTC
-    socket.on('call:offer', (data) => {
-      const { receiverId, signal, callId } = data;
+socket.on('call:offer', (data) => {
+  const { callId, receiverId, signal } = data;
+  
+  console.log(`📡 OFFER envoyé pour appel ${callId}`);
 
-      console.log(`📡 Offre WebRTC envoyée pour appel ${callId}`);
-
-      // Utiliser la salle d'appel pour envoyer l'offre
-      io.to(`call_${callId}`).emit('call:offer', {
-        callerId: socket.userId,
-        signal,
-        callId
-      });
-    });
+  // Envoyer à toute la salle
+  io.to(`call_${callId}`).emit('call:offer', {
+    callId,
+    callerId: socket.userId,
+    signal
+  });
+});
 
     // Envoyer réponse WebRTC
-    socket.on('call:answer', (data) => {
-      const { callerId, signal, callId } = data;
+socket.on('call:answer', (data) => {
+  const { callId, signal } = data;
+  
+  console.log(`📡 ANSWER envoyé pour appel ${callId}`);
 
-      console.log(`📡 Réponse WebRTC envoyée pour appel ${callId}`);
+  // Envoyer à toute la salle
+  io.to(`call_${callId}`).emit('call:answer', {
+    callId,
+    receiverId: socket.userId,
+    signal
+  });
+});
 
-      // Utiliser la salle d'appel pour envoyer la réponse
-      io.to(`call_${callId}`).emit('call:answer', {
-        receiverId: socket.userId,
-        signal,
-        callId
-      });
-    });
+
     // Dans la section des appels vidéo
 socket.on('call:ice-candidate', (data) => {
   const { callId, candidate } = data;
 
-  console.log(`🧊 Candidat ICE envoyé pour appel ${callId}`);
+  // ⚠️ VÉRIFIER QUE LE callId EXISTE
+  if (!callId) {
+    console.log('❌ ICE candidate sans callId, ignoré');
+    return;
+  }
 
-  // Utiliser la salle d'appel au lieu de chercher le socket individuel
+  console.log(`🧊 Candidat ICE pour appel ${callId}`);
+
+  // Utiliser la salle d'appel
   io.to(`call_${callId}`).emit('call:ice-candidate', {
     senderId: socket.userId,
+    callId, // ⚠️ Inclure le callId dans la réponse
     candidate
   });
 });

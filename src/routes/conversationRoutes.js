@@ -341,61 +341,56 @@ router.get("/user/:userId", protact, async (req, res) => {
 // 🗑️ SUPPRIMER UNE CONVERSATION (UNIQUEMENT POUR MOI)
 router.delete("/:conversationId", protact, async (req, res) => {
   try {
-    if (!req.user || !req.user._id) {
-      return res.status(401).json({
+    const { conversationId } = req.params;
+    const userId = req.user._id;
+
+    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
+      return res.status(400).json({
         success: false,
-        error: "Utilisateur non authentifié (req.user manquant)"
+        error: "ID de conversation invalide",
       });
     }
 
-    const userId = req.user._id;
-    const { conversationId } = req.params;
-
-    if (!mongoose.Types.ObjectId.isValid(conversationId)) {
-      return res.status(400).json({ success: false, error: "ID conversation invalide" });
-    }
-
-    console.log(`[DELETE] Tentative suppression conv ${conversationId} par user ${userId}`);
-
+    // Vérifier que l'utilisateur fait partie de la conversation
     const participant = await Participants.findOne({
       Id_User: userId,
-      Id_Conversation: conversationId
+      Id_Conversation: conversationId,
     });
 
     if (!participant) {
       return res.status(403).json({
         success: false,
-        error: "Vous ne participez pas à cette conversation"
+        error: "Vous n'êtes pas membre de cette conversation",
       });
     }
 
-    // Soft delete : on supprime juste l’entrée participant
-    await Participants.deleteOne({
-      Id_User: userId,
-      Id_Conversation: conversationId
-    });
+    // Marquer comme supprimée pour cet utilisateur seulement
+    const result = await Conversation.findByIdAndUpdate(
+      conversationId,
+      {
+        $addToSet: { deletedBy: { userId } }, // évite les doublons
+      },
+      { new: true }
+    );
 
-    // Option : si plus personne dans la conv → supprimer tout (facultatif)
-    const remaining = await Participants.countDocuments({ Id_Conversation: conversationId });
-    if (remaining === 0) {
-      await Conversation.findByIdAndDelete(conversationId);
-      // await Message.deleteMany({ conversationId }); // ← à activer si tu veux
-      console.log(`Conv ${conversationId} supprimée totalement (plus de participants)`);
+    if (!result) {
+      return res.status(404).json({
+        success: false,
+        error: "Conversation non trouvée",
+      });
     }
 
-    // Émission socket
-    req.io?.to(`user_${userId}`).emit("conversation_deleted", { conversationId });
+    console.log(`🗑️ Conversation ${conversationId} supprimée pour l'utilisateur ${userId} seulement`);
 
     res.json({
       success: true,
-      message: "Conversation supprimée de votre liste"
+      message: "Conversation supprimée de votre liste",
     });
-
   } catch (error) {
-    console.error("[DELETE ERROR]", error);
+    console.error("❌ Erreur suppression conversation (pour moi):", error);
     res.status(500).json({
       success: false,
-      error: error.message || "Erreur serveur interne"
+      error: "Erreur lors de la suppression",
     });
   }
 });
