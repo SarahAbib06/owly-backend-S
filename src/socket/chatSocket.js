@@ -56,25 +56,8 @@ export const configureChatSockets = (io) => {
   console.log('📋 userId value:', socket.userId);
 
     let presenceInterval = null;
-<<<<<<< HEAD
-    // 🖥️ GESTION DU VERRU DE PARTAGE D'ÉCRAN
-socket.on('call:screen-share-start', (data) => {
-  const { remoteUserId } = data;
-  // On informe l'autre participant que socket.userId a pris le contrôle
-  io.to(`user_${remoteUserId}`).emit('call:screen-share-start', {
-    sharerId: socket.userId
-  });
-});
-
-socket.on('call:screen-share-stop', (data) => {
-  const { remoteUserId } = data;
-  // On libère le bouton chez l'autre
-  io.to(`user_${remoteUserId}`).emit('call:screen-share-stop');
-});
-=======
     
 // ==================== 📞 SYSTEME D'APPELS UNIFIE (AUDIO + VIDEO) ====================
->>>>>>> agora-video-call
 
 const AGORA_APP_ID = process.env.AGORA_APP_ID;
 // Après la déclaration d'AGORA_APP_ID
