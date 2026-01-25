@@ -246,7 +246,7 @@ export const login = async (req, res) => {
 
   try {
     const user = await User.findOne({ email });
-    if (!user) return res.status(401).json({ message: 'Identifiants invalides' });
+    if (!user) return res.status(400).json({ message: 'Identifiants invalides' });
 
     const now = new Date();
     const oneWeekAgo = new Date(now);
@@ -283,7 +283,7 @@ export const login = async (req, res) => {
         `;
         await sendEmail(email, 'Alerte sécurité - Owly', 'Tentative suspecte', html);
       }
-      return res.status(401).json({ message: 'Mot de passe incorrect', attempts: user.failedLoginAttempts });
+      return res.status(400).json({ message: 'Mot de passe incorrect', attempts: user.failedLoginAttempts });
     }
 
     user.failedLoginAttempts = 0;
