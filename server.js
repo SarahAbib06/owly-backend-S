@@ -29,6 +29,8 @@ import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 
 
 import favoritesRoutes from './src/routes/favoritesRoute.js';
+import contactRouter from './src/routes/contact.js';
+
 import themeRoutes from "./src/routes/themeRoutes.js";
 
 
@@ -55,6 +57,7 @@ app.use(
       "http://localhost:5173",
       "http://localhost:5174",
       "http://localhost:5175",
+      "http://localhost:5176",
       "http://127.0.0.1:5500",
       "http://localhost:5500",
       "http://127.0.0.1:5501",
@@ -128,6 +131,7 @@ app.use("/api/calls", callRoutes);
 
 app.use("/api/users", userStatusRoutes);
 app.use('/api/favorites', favoritesRoutes);
+app.use('/api', contactRouter);
 app.use("/api/themes", themeRoutes); 
 
 

@@ -953,6 +953,80 @@ export const messageController = {
       return res.status(500).json({ success: false, error: error.message });
     }
   },
+
+
+  deleteMessage: async (req, res) => {
+  try {
+    // Déclarations TOUT EN HAUT — obligatoire
+    const { messageId } = req.params;
+    const userId = req.user?.id; // ← sécurité si req.user est undefined
+    const io = req.io;
+
+    // Logs de debug (très utiles)
+    console.log(`[DELETE REQ] Message ID: ${messageId} | User ID: ${userId}`);
+
+    // Validation rapide
+    if (!messageId || !mongoose.Types.ObjectId.isValid(messageId)) {
+      console.log(`[DELETE ERR] ID invalide: ${messageId}`);
+      return res.status(400).json({ success: false, error: "ID message invalide" });
+    }
+
+    if (!userId) {
+      console.log("[DELETE ERR] Utilisateur non authentifié");
+      return res.status(401).json({ success: false, error: "Authentification requise" });
+    }
+
+    // Récupération du message
+    const message = await Message.findById(messageId);
+    if (!message) {
+      console.log(`[DELETE ERR] Message non trouvé: ${messageId}`);
+      return res.status(404).json({ success: false, error: "Message introuvable" });
+    }
+
+    console.log(`[DELETE] Message trouvé - Sender: ${message.Id_sender?.toString() || 'inconnu'} | Conv: ${message.conversationId?.toString() || 'inconnu'}`);
+
+    // Vérification droits
+    if (message.Id_sender.toString() !== userId) {
+      console.log(`[DELETE ERR] Droit refusé - Sender: ${message.Id_sender} ≠ User: ${userId}`);
+      return res.status(403).json({
+        success: false,
+        error: "Vous ne pouvez supprimer que vos propres messages",
+      });
+    }
+
+    const conversationId = message.conversationId;
+
+    // Suppression
+    await Message.findByIdAndDelete(messageId);
+    console.log(`[DELETE SUCCESS] Message ${messageId} supprimé en base`);
+
+    // Diffusion socket
+    if (io && conversationId) {
+      console.log(`[SOCKET] Emission suppression dans conv ${conversationId}`);
+      io.to(conversationId.toString()).emit("message:deleted", {
+        messageId: messageId.toString(),
+        conversationId: conversationId.toString(),
+        deletedBy: userId,
+        deletedAt: new Date().toISOString(),
+      });
+    } else {
+      console.warn("[SOCKET WARN] io ou conversationId manquant → pas d'émission");
+    }
+
+    return res.json({
+      success: true,
+      message: "Message supprimé pour tout le monde",
+      deletedMessageId: messageId,
+    });
+
+  } catch (error) {
+    console.error("[DELETE CRASH]", error.stack || error.message);
+    return res.status(500).json({
+      success: false,
+      error: "Erreur serveur lors de la suppression",
+    });
+  }
+},
 }; // ← Fermeture CORRECTE de l’objet messageController
 
 // FONCTIONS ANNEXES
