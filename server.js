@@ -29,6 +29,7 @@ import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 
 
 import favoritesRoutes from './src/routes/favoritesRoute.js';
+import contactRouter from './src/routes/contact.js';
 
 
 
@@ -128,6 +129,7 @@ app.use("/api/calls", callRoutes);
 
 app.use("/api/users", userStatusRoutes);
 app.use('/api/favorites', favoritesRoutes);
+app.use('/api', contactRouter);
 
 
 

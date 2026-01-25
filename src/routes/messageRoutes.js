@@ -103,6 +103,11 @@ router.post("/:messageId/unpin", protact, (req, res) => {
 router.get('/:conversationId/media', protact, messageController.getConversationMedia);
 
 
+router.post("/:messageId/delete", protact, (req, res) => {
+  req.io = req.app.get("io");
+  messageController.deleteMessage(req, res);
+});
+
 
 
 
