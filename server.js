@@ -29,7 +29,7 @@ import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 
 
 import favoritesRoutes from './src/routes/favoritesRoute.js';
-
+import themeRoutes from "./src/routes/themeRoutes.js";
 
 
 // ⭐ Configuration __dirname pour ES modules
@@ -128,6 +128,7 @@ app.use("/api/calls", callRoutes);
 
 app.use("/api/users", userStatusRoutes);
 app.use('/api/favorites', favoritesRoutes);
+app.use("/api/themes", themeRoutes); 
 
 
 
