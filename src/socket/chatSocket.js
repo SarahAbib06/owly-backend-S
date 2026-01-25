@@ -1505,15 +1505,34 @@ socket.on('call:ice-candidate', (data) => {
     }, 30000); // 30 secondes
   }
 
- function notifyUserPresence(io, userId, status, lastSeen = new Date()) {
-  if (status === "online") {
-    io.emit("user:online", { userId });
-    console.log("📡 EMIT user:online", userId);
-  }
+async function notifyUserPresence(io, userId, status, lastSeen = new Date()) {
+  try {
+    // ✅ VÉRIFIER LA VISIBILITÉ DU STATUT AVANT D'ÉMETTRE
+    const user = await User.findById(userId).select('statusVisibility');
+    
+    if (!user) {
+      console.log(`⚠️ User ${userId} non trouvé pour notifyUserPresence`);
+      return;
+    }
 
-  if (status === "offline") {
-    io.emit("user:offline", { userId, lastSeen });
-    console.log(`📡 EMIT user:offline → User: ${userId}, LastSeen: ${lastSeen}`);
+    // 🔒 SI L'UTILISATEUR A DÉSACTIVÉ SON STATUT, NE PAS ÉMETTRE
+    if (user.statusVisibility === "Personne") {
+      console.log(`🔒 Statut masqué pour ${userId} (visibilité: Personne)`);
+      return; // ← IMPORTANT : On ne fait rien
+    }
+
+    // ✅ SINON, ÉMETTRE NORMALEMENT
+    if (status === "online") {
+      io.emit("user:online", { userId });
+      console.log("📡 EMIT user:online", userId);
+    }
+
+    if (status === "offline") {
+      io.emit("user:offline", { userId, lastSeen });
+      console.log(`📡 EMIT user:offline → User: ${userId}, LastSeen: ${lastSeen}`);
+    }
+  } catch (error) {
+    console.error("❌ Erreur notifyUserPresence:", error);
   }
 }});
 }
