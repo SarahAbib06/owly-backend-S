@@ -166,6 +166,11 @@ socket.on("initiate-call", async (data) => {
       conversationId: chatId
     });
 
+    // 🔥 CORRECTION CRITIQUE : L'APPELANT REJOINT LA ROOM
+    const roomName = `call:${newCall._id}`;
+    socket.join(roomName);
+    console.log(`✅ Appelant ${callerId} a rejoint la room: ${roomName}`);
+
     // Notifier tous les appareils du destinataire
     recipientSockets.forEach(recipientSocket => {
       recipientSocket.emit("incoming-call", {
@@ -198,6 +203,63 @@ socket.on("initiate-call", async (data) => {
       error: error.message,
       code: "INIT_ERROR"
     });
+  }
+});
+
+// ✅ ACCEPTER UN APPEL - CORRIGÉ
+socket.on("accept-call", async (data) => {
+  try {
+    const { callId, callerId } = data;
+    const receiverId = socket.userId;
+
+    console.log(`✅ Appel accepté par: ${receiverId}`, { callId });
+
+    // Vérifier autorisation
+    if (receiverId === callerId) {
+      return socket.emit("call-error", { error: "Impossible de s'appeler soi-même" });
+    }
+
+    // ✅ Mettre à jour DB en 'ongoing'
+    const acceptedCall = await Call.findByIdAndUpdate(
+      callId,
+      {
+        status: 'ongoing',
+        $push: {
+          statusHistory: { status: 'ongoing', timestamp: new Date() }
+        }
+      },
+      { new: true }
+    );
+    
+    if (!acceptedCall) {
+      return socket.emit("call-error", { error: "Appel non trouvé" });
+    }
+
+    console.log(`📝 Appel ${callId} accepté: ongoing`);
+
+    // ✅ RECEVEUR REJOINT LA ROOM
+    const roomName = `call:${callId}`;
+    socket.join(roomName);
+    console.log(`✅ Receveur ${receiverId} a rejoint la room: ${roomName}`);
+
+    // ✅ ENVOYER À TOUTE LA SALLE (APPELANT + RECEVEUR)
+    const notificationData = {
+      callId,
+      callerId: acceptedCall.callerId.toString(),
+      receiverId: acceptedCall.receiverId.toString(),
+      conversationId: acceptedCall.conversationId.toString(),
+      callType: acceptedCall.callType,
+      status: 'active',
+      channelName: `call_${acceptedCall.conversationId}` // 🔥 IMPORTANT
+    };
+
+    io.to(roomName).emit("call-accepted", notificationData);
+    console.log(`✅ call-accepted envoyé à la room: ${roomName}`);
+    console.log(`📊 Participants dans la room:`, io.sockets.adapter.rooms.get(roomName)?.size || 0);
+
+  } catch (err) {
+    console.error("❌ call:accept error:", err);
+    socket.emit("call-error", { error: err.message });
   }
 });
 
@@ -292,193 +354,7 @@ socket.on("reject-call", async (data) => {
     });
   }
 });
-// ❌ ANNULER UN APPEL (avant qu'il soit accepté)
-socket.on("cancel-call", async (data) => {
-  try {
-    const { channelName, callType, chatId, callId, recipientId } = data;
-    const callerId = socket.userId;
 
-    console.log(`🚫 Appel ${callType} annulé par: ${callerId}`, { callId });
-
-    // 🆕 METTRE À JOUR LE STATUT EN "MISSED" DANS LA BDD
-    let cancelledCall;
-    if (callId) {
-      cancelledCall = await Call.findByIdAndUpdate(
-        callId,
-        {
-          status: 'missed',
-          endTime: new Date(),
-          duration: 0,
-          $push: {
-            statusHistory: { status: 'cancelled', timestamp: new Date() }
-          }
-        },
-        { new: true }
-      );
-      console.log(`📝 Appel ${callId} annulé dans la BDD`);
-    } else {
-      // Si callId n'est pas fourni, chercher dans activeCalls
-      const activeCall = activeCalls.get(channelName);
-      if (activeCall?.dbCallId) {
-        cancelledCall = await Call.findByIdAndUpdate(
-          activeCall.dbCallId,
-          {
-            status: 'missed',
-            endTime: new Date(),
-            duration: 0,
-            $push: {
-              statusHistory: { status: 'cancelled', timestamp: new Date() }
-            }
-          },
-          { new: true }
-        );
-      }
-    }
-
-    // Supprimer de activeCalls
-    activeCalls.delete(channelName);
-
-    // Notifier le destinataire que l'appel est annulé
-    const recipientSockets = getSocketsByUserId(recipientId);
-    recipientSockets.forEach(recipientSocket => {
-      recipientSocket.emit("call-cancelled", {
-        channelName,
-        callerId,
-        callType,
-        callId: cancelledCall?._id,
-        timestamp: new Date().toISOString()
-      });
-    });
-
-    // 🔥 CRÉER UN MESSAGE D'APPEL MANQUÉ
-    if (chatId && cancelledCall) {
-      const { default: Message } = await import("../models/Message.js");
-      const callMessage = await Message.create({
-        conversationId: chatId,
-        Id_sender: callerId,
-        typeMessage: "call",
-        content: `❌ Appel ${callType === 'audio' ? 'audio' : 'vidéo'} manqué`,
-        callType,
-        callResult: "missed",
-        duration: 0,
-        status: "sent"
-      });
-
-      await callMessage.populate("Id_sender", "username avatar");
-      io.to(chatId).emit("new-message", callMessage);
-    }
-
-    socket.emit("call-cancelled-success", {
-      channelName,
-      callType,
-      callId: cancelledCall?._id,
-      timestamp: new Date().toISOString()
-    });
-
-    console.log(`✅ Appel annulé et message "manqué" créé`);
-
-  } catch (error) {
-    console.error("💥 Erreur annulation appel:", error);
-    socket.emit("call-error", {
-      error: error.message,
-      code: "CANCEL_ERROR"
-    });
-  }
-});
-
-// 📞 TERMINER UN APPEL
-socket.on("end-call", async ({ chatId, channelName, callId }) => {
-  try {
-    const endedBy = socket.userId;
-
-    if (!channelName) return;
-
-    const call = activeCalls.get(channelName);
-    if (!call) {
-      console.warn("⚠️ end-call ignoré (déjà terminé)", channelName);
-      return;
-    }
-
-    // 🔒 LOCK — empêcher double exécution
-    activeCalls.delete(channelName);
-
-    const duration = Math.floor((Date.now() - call.startedAt) / 1000);
-
-    // 🆕 METTRE À JOUR L'APPEL DANS LA BDD
-    const dbCallId = callId || call.dbCallId;
-    let completedCall;
-    
-    if (dbCallId) {
-      completedCall = await Call.findByIdAndUpdate(
-        dbCallId,
-        {
-          status: duration < 2 ? 'missed' : 'completed',
-          endTime: new Date(),
-          duration,
-          $push: {
-            statusHistory: { 
-              status: duration < 2 ? 'missed' : 'completed', 
-              timestamp: new Date() 
-            }
-          }
-        },
-        { new: true }
-      );
-      console.log(`📝 Appel ${dbCallId} terminé: ${duration}s (status: ${completedCall?.status})`);
-    }
-
-    io.to(channelName).emit("call-ended", {
-      channelName,
-      endedBy,
-      duration,
-      callId: dbCallId,
-      timestamp: new Date().toISOString()
-    });
-
-    // 🔥 CRÉER UN MESSAGE D'APPEL TERMINÉ
-    if (chatId && completedCall) {
-      const { default: Message } = await import("../models/Message.js");
-      
-      let messageContent;
-      if (duration < 2) {
-        messageContent = `❌ Appel ${call.callType === 'audio' ? 'audio' : 'vidéo'} manqué`;
-      } else {
-        const mins = Math.floor(duration / 60);
-        const secs = duration % 60;
-        const durationText = `${mins}:${secs.toString().padStart(2, '0')}`;
-        messageContent = `📞 Appel ${call.callType === 'audio' ? 'audio' : 'vidéo'} terminé (${durationText})`;
-      }
-
-      const callMessage = await Message.create({
-        conversationId: chatId,
-        Id_sender: endedBy,
-        typeMessage: "call",
-        content: messageContent,
-        callType: call.callType,
-        callResult: duration < 2 ? "missed" : "ended",
-        duration,
-        status: "sent",
-        callStartedAt: duration >= 2 ? new Date(Date.now() - duration * 1000) : null,
-        callEndedAt: duration >= 2 ? new Date() : null
-      });
-
-      await callMessage.populate("Id_sender", "username avatar");
-      io.to(chatId).emit("new-message", callMessage);
-    }
-
-    // 🚪 Force leave
-    const sockets = io.sockets.adapter.rooms.get(channelName);
-    if (sockets) {
-      sockets.forEach(id => {
-        const s = io.sockets.sockets.get(id);
-        s?.leave(channelName);
-      });
-    }
-
-  } catch (err) {
-    console.error("💥 end-call error:", err);
-  }
-});
 // ==================== 🎯 FONCTIONS UTILITAIRES ====================
 
 function getSocketsByUserId(userId) {
@@ -1931,67 +1807,7 @@ socket.on('call:reject', async (data) => {
     socket.emit('call:error', { error: error.message });
   }
 });
-socket.on('call:cancel', async (data) => {
-  try {
-    const { callId } = data;
-    const callerId = socket.userId;
 
-    console.log(`🚫 Appel WebRTC annulé:`, { callId, callerId });
-
-    // 1️⃣ Mettre à jour la base de données en 'missed'
-    const cancelledCall = await Call.findByIdAndUpdate(
-      callId,
-      {
-        status: 'missed',
-        endTime: new Date(),
-        duration: 0,
-        $push: {
-          statusHistory: { status: 'cancelled', timestamp: new Date() }
-        }
-      },
-      { new: true }
-    );
-
-    // 2️⃣ Supprimer de la mémoire
-    activeCalls.delete(callId);
-
-    // 🔥 CRÉER UN MESSAGE D'APPEL MANQUÉ
-    if (cancelledCall) {
-      const { default: Message } = await import("../models/Message.js");
-      const callMessage = await Message.create({
-        conversationId: cancelledCall.conversationId,
-        Id_sender: cancelledCall.callerId,
-        typeMessage: "call",
-        content: `❌ Appel ${cancelledCall.callType === 'audio' ? 'audio' : 'vidéo'} manqué`,
-        callType: cancelledCall.callType,
-        callResult: "missed",
-        duration: 0,
-        status: "sent"
-      });
-
-      await callMessage.populate("Id_sender", "username avatar");
-      io.to(cancelledCall.conversationId.toString()).emit("new-message", callMessage);
-    }
-
-    // 3️⃣ Notifier le receiver que l'appel est annulé
-    const receiverSocket = Array.from(io.sockets.sockets.values())
-      .find(s => s.userId === cancelledCall.receiverId.toString());
-
-    if (receiverSocket) {
-      receiverSocket.emit('call:cancelled', {
-        callId,
-        callerId,
-        timestamp: new Date()
-      });
-    }
-
-    console.log(`✅ Appel ${callId} annulé et message manqué créé`);
-
-  } catch (error) {
-    console.error('💥 Erreur annulation appel:', error);
-    socket.emit('call:error', { error: error.message });
-  }
-});
 socket.on('call:end', async (data) => {
   const { userId, callId } = data;
   const callerId = socket.userId;
