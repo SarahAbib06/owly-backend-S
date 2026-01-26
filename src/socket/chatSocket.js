@@ -1894,90 +1894,122 @@ socket.on('call:reject', async (data) => {
     socket.emit('call:error', { error: error.message });
   }
 });
+// 🔧 REMPLACER LES DEUX GESTIONNAIRES call:end ET end-call PAR CELUI-CI
+// (Supprimer les lignes 606-649 et 713-809, garder celui-ci)
 
-socket.on('call:end', async (data) => {
-  const { userId, callId } = data;
-  const callerId = socket.userId;
+socket.on('end-call', async (data) => {
+  const { chatId, channelName, duration = 0, reason = 'ended', callId } = data;
+  const userId = socket.userId;
 
-  console.log(`📴 Appel terminé entre ${callerId} et ${userId} pour call ${callId}`);
+  console.log(`[end-call] Reçu de ${userId}`, { callId, channelName, chatId, duration, reason });
 
-  try {
-    // 1️⃣ Récupérer l'appel de la mémoire
-    const call = activeCalls.get(callId);
-    
-    if (!call) {
-      console.warn('⚠️ Appel déjà terminé:', callId);
-      return;
-    }
+  let targetCall = null;
 
-    // 2️⃣ Calculer la durée
-    const duration = Math.floor((Date.now() - new Date(call.startedAt).getTime()) / 1000);
-
-    // 3️⃣ Mettre à jour dans la BDD
-    const endedCall = await Call.findByIdAndUpdate(
-      callId,
-      {
-        status: duration < 2 ? 'missed' : 'completed',
-        endTime: new Date(),
-        duration,
-        $push: {
-          statusHistory: { 
-            status: duration < 2 ? 'missed' : 'completed', 
-            timestamp: new Date() 
-          }
-        }
-      },
-      { new: true }
-    );
-
-    console.log(`📝 Appel ${callId} terminé: ${duration}s (status: ${endedCall?.status})`);
-
-    // 🔥 CRÉER UN MESSAGE D'APPEL TERMINÉ
-    if (endedCall) {
-      const { default: Message } = await import("../models/Message.js");
-      
-      let messageContent;
-      if (duration < 2) {
-        messageContent = `❌ Appel ${endedCall.callType === 'audio' ? 'audio' : 'vidéo'} manqué`;
-      } else {
-        const mins = Math.floor(duration / 60);
-        const secs = duration % 60;
-        const durationText = `${mins}:${secs.toString().padStart(2, '0')}`;
-        messageContent = `📞 Appel ${endedCall.callType === 'audio' ? 'audio' : 'vidéo'} terminé (${durationText})`;
-      }
-
-      const callMessage = await Message.create({
-        conversationId: endedCall.conversationId,
-        Id_sender: callerId,
-        typeMessage: "call",
-        content: messageContent,
-        callType: endedCall.callType,
-        callResult: duration < 2 ? "missed" : "ended",
-        duration,
-        status: "sent",
-        callStartedAt: duration >= 2 ? new Date(Date.now() - duration * 1000) : null,
-        callEndedAt: duration >= 2 ? new Date() : null
-      });
-
-      await callMessage.populate("Id_sender", "username avatar");
-      io.to(endedCall.conversationId.toString()).emit("new-message", callMessage);
-    }
-
-    // 4️⃣ Supprimer de la mémoire
-    activeCalls.delete(callId);
-
-    // 5️⃣ Notifier tous les participants via la salle
-    io.to(`call_${callId}`).emit('call:ended', {
-      userId: callerId,
-      callId,
-      duration,
-      timestamp: new Date()
-    });
-
-  } catch (error) {
-    console.error('💥 Erreur fin appel:', error);
+  // 1. Recherche par callId (priorité max)
+  if (callId) {
+    targetCall = await Call.findById(callId);
   }
+
+  // 2. Sinon via activeCalls + channelName
+  if (!targetCall && channelName) {
+    const active = activeCalls.get(channelName);
+    if (active?.dbCallId) {
+      targetCall = await Call.findById(active.dbCallId);
+    }
+  }
+
+  // 3. Dernier recours : appel le plus récent dans cette conversation
+  if (!targetCall && chatId) {
+    targetCall = await Call.findOne({
+      conversationId: chatId,
+      $or: [{ callerId: userId }, { receiverId: userId }],
+      status: { $in: ['ringing', 'ongoing'] }
+    }).sort({ createdAt: -1 });
+  }
+
+  if (!targetCall) {
+    console.warn("Aucun appel actif trouvé pour terminer");
+    socket.emit('call:ended', { reason: 'no_call_found' });
+    return;
+  }
+
+  const callIdStr = targetCall._id.toString();
+
+  // Mise à jour statut
+  const finalStatus = duration < 3 ? 'missed' : 'completed';
+  await Call.findByIdAndUpdate(callIdStr, {
+    status: finalStatus,
+    endTime: new Date(),
+    duration,
+    $push: {
+      statusHistory: {
+        status: finalStatus,
+        endedBy: userId,
+        reason,
+        timestamp: new Date()
+      }
+    }
+  });
+
+  // Nettoyage mémoire
+  activeCalls.delete(callIdStr);
+  if (channelName) activeCalls.delete(channelName);
+
+  // ────────────────────────────────────────────────
+  // MESSAGE DANS LE CHAT (très important)
+  // ────────────────────────────────────────────────
+  const { default: Message } = await import("../models/Message.js");
+
+  const content = duration < 3
+    ? `❌ Appel ${targetCall.callType} manqué`
+    : `📞 Appel ${targetCall.callType} terminé (${Math.floor(duration/60)}:${(duration%60).toString().padStart(2,'0')})`;
+
+  const callMsg = await Message.create({
+    conversationId: targetCall.conversationId,
+    Id_sender: userId,
+    typeMessage: "call",
+    content,
+    callType: targetCall.callType,
+    callResult: duration < 3 ? "missed" : "ended",
+    duration,
+    status: "sent"
+  });
+
+  await callMsg.populate("Id_sender", "username avatar");
+  io.to(targetCall.conversationId.toString()).emit("new-message", callMsg);
+
+  // ────────────────────────────────────────────────
+  // DIFFUSION ULTRA-LARGE de call:ended
+  // ────────────────────────────────────────────────
+  const endedPayload = {
+    callId: callIdStr,
+    conversationId: targetCall.conversationId.toString(),
+    channelName: channelName || `call_${targetCall.conversationId}`,
+    endedBy: userId,
+    duration,
+    reason,
+    timestamp: new Date().toISOString()
+  };
+
+  // A. Toute la conversation (le plus fiable)
+  io.to(targetCall.conversationId.toString()).emit('call:ended', endedPayload);
+
+  // B. Room d'appel (si elle existe encore)
+  io.to(`call:${callIdStr}`).emit('call:ended', endedPayload);
+
+  // C. Rooms personnelles des deux participants
+  io.to(`user_${targetCall.callerId.toString()}`).emit('call:ended', endedPayload);
+  io.to(`user_${targetCall.receiverId.toString()}`).emit('call:ended', endedPayload);
+
+  console.log(`Appel ${callIdStr} terminé et notifié agressivement`);
+
+  // Confirmer à celui qui a raccroché
+  socket.emit('call:ended', { ...endedPayload, success: true });
 });
+
+
+// Ajouter / remplacer par ceci
+
     // Envoyer offre WebRTC
 socket.on('call:offer', (data) => {
   const { callId, receiverId, signal } = data;
@@ -2027,55 +2059,54 @@ socket.on('call:ice-candidate', (data) => {
   });
 });
 
-    // Terminer un appel
-    socket.on('call:end', async (data) => {
-      const { userId, callId } = data;
-      const callerId = socket.userId;
-
-      console.log(`📴 Appel terminé entre ${callerId} et ${userId} pour call ${callId}`);
-
-      // Collecter les callIds à terminer
-      const callsToEnd = [];
-      if (callId) {
-        callsToEnd.push(callId);
-      } else {
-        for (const [cid, call] of activeCalls.entries()) {
-          if (call.callerId === callerId || call.receiverId === callerId ||
-              call.callerId === userId || call.receiverId === userId) {
-            callsToEnd.push(cid);
-          }
-        }
-      }
-
-      // Finaliser les appels en base de données
-      for (const cid of callsToEnd) {
-        const call = activeCalls.get(cid);
-        if (call && call.callId) {
-          try {
-            await callController.endCall(call.callId);
-          } catch (error) {
-            console.error(`Erreur fin appel DB ${call.callId}:`, error);
-          }
-        }
-      }
-
-      // Supprimer les appels de la mémoire
-      for (const cid of callsToEnd) {
-        activeCalls.delete(cid);
-      }
-
-      // Notifier tous les participants de l'appel via la salle
-      for (const cid of callsToEnd) {
-        io.to(`call_${cid}`).emit('call:ended', {
-          userId: callerId,
-          callId: cid,
-          timestamp: new Date()
-        });
-      }
-    });
+    
     // 🆕 DÉCONNEXION ROBUSTE
     socket.on("disconnect", async (reason) => {
       console.log("🔴 User déconnecté:", socket.userId, "- Raison:", reason);
+      // Ajouter ceci dans socket.on("disconnect")
+if (socket.userId) {
+  // Chercher et terminer tous les appels en cours de cet utilisateur
+  const callsToEnd = [];
+  for (const [key, call] of activeCalls.entries()) {
+    if (call.callerId === socket.userId || call.recipientId === socket.userId) {
+      callsToEnd.push(key);
+    }
+  }
+
+  for (const callKey of callsToEnd) {
+    const call = activeCalls.get(callKey);
+    if (call && call.dbCallId) {
+      try {
+        await Call.findByIdAndUpdate(
+          call.dbCallId,
+          {
+            status: 'missed', // ou 'disconnected' si tu veux différencier
+            endTime: new Date(),
+            duration: 0,
+            $push: {
+              statusHistory: {
+                status: 'missed',
+                reason: 'peer_disconnected',
+                timestamp: new Date()
+              }
+            }
+          }
+        );
+
+        io.to(call.conversationId.toString()).emit('call:ended', {
+          callId: call.dbCallId.toString(),
+          endedBy: 'system',
+          reason: 'peer_disconnected',
+          timestamp: new Date().toISOString()
+        });
+
+        activeCalls.delete(callKey);
+      } catch (err) {
+        console.error('Erreur cleanup appel sur disconnect:', err);
+      }
+    }
+  }
+}
 
       // NETTOYAGE INTERVAL
       if (presenceInterval) {
