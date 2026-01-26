@@ -354,7 +354,98 @@ socket.on("reject-call", async (data) => {
     });
   }
 });
+// 🚫 ANNULATION D'APPEL PAR L'APPELANT (avant acceptation)
+socket.on("cancel-call", async (data) => {
+  try {
+    const { callId, channelName, chatId, callerId, recipientId, callType } = data;
 
+    console.log(`🚫 [cancel-call] Appel annulé par l'appelant ${callerId}`, {
+      callId,
+      channelName,
+      chatId,
+      recipientId
+    });
+
+    // 1. Vérifier que c'est bien l'appelant qui annule
+    if (socket.userId !== callerId) {
+      return socket.emit("call-error", { error: "Seul l'appelant peut annuler" });
+    }
+
+    // 2. Mettre à jour l'appel en base (si callId existe)
+    let cancelledCall;
+    if (callId) {
+      cancelledCall = await Call.findByIdAndUpdate(
+        callId,
+        {
+          status: 'cancelled',
+          endTime: new Date(),
+          duration: 0,
+          $push: {
+            statusHistory: { status: 'cancelled', timestamp: new Date() }
+          }
+        },
+        { new: true }
+      );
+    }
+
+    // 3. Supprimer de la mémoire activeCalls
+    if (channelName) {
+      activeCalls.delete(channelName);
+    }
+
+    // 4. Notifier le receveur → ferme son modal incoming call
+    if (recipientId) {
+      const recipientSockets = getSocketsByUserId(recipientId);
+
+      recipientSockets.forEach(recipientSocket => {
+        recipientSocket.emit("call-cancelled", {
+          callId,
+          channelName,
+          chatId,
+          callerId,
+          reason: "cancelled_by_caller",
+          callType,
+          timestamp: new Date().toISOString()
+        });
+      });
+
+      console.log(`📴 Notification "call-cancelled" envoyée à ${recipientId} (${recipientSockets.length} sockets)`);
+    }
+
+    // 5. Optionnel : créer un message dans le chat "Appel annulé"
+    if (chatId && cancelledCall) {
+      const { default: Message } = await import("../models/Message.js");
+      const callMessage = await Message.create({
+        conversationId: chatId,
+        Id_sender: callerId,
+        typeMessage: "call",
+        content: `❌ Appel ${callType === 'audio' ? 'audio' : 'vidéo'} annulé`,
+        callType,
+        callResult: "cancelled",
+        duration: 0,
+        status: "sent"
+      });
+      await callMessage.populate("Id_sender", "username avatar");
+      io.to(chatId).emit("new-message", callMessage);
+      console.log(`📩 Message "Appel annulé" créé et diffusé dans ${chatId}`);
+    }
+
+    // 6. Confirmer à l'appelant
+    socket.emit("call-cancelled-success", {
+      success: true,
+      callId,
+      channelName,
+      timestamp: new Date().toISOString()
+    });
+
+  } catch (error) {
+    console.error("💥 Erreur annulation appel:", error);
+    socket.emit("call-error", {
+      error: error.message || "Erreur lors de l'annulation",
+      code: "CANCEL_ERROR"
+    });
+  }
+});
 // ==================== 🎯 FONCTIONS UTILITAIRES ====================
 
 function getSocketsByUserId(userId) {
