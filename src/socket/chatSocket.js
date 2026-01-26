@@ -357,8 +357,7 @@ socket.on("reject-call", async (data) => {
 // 🚫 ANNULATION D'APPEL PAR L'APPELANT (avant acceptation)
 socket.on("cancel-call", async (data) => {
   try {
-    const { callId, channelName, chatId, callerId, recipientId, callType } = data;
-
+    const { channelName, chatId, callerId, recipientId, callType, callId } = data;
     console.log(`🚫 [cancel-call] Appel annulé par l'appelant ${callerId}`, {
       callId,
       channelName,
@@ -366,13 +365,13 @@ socket.on("cancel-call", async (data) => {
       recipientId
     });
 
-    // 1. Vérifier que c'est bien l'appelant qui annule
+    // 1. Vérifier que c'est bien l'appelant
     if (socket.userId !== callerId) {
       return socket.emit("call-error", { error: "Seul l'appelant peut annuler" });
     }
 
-    // 2. Mettre à jour l'appel en base (si callId existe)
-    let cancelledCall;
+    // 2. Mettre à jour l'appel si callId existe (optionnel maintenant)
+    let cancelledCall = null;
     if (callId) {
       cancelledCall = await Call.findByIdAndUpdate(
         callId,
@@ -380,23 +379,18 @@ socket.on("cancel-call", async (data) => {
           status: 'cancelled',
           endTime: new Date(),
           duration: 0,
-          $push: {
-            statusHistory: { status: 'cancelled', timestamp: new Date() }
-          }
+          $push: { statusHistory: { status: 'cancelled', timestamp: new Date() } }
         },
         { new: true }
       );
     }
 
-    // 3. Supprimer de la mémoire activeCalls
-    if (channelName) {
-      activeCalls.delete(channelName);
-    }
+    // 3. Supprimer de activeCalls
+    if (channelName) activeCalls.delete(channelName);
 
-    // 4. Notifier le receveur → ferme son modal incoming call
+    // 4. Notifier le receveur
     if (recipientId) {
       const recipientSockets = getSocketsByUserId(recipientId);
-
       recipientSockets.forEach(recipientSocket => {
         recipientSocket.emit("call-cancelled", {
           callId,
@@ -408,12 +402,12 @@ socket.on("cancel-call", async (data) => {
           timestamp: new Date().toISOString()
         });
       });
-
-      console.log(`📴 Notification "call-cancelled" envoyée à ${recipientId} (${recipientSockets.length} sockets)`);
     }
 
-    // 5. Optionnel : créer un message dans le chat "Appel annulé"
-    if (chatId && cancelledCall) {
+    // ────────────────────────────────────────────────────────────────
+    // IMPORTANT : Créer le message même si callId est null
+    // On a déjà chatId, callerId, callType → on crée directement
+    if (chatId) {
       const { default: Message } = await import("../models/Message.js");
       const callMessage = await Message.create({
         conversationId: chatId,
@@ -421,29 +415,31 @@ socket.on("cancel-call", async (data) => {
         typeMessage: "call",
         content: `❌ Appel ${callType === 'audio' ? 'audio' : 'vidéo'} annulé`,
         callType,
-        callResult: "cancelled",
+        callResult: "missed",
         duration: 0,
-        status: "sent"
+        status: "sent",
+        createdAt: new Date()
       });
+
       await callMessage.populate("Id_sender", "username avatar");
-      io.to(chatId).emit("new-message", callMessage);
-      console.log(`📩 Message "Appel annulé" créé et diffusé dans ${chatId}`);
+      io.to(chatId.toString()).emit("new-message", callMessage);
+      
+      console.log(`📩 Message "Appel annulé" créé et envoyé dans ${chatId}`);
     }
+    // ────────────────────────────────────────────────────────────────
 
     // 6. Confirmer à l'appelant
     socket.emit("call-cancelled-success", {
       success: true,
-      callId,
       channelName,
+      callType,
+      callId,
       timestamp: new Date().toISOString()
     });
 
   } catch (error) {
     console.error("💥 Erreur annulation appel:", error);
-    socket.emit("call-error", {
-      error: error.message || "Erreur lors de l'annulation",
-      code: "CANCEL_ERROR"
-    });
+    socket.emit("call-error", { error: error.message || "Erreur lors de l'annulation" });
   }
 });
 // ==================== 🎯 FONCTIONS UTILITAIRES ====================
