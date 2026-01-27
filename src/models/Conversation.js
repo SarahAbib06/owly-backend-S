@@ -60,6 +60,40 @@ const conversationSchema = new Schema(
         _id: false,
       },
     ],
+    
+    // ============================================
+    // 🎨 THÈME DE LA CONVERSATION
+    // ============================================
+    theme: {
+      type: {
+        type: String,
+        enum: ["color", "gradient", "image", "seasonal", "upload"],
+        default: null,
+      },
+      value: {
+        type: String,
+        default: null,
+      },
+      emojis: {
+        type: [String],
+        default: [],
+      },
+      appliedBy: {
+        type: Schema.Types.ObjectId,
+        ref: "User",
+        default: null,
+      },
+      appliedAt: {
+        type: Date,
+        default: null,
+      },
+      name: {
+        type: String,
+        default: null,
+      },
+      _id: false, // Pas besoin d'_id pour ce sous-document
+    },
+    // ============================================
 
     // Dernier message (pour trier les conversations)
     lastMessageAt: {

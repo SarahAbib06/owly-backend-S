@@ -13,8 +13,8 @@ const participantsSchema = new mongoose.Schema({
   },
   Role: {
     type: String,
-    enum: ['admin', 'membre'],
-    default: 'membre'
+    enum: ['admin', 'member'],
+    default: 'member'
   },
   date: {
     type: Date,

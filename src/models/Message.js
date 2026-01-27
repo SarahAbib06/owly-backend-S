@@ -46,10 +46,22 @@ const messageSchema = new Schema(
 
     status: {
       type: String,
-      enum: ["sent", "delivered", "seen", "pending"],
-      default: "sent",
+      enum: ["sending","sent", "delivered", "seen", "pending"],
+      default: "sending",
     },
-
+ seenBy: [
+      {
+        userId: {
+          type: Schema.Types.ObjectId,
+          ref: "User",
+        },
+        seenAt: {
+          type: Date,
+          default: Date.now,
+        },
+        _id: false,
+      },
+    ],
     isPinned: { type: Boolean, default: false },
     pinnedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     pinnedAt: { type: Date },
