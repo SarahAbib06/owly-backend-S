@@ -40,7 +40,7 @@ const messageSchema = new Schema(
 
     typeMessage: {
       type: String,
-      enum: ["text", "image", "video", "audio", "file", "emojis"],
+      enum: ["text", "image", "video", "audio", "file", "emojis", "system"],
       default: "text",
     },
 
