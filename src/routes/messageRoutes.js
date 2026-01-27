@@ -43,7 +43,7 @@ router.get("/:conversationId", protact, async (req, res) => {
   }
 });
 
-// ROUTES AUDIO (inchangées)
+// 🔧 ROUTE AUDIO CORRIGÉE - avec logging du statut
 router.post(
   "/audio/send",
   protact,
@@ -65,6 +65,8 @@ router.post(
     console.log("- Files received:", req.files);
     console.log("- Body after Multer:", req.body);
     console.log("- ConversationId in body:", req.body?.conversationId);
+    // 🆕 AJOUT: Logger le statut reçu
+    console.log("- Status in body:", req.body?.status);
 
     if (!req.file) {
       console.log("MULTER N'A PAS REÇU LE FICHIER");
@@ -82,12 +84,11 @@ router.post(
     console.log("Fichier reçu par Multer:", req.file.originalname);
     next();
   },
-  sendAudioMessage
+  sendAudioMessage // ← Cette fonction doit utiliser req.body.status
 );
 
 router.get("/audio/:conversationId", protact, getAudioMessages);
 
-// NOUVELLES ROUTES ÉPINGLER / DÉSÉPINGLER (ajoutées sans toucher au reste)
 // Épingler un message
 router.post("/:messageId/pin", protact, (req, res) => {
   req.io = req.app.get("io");
@@ -99,27 +100,24 @@ router.post("/:messageId/unpin", protact, (req, res) => {
   req.io = req.app.get("io");
   messageController.unpinMessage(req, res);
 });
-// Route pour la galerie médias/fichiers (comme Messenger)
+
+// Route pour la galerie médias/fichiers
 router.get('/:conversationId/media', protact, messageController.getConversationMedia);
 
-
+// Supprimer un message
 router.post("/:messageId/delete", protact, (req, res) => {
   req.io = req.app.get("io");
   messageController.deleteMessage(req, res);
 });
 
-
-
-
-
-
-// Bonus : récupérer les messages épinglés d'une conversation (super utile pour l'affichage en haut)
+// Récupérer les messages épinglés
 router.get(
   "/:conversationId/pinned",
   protact,
   messageController.getPinnedMessages
 );
-//pour trensfer de msg
+
+// Transférer un message
 router.post("/:messageId/forward", protact, messageController.forwardMessage);
 
 export default router;

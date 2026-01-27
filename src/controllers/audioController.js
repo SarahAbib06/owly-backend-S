@@ -10,7 +10,8 @@ export const sendAudioMessage = async (req, res) => {
   console.log("🎯 DÉBUT sendAudioMessage avec Cloudinary + Temps Réel");
 
   try {
-    const { conversationId } = req.body;
+    // 🆕 RÉCUPÉRER LE STATUT du body
+    const { conversationId, status } = req.body;
     const senderId = req.user.id;
     const io = req.app.get("io"); // Récupérer l'instance Socket.io
 
@@ -19,6 +20,8 @@ export const sendAudioMessage = async (req, res) => {
     console.log("- Conversation ID:", conversationId);
     console.log("- Sender ID:", senderId);
     console.log("- Fichier reçu:", req.file ? req.file.filename : "AUCUN");
+    console.log("- Status reçu:", status); // 🆕 LOG DU STATUT
+
 
     if (!conversationId) {
       if (req.file) fs.unlinkSync(req.file.path);
@@ -73,6 +76,7 @@ const audioDuration = cloudinaryResult.duration ? Math.round(cloudinaryResult.du
       content: cloudinaryResult.secure_url,
       cloudinaryPublicId: cloudinaryResult.public_id,
       cloudinaryFormat: cloudinaryResult.format,
+       status: status || "sent", // Par défaut "sent" si non fourni
     });
 
     await newMessage.save();

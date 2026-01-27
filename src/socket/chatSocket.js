@@ -760,6 +760,7 @@ socket.on('call:screen-share-stop', (data) => {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
           typeMessage: "image",
+           tempId: data.tempId, 
         };
 
         // Traitement du fichier image
@@ -799,6 +800,7 @@ socket.on('call:screen-share-stop', (data) => {
           success: true,
           data: savedMessage,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
 
         console.log("🖼️ Message image traité - ID:", savedMessage._id);
@@ -808,6 +810,7 @@ socket.on('call:screen-share-stop', (data) => {
           success: false,
           error: error.message,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
       }
     });
@@ -888,6 +891,7 @@ socket.on('call:screen-share-stop', (data) => {
           success: true,
           data: formattedMessage,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
 
         console.log("📎 Message fichier traité - ID:", savedMessage._id);
@@ -925,6 +929,8 @@ socket.on('call:screen-share-stop', (data) => {
           fileType: data.fileType,
           fileSize: data.fileSize,
           typeMessage: "video",
+          tempId: data.tempId, 
+          
         };
 
         // Conversion ArrayBuffer → Buffer Node.js
@@ -971,6 +977,7 @@ socket.on('call:screen-share-stop', (data) => {
           success: true,
           data: formattedMessage,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
 
         console.log("🎥 Message vidéo traité - ID:", savedMessage._id);
@@ -1015,6 +1022,7 @@ socket.on('call:screen-share-stop', (data) => {
           success: true,
           totalUnread: totalUnread,
           conversationCounts: unreadData,
+          
         });
       } catch (error) {
         socket.emit("notification_error", { message: error.message });
@@ -1068,31 +1076,137 @@ socket.on('call:screen-share-stop', (data) => {
       });
     });
 
-    socket.on("mark_as_read", async (data) => {
-      try {
-        console.log("👀 Message marqué comme lu:", data);
-        socket.emit("message_read", {
-          success: true,
-          messageId: data.messageId,
+    // Remplacer l'événement existant par :
+socket.on("mark_as_read", async (data) => {
+  try {
+    console.log("👀 Message marqué comme lu:", data);
+    const { messageId, conversationId } = data;
+    const userId = socket.userId;
+
+    // 1. Mettre à jour le message dans la base de données
+    const message = await Message.findById(messageId);
+    if (message) {
+      if (!message.readBy) message.readBy = [];
+      
+      // Ajouter l'utilisateur à la liste readBy s'il n'y est pas déjà
+      const alreadyRead = message.readBy.some(
+        r => r.userId.toString() === userId.toString()
+      );
+      
+      if (!alreadyRead) {
+        message.readBy.push({
+          userId: userId,
+          readAt: new Date()
         });
-      } catch (error) {
-        socket.emit("error", { message: error.message });
+        await message.save();
+        
+        console.log(`✅ Message ${messageId} marqué comme lu par ${userId}`);
       }
+    }
 
-    
+    // 2. Émettre l'événement à TOUS les participants de la conversation
+    // Pour que l'expéditeur voie les deux coches bleues
+    if (conversationId) {
+      io.to(conversationId.toString()).emit("message:seen", {
+        messageId: messageId,
+        seenBy: userId,
+        conversationId: conversationId,
+        timestamp: new Date()
+      });
+      
+      // Émettre aussi spécifiquement à l'expéditeur si différent
+      if (message && message.Id_sender.toString() !== userId.toString()) {
+        io.to(`user_${message.Id_sender.toString()}`).emit("message:seen", {
+          messageId: messageId,
+          seenBy: userId,
+          conversationId: conversationId,
+          timestamp: new Date()
+        });
+      }
+    }
 
-
-
-
-
-
-
-
-
-
-
-
+    // 3. Répondre à l'émetteur
+    socket.emit("message_read", {
+      success: true,
+      messageId: data.messageId,
     });
+  } catch (error) {
+    console.error("💥 Erreur mark_as_read:", error);
+    socket.emit("error", { message: error.message });
+  }
+});
+
+// Ajouter aussi un événement pour marquer TOUS les messages d'une conversation
+socket.on("mark_conversation_read", async (data) => {
+  try {
+    const { conversationId } = data;
+    const userId = socket.userId;
+
+    console.log(`👁️ Marquer toute la conversation comme lue:`, { conversationId, userId });
+
+    // 1. Trouver tous les messages non lus dans cette conversation
+    const messages = await Message.find({
+      conversationId: conversationId,
+      Id_sender: { $ne: userId }, // Pas les messages de l'utilisateur lui-même
+      "readBy.userId": { $ne: userId } // Pas déjà lus
+    });
+
+    const updatedMessageIds = [];
+
+    // 2. Marquer chaque message comme lu
+    for (const message of messages) {
+      if (!message.readBy) message.readBy = [];
+      
+      message.readBy.push({
+        userId: userId,
+        readAt: new Date()
+      });
+      
+      await message.save();
+      updatedMessageIds.push(message._id.toString());
+
+      // 3. Émettre pour chaque message
+      io.to(conversationId.toString()).emit("message:seen", {
+        messageId: message._id.toString(),
+        seenBy: userId,
+        conversationId: conversationId,
+        timestamp: new Date()
+      });
+
+      // Informer l'expéditeur
+      io.to(`user_${message.Id_sender.toString()}`).emit("message:seen", {
+        messageId: message._id.toString(),
+        seenBy: userId,
+        conversationId: conversationId,
+        timestamp: new Date()
+      });
+    }
+
+    console.log(`✅ ${updatedMessageIds.length} messages marqués comme lus`);
+
+    // 4. Réinitialiser le compteur de non-lus dans la conversation
+    await Conversation.findByIdAndUpdate(
+      conversationId,
+      {
+        $set: { "unreadCounts.$[elem].count": 0 }
+      },
+      {
+        arrayFilters: [{ "elem.userId": userId }],
+        new: true
+      }
+    );
+
+    socket.emit("conversation_marked_read", {
+      success: true,
+      conversationId: conversationId,
+      messagesRead: updatedMessageIds.length
+    });
+
+  } catch (error) {
+    console.error("💥 Erreur mark_conversation_read:", error);
+    socket.emit("error", { message: error.message });
+  }
+});
 // ==================== 📞 APPELS VIDÉO WEBRTC ====================
 socket.on('call:initiate', async (data) => {
   console.log('📞 call:initiate received:', data, 'from user:', socket.userId);

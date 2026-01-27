@@ -473,19 +473,26 @@ try {
     const conversation = await Conversation.findById(finalConversationId);
 
     const messageToEmit = {
-      _id: savedMessage._id,
-      conversationId: finalConversationId,
-      Id_sender,
-      content: typeMessage === "text" ? content.trim() : content,
-      typeMessage,
-      status: savedMessage.status,
-      createdAt: savedMessage.createdAt,     // IMPORTANT
-      timestamp: savedMessage.createdAt,
-      isGroup: conversation?.type === "group",
-      ...additionalData,
-    };
+  _id: savedMessage._id,
+  conversationId: finalConversationId,
+  Id_sender,
+  content: typeMessage === "text" ? content.trim() : content,
+  typeMessage,
+  status: savedMessage.status,
+  createdAt: savedMessage.createdAt,
+  timestamp: savedMessage.createdAt,
+  isGroup: conversation?.type === "group",
 
-    io.to(finalConversationId.toString()).emit("new_message", messageToEmit);
+  tempId, // 🔥🔥🔥 AJOUT CRUCIAL
+
+  ...additionalData,
+};
+
+    // 🔥 envoyer aux AUTRES uniquement
+io.to(finalConversationId.toString())
+  .except(`user_${Id_sender}`)
+  .emit("new_message", messageToEmit);
+
     if (tempId) {
     io.to(`user_${Id_sender}`).emit("message_sent", {
       success: true,
@@ -529,6 +536,7 @@ export const messageController = {
         Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
         typeMessage: "image",
+        tempId: messageData.tempId,
       };
 
       const additionalData = {
@@ -563,6 +571,7 @@ export const messageController = {
         Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
         typeMessage: "video",
+        tempId: messageData.tempId,
       };
 
       const additionalData = {
@@ -596,7 +605,8 @@ export const messageController = {
         conversationId: messageData.conversationId,
         Id_receiver: messageData.Id_receiver,
         content: uploadResult.secure_url,
-        typeMessage: 'file'
+        typeMessage: 'file',
+        tempId: messageData.tempId,
       };
 
       const additionalData = {
@@ -1119,4 +1129,3 @@ async function shouldSendPushNotification(userId) {
     return true;
   }
 }
-
