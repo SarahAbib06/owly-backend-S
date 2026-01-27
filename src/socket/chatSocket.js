@@ -675,6 +675,17 @@ socket.on("call-duration-report", (data) => {
   // Stocker la durée pour les statistiques
   // Par exemple: db.collection('call_durations').insertOne({...})
 });
+    // ==================== 🎯 Groupe ====================
+
+    socket.on('groupMemberAdded', (data) => {
+  // Refresh membres pour tous
+  console.log('Membre ajouté:', data);
+});
+
+socket.on('groupMemberRemoved', (data) => {
+  console.log('Membre supprimé:', data);
+});
+
     // ==================== 🎯 RÉACTIONS EN TEMPS RÉEL ====================
 
     socket.on("join_message_reactions", (messageId) => {
@@ -1286,66 +1297,81 @@ socket.on("call-duration-report", (data) => {
     });
 
     // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ - CORRIGÉ SANS DOUBLON
-    socket.on("send_message", async (data) => {
-      console.log("📨 Message reçu:", data);
+socket.on("send_message", async (data) => {
+  console.log("📨 Message reçu:", data);
 
-      try {
-        let messageData = data;
+  try {
+    let messageData = data;
 
-        if (typeof data === "string") {
-          messageData = JSON.parse(data);
-        }
+    if (typeof data === "string") {
+      messageData = JSON.parse(data);
+    }
 
-        const requiredFields = ["content"];
-        const missingFields = requiredFields.filter(
-          (field) => !messageData[field]
-        );
+    const requiredFields = ["content"];
+    const missingFields = requiredFields.filter(
+      (field) => !messageData[field]
+    );
 
-        if (missingFields.length > 0) {
-          throw new Error(`Champs manquants: ${missingFields.join(", ")}`);
-        }
+    if (missingFields.length > 0) {
+      throw new Error(`Champs manquants: ${missingFields.join(", ")}`);
+    }
 
-        // Vérification autorisation si conversationId fourni
-        if (messageData.conversationId) {
-          await conversationController.checkUserAuthorization(
-            socket.userId,
-            messageData.conversationId
-          );
-        }
+    // Vérification autorisation si conversationId fourni
+    if (messageData.conversationId) {
+      await conversationController.checkUserAuthorization(
+        socket.userId,
+        messageData.conversationId
+      );
+    }
 
-        const finalMessageData = {
-          ...messageData,
-          Id_sender: socket.userId, // ← SÉCURISÉ DU TOKEN
-        };
+    // 🔥 RÉCUPÉRER LES INFOS DE L'EXPÉDITEUR
+    const sender = await User.findById(socket.userId).select('username profilePicture');
 
-        // SAUVEGARDE DU MESSAGE (l'émission se fait dans handleMessageCreation)
-        const savedMessage = await messageController.createMessage(
-          finalMessageData,
-          io,
-          socket.userId
-        );
+    const finalMessageData = {
+      ...messageData,
+      Id_sender: socket.userId,
+      // 🆕 AJOUTER CES CHAMPS
+      senderUsername: sender?.username || socket.username,
+      senderProfilePicture: sender?.profilePicture || null,
+    };  
 
-        // METTRE À JOUR L'ACTIVITÉ
-        await updateUserActivity(socket.userId, socket.id);
+    // SAUVEGARDE DU MESSAGE
+    const savedMessage = await messageController.createMessage(
+      finalMessageData,
+      io,
+      socket.userId
+    );
 
-        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit("message_sent", {
-          success: true,
-          data: savedMessage,
-          timestamp: new Date(),
-        });
+    // METTRE À JOUR L'ACTIVITÉ
+    await updateUserActivity(socket.userId, socket.id);
 
-        console.log("🎉 Message traité - ID:", savedMessage._id);
-      } catch (error) {
-        console.error("💥 Erreur traitement message:", error.message);
+    // 🔥 AJOUTER LES INFOS EXPÉDITEUR DANS LA RÉPONSE
+    const messageWithSenderInfo = {
+      ...savedMessage.toObject(),
+      senderUsername: sender?.username || socket.username,
+      senderProfilePicture: sender?.profilePicture || null,
+      tempId: messageData.tempId, // Pour lier au message temporaire
+    };
 
-        socket.emit("message_error", {
-          success: false,
-          error: error.message,
-          timestamp: new Date(),
-        });
-      }
+    // ✅ CONFIRMATION À L'ÉMETTEUR
+    socket.emit("message_sent", {
+      success: true,
+      data: messageWithSenderInfo,
+      tempId: messageData.tempId,
+      timestamp: new Date(),
     });
+
+    console.log("🎉 Message traité - ID:", savedMessage._id);
+  } catch (error) {
+    console.error("💥 Erreur traitement message:", error.message);
+
+    socket.emit("message_error", {
+      success: false,
+      error: error.message,
+      timestamp: new Date(),
+    });
+  }
+});
 
     // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ SANS DOUBLON
     socket.on("send_image_message", async (data) => {

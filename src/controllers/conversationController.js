@@ -102,8 +102,10 @@ getOrCreateConversation: async (senderId, receiverId) => {
     const newConversation = await Conversation.create({
       Id_participant: allUserIds,
       type: "group",
-      groupName: groupName.trim(),
-      createdBy: creatorIdFromToken,
+  groupName: groupName.trim(),
+  groupDescription: groupDescription || '', // NOUVEAU
+  groupPic: groupPic || null, // NOUVEAU
+  createdBy: creatorIdFromToken,
     });
 
     console.log(
