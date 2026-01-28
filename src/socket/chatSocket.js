@@ -355,6 +355,8 @@ socket.on("reject-call", async (data) => {
   }
 });
 // 🚫 ANNULATION D'APPEL PAR L'APPELANT (avant acceptation)
+
+
 socket.on("cancel-call", async (data) => {
   try {
     const { channelName, chatId, callerId, recipientId, callType, callId } = data;
@@ -370,7 +372,7 @@ socket.on("cancel-call", async (data) => {
       return socket.emit("call-error", { error: "Seul l'appelant peut annuler" });
     }
 
-    // 2. Mettre à jour l'appel si callId existe (optionnel maintenant)
+    // 2. Mettre à jour l'appel si callId existe
     let cancelledCall = null;
     if (callId) {
       cancelledCall = await Call.findByIdAndUpdate(
@@ -404,29 +406,10 @@ socket.on("cancel-call", async (data) => {
       });
     }
 
-    // ────────────────────────────────────────────────────────────────
-    // IMPORTANT : Créer le message même si callId est null
-    // On a déjà chatId, callerId, callType → on crée directement
-    if (chatId) {
-      const { default: Message } = await import("../models/Message.js");
-      const callMessage = await Message.create({
-        conversationId: chatId,
-        Id_sender: callerId,
-        typeMessage: "call",
-        content: `❌ Appel ${callType === 'audio' ? 'audio' : 'vidéo'} annulé`,
-        callType,
-        callResult: "missed",
-        duration: 0,
-        status: "sent",
-        createdAt: new Date()
-      });
-
-      await callMessage.populate("Id_sender", "username avatar");
-      io.to(chatId.toString()).emit("new-message", callMessage);
-      
-      console.log(`📩 Message "Appel annulé" créé et envoyé dans ${chatId}`);
-    }
-    // ────────────────────────────────────────────────────────────────
+    // 5. ✅ NE PLUS CRÉER DE MESSAGE ICI
+    // Le message sera créé automatiquement par l'événement end-call
+    // qui se déclenche quand l'appel se termine
+    console.log(`📩 Appel annulé, le message sera créé par end-call si nécessaire`);
 
     // 6. Confirmer à l'appelant
     socket.emit("call-cancelled-success", {
@@ -591,37 +574,10 @@ socket.on("leave-call-room", (roomId) => {
 
 // ==================== message appel dans le chat ====================
 
-// AJOUTER CET ÉVÉNEMENT APRÈS LES AUTRES ÉVÉNEMENTS D'APPEL
+
 socket.on("call-message", async (data) => {
-  try {
-    const { chatId, callType, callResult, duration, senderId } = data;
-
-    console.log("📞 Message d'appel reçu:", data);
-
-    const { default: Message } = await import("../models/Message.js");
-
-    const message = await Message.create({
-      conversationId: chatId,
-      Id_sender: senderId,
-      typeMessage: "call",
-      content: generateCallMessage(callResult, callType, duration),
-      callType,
-      callResult,
-      duration,
-      status: "sent",
-      callStartedAt: callResult === "ended" ? new Date(Date.now() - duration * 1000) : null,
-      callEndedAt: callResult === "ended" ? new Date() : null
-    });
-
-    await message.populate("Id_sender", "username avatar");
-
-    io.to(chatId).emit("new-message", message);
-
-    console.log("✅ Message d'appel diffusé:", message._id);
-
-  } catch (error) {
-    console.error("❌ Erreur message appel:", error);
-  }
+  console.log("ℹ️ call-message ignoré (doublon évité)");
+  
 });
 
 
