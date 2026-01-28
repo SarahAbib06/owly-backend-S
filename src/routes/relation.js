@@ -9,4 +9,5 @@ router.post('/block', authMiddleware, relationController.blockUser);
 router.post('/unblock', authMiddleware, relationController.unblockUser);
 
 
+
 export default router; 

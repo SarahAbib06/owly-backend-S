@@ -8,19 +8,24 @@ export const searchUsers = async (req, res) => {
   try {
     const { username } = req.query;
     
-    if (!username) {
-      return res.status(400).json({ message: 'Le paramètre username est requis' });
+    if (!username || username.trim() === '') {
+      return res.status(400).json([]);
     }
 
+    const trimmed = username.trim();
+
     const users = await User.find({
-      username: username, // Recherche exacte au lieu de regex
-      _id: { $ne: req.user.id }
-    }).select('username profilePicture status');
+      username: { $regex: new RegExp(trimmed, 'i') }, // Recherche partielle
+      _id: { $ne: req.user._id }
+    })
+    .select('username profilePicture status _id')
+    .limit(10)
+    .sort({ username: 1 });
 
     res.json(users);
   } catch (error) {
     console.error('Erreur recherche:', error);
-    res.status(500).json({ message: 'Erreur serveur' });
+    res.status(500).json([]);
   }
 };
 // Obtenir le profil d'un utilisateur

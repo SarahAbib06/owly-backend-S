@@ -1,79 +1,75 @@
 import Conversation from "../models/Conversation.js";
 import Participants from "../models/Participants.js";
 import User from "../models/User.js";
+
 import mongoose from "mongoose";
 
 export const conversationController = {
-  getOrCreateConversation: async (Id_sender, Id_receiver) => {
-    // 🎯 VÉRIFICATION IDs FORMAT
-    if (
-      !mongoose.Types.ObjectId.isValid(Id_sender) ||
-      !mongoose.Types.ObjectId.isValid(Id_receiver)
-    ) {
-      throw new Error("IDs utilisateurs invalides");
-    }
+getOrCreateConversation: async (senderId, receiverId) => {
+  // Conversion IDs
+  const senderIdObj = new mongoose.Types.ObjectId(senderId);
+  const receiverIdObj = new mongoose.Types.ObjectId(receiverId);
 
-    // 🎯 VÉRIFICATION SI LES USERS EXISTENT
-    const [senderExists, receiverExists] = await Promise.all([
-      User.findById(Id_sender),
-      User.findById(Id_receiver),
-    ]);
+  // Vérif users
+  const [sender, receiver] = await Promise.all([
+    User.findById(senderIdObj),
+    User.findById(receiverIdObj),
+  ]);
+  if (!sender || !receiver) throw new Error('Users introuvables');
 
-    if (!senderExists) {
-      throw new Error(`L'utilisateur expéditeur (${Id_sender}) n'existe pas`);
-    }
-    if (!receiverExists) {
-      throw new Error(
-        `L'utilisateur destinataire (${Id_receiver}) n'existe pas`
-      );
-    }
+  // ✅ CRUCIAL : Vérif relation
+  const Relation = (await import('../models/Relation.js')).default;
+  const relation = await Relation.findOne({
+    $or: [
+      { userId: senderIdObj, contactId: receiverIdObj, status: 'accepted' },
+      { userId: receiverIdObj, contactId: senderIdObj, status: 'accepted' }
+    ]
+  });
 
-    // 🎯 EMPÊCHER CONVERSATION AVEC SOI-MÊME
-    if (Id_sender.toString() === Id_receiver.toString()) {
-      throw new Error("Impossible de créer une conversation avec vous-même");
-    }
+  const isContact = !!relation;
 
-    const existingConversation = await Conversation.findOne({
-      Id_participant: { $all: [Id_sender, Id_receiver] },
-      type: "private",
-    });
+  console.log('🤝 Relation check:', { 
+    senderId, receiverId, 
+    isContact: isContact ? relation.status : 'NO_RELATION' 
+  });
 
-    if (existingConversation) {
-      console.log("✅ Conversation existante:", existingConversation._id);
-      return existingConversation;
-    }
+  // Conversation existante
+  let conversation = await Conversation.findOne({
+    Id_participant: { $all: [senderId, receiverId] },
+    type: "private",
+  });
 
-    const newConversation = await Conversation.create({
-      Id_participant: [Id_sender, Id_receiver],
-      type: "private",
-      createdBy: Id_sender,
-    });
+  if (conversation) {
+    console.log('✅ Conversation existante');
+    return conversation;
+  }
 
-    console.log("✅ Nouvelle conversation:", newConversation._id);
+  // ✅ NOUVELLE avec MessageRequest !
+  conversation = await Conversation.create({
+    Id_participant: [senderId, receiverId],
+    type: "private",
+    createdBy: senderId,
+    // 🎯 ÇA !
+    isMessageRequest: !isContact,
+    messageRequestFrom: !isContact ? senderId : null,
+    messageRequestFor: !isContact ? receiverId : null,
+  });
 
-    // 🆕 CRÉATION DES PARTICIPANTS AVEC VÉRIFICATION
-    try {
-      await Participants.create([
-        {
-          Id_User: Id_sender,
-          Id_Conversation: newConversation._id,
-          Role: "membre",
-        },
-        {
-          Id_User: Id_receiver,
-          Id_Conversation: newConversation._id,
-          Role: "membre",
-        },
-      ]);
-      console.log("✅ Participants créés avec succès");
-    } catch (error) {
-      // 🆕 SI ERREUR, SUPPRIMER LA CONVERSATION CRÉÉE
-      await Conversation.findByIdAndDelete(newConversation._id);
-      throw new Error("Erreur création participants: " + error.message);
-    }
+  console.log('✅ NOUVELLE Conversation:', {
+    id: conversation._id,
+    isMessageRequest: conversation.isMessageRequest,
+    messageRequestFor: conversation.messageRequestFor,
+    isContact
+  });
 
-    return newConversation;
-  },
+  // Participants
+  await Participants.create([
+    { Id_User: senderId, Id_Conversation: conversation._id, Role: "membre" },
+    { Id_User: receiverId, Id_Conversation: conversation._id, Role: "membre" },
+  ]);
+
+  return conversation;
+},
 
   // 🆕 FONCTION POUR CRÉER UN GROUPE (SÉCURISÉE)
   createGroupConversation: async (

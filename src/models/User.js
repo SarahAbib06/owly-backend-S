@@ -16,6 +16,14 @@ const userSchema = new mongoose.Schema(
       enum: ["online", "offline", "away"],
       default: "offline",
     },
+    statusVisibility: {
+  type: String,
+  enum: ["Tout le monde", "Personne"],
+  default: "Tout le monde"
+},
+    favorites: [
+  { type: mongoose.Schema.Types.ObjectId, ref: "Conversation" }
+],
 
 activeSessions: [
   {

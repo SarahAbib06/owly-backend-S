@@ -27,7 +27,7 @@ export const deleteAccount = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.passwordHash);
     if (!isMatch) {
-      return res.status(401).json({ message: "Mot de passe incorrect." });
+      return res.status(400).json({ message: "Mot de passe incorrect." });
     }
 
     // ---------------------------------------------------------
