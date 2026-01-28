@@ -26,6 +26,7 @@ import { participantController } from "./src/controllers/participantController.j
 import userRoutes from "./src/routes/userRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
+import agoraRoutes from "./src/routes/agora.js";
 
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 
@@ -130,6 +131,8 @@ app.use("/api/relations", relationRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+app.use("/api/agora", agoraRoutes);
+
 app.use("/api/calls", callRoutes);
 app.use('/api/groups', groupRoutes); // ← Cette route pourra maintenant accéder à req.io
 app.use("/api/users", userStatusRoutes);
