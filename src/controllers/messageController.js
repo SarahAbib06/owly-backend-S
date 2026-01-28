@@ -469,22 +469,30 @@ try {
     console.log("Erreur notifications:", error.message);
   }
 
+      const sender = await User.findById(Id_sender).select('username profilePicture');
+
   if (io) {
     const conversation = await Conversation.findById(finalConversationId);
 
-    const messageToEmit = {
+
+
+const messageToEmit = {
   _id: savedMessage._id,
   conversationId: finalConversationId,
   Id_sender,
+  senderId: Id_sender,  // ← IMPORTANT
   content: typeMessage === "text" ? content.trim() : content,
   typeMessage,
   status: savedMessage.status,
   createdAt: savedMessage.createdAt,
   timestamp: savedMessage.createdAt,
   isGroup: conversation?.type === "group",
-
-  tempId, // 🔥🔥🔥 AJOUT CRUCIAL
-
+  
+  // 🔥 AJOUTER CES 2 LIGNES
+  senderUsername: sender?.username || "Utilisateur",
+  senderProfilePicture: sender?.profilePicture || null,
+  
+  tempId,
   ...additionalData,
 };
 
@@ -594,37 +602,45 @@ export const messageController = {
   },
 
   // FICHIER
-  uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
-    try {
-      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
+  // FICHIER
+uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+  try {
+    validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+    validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
 
-      const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
+    const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
+    const originalName = uploadResult.original_filename || messageData.originalName || 'fichier';
 
-      const messageDataForCreate = {
-        conversationId: messageData.conversationId,
-        Id_receiver: messageData.Id_receiver,
-        content: uploadResult.secure_url,
-        typeMessage: 'file',
-        tempId: messageData.tempId,
-      };
+    // 🆕 MODIFICATION ICI : Ajouter fl_attachment pour forcer le download
+    let downloadUrl = uploadResult.secure_url;
+    // Insérez /fl_attachment/ après /upload/ (ou /raw/upload/ si c'est le cas)
+    downloadUrl = downloadUrl.replace('/upload/', '/upload/fl_attachment/');
+    // Optionnel : Ajouter le nom de fichier dans l'URL pour forcer le filename (Cloudinary le supporte via fl_attachment:filename=xxx mais mieux via header)
+    // Mais fl_attachment suffit généralement.
 
-      const additionalData = {
-        fileInfo: {
-          url: uploadResult.secure_url,
-          publicId: uploadResult.public_id,
-          originalFilename: uploadResult.original_filename || messageData.originalName || 'fichier',
-          bytes: uploadResult.bytes
-        }
-      };
+    const messageDataForCreate = {
+      conversationId: messageData.conversationId,
+      Id_receiver: messageData.Id_receiver,
+      content: downloadUrl, // 🆕 Utilisez l'URL modifiée au lieu de secure_url brute
+      typeMessage: 'file',
+      fileName: originalName           // Nom du fichier
+    };
 
-      return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-    } catch (error) {
-      console.error('Erreur upload fichier:', error);
-      throw new Error(`Échec upload fichier: ${error.message}`);
-    }
-  },
+    const additionalData = {
+      fileInfo: {
+        url: downloadUrl, // 🆕 URL modifiée
+        publicId: uploadResult.public_id,
+        originalFilename: originalName,
+        bytes: uploadResult.bytes
+      }
+    };
 
+    return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
+  } catch (error) {
+    console.error('Erreur upload fichier:', error);
+    throw new Error(`Échec upload fichier: ${error.message}`);
+  }
+},
   // 🆕 NOUVELLE FONCTION DEMANDÉE : CONTENU MULTIMÉDIA COMME MESSENGER
   getConversationMedia: async (req, res) => {
     try {
@@ -709,31 +725,35 @@ export const messageController = {
         throw new Error("ID conversation invalide");
       }
       const skip = (page - 1) * limit;
-      const messages = await Message.find({ conversationId: conversationId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate({
-          path: 'reactions',
-          populate: {
-            path: 'id_user',
-            select: 'username'
-          }
+const messages = await Message.find({ conversationId: conversationId })
+  .sort({ createdAt: -1 })
+  .skip(skip)
+  .limit(limit)
+  .populate('Id_sender', 'username profilePicture')  // ← AJOUTER CETTE LIGNE
+  .populate({
+    path: 'reactions',
+    populate: {
+      path: 'id_user',
+      select: 'username'
+    }
+  })
+  .lean();
 
-        })
-        .lean();
-
-      const decryptedMessages = messages.map((msg) => ({
-        ...msg,
-        _id: msg._id.toString(),
-        conversationId: msg.conversationId.toString(),
-        Id_sender: msg.Id_sender.toString(),
-        content:
-          msg.typeMessage === "text"
-            ? decryptContent(msg.content)
-            : msg.content,
-        timestamp: msg.time || msg.createdAt,
-      }));
+// Et modifier le retour pour inclure les infos
+const decryptedMessages = messages.map((msg) => ({
+  ...msg,
+  _id: msg._id.toString(),
+  conversationId: msg.conversationId.toString(),
+  Id_sender: msg.Id_sender._id?.toString() || msg.Id_sender.toString(),
+  senderId: msg.Id_sender._id || msg.Id_sender,
+  senderUsername: msg.Id_sender.username || "Utilisateur",  // ← AJOUTER
+  senderProfilePicture: msg.Id_sender.profilePicture || null,  // ← AJOUTER
+  content:
+    msg.typeMessage === "text"
+      ? decryptContent(msg.content)
+      : msg.content,
+  timestamp: msg.time || msg.createdAt,
+}));
 
       console.log(`${decryptedMessages.length} messages trouvés et déchiffrés`);
       return decryptedMessages;
