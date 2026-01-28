@@ -420,22 +420,32 @@ const handleMessageCreation = async (messageData, io = null, userIdFromToken = n
     // On ne bloque pas l'envoi du message même si la push échoue
   }
 
+      const sender = await User.findById(Id_sender).select('username profilePicture');
+
   if (io) {
     const conversation = await Conversation.findById(finalConversationId);
 
-    const messageToEmit = {
-      _id: savedMessage._id,
-      conversationId: finalConversationId,
-      Id_sender,
-      content: typeMessage === "text" ? content.trim() : content,
-      typeMessage,
-      status: savedMessage.status,
-      createdAt: savedMessage.createdAt,
-      timestamp: savedMessage.createdAt,
-      isGroup: conversation?.type === "group",
-      tempId, // 🔥 AJOUT CRUCIAL
-      ...additionalData,
-    };
+
+
+const messageToEmit = {
+  _id: savedMessage._id,
+  conversationId: finalConversationId,
+  Id_sender,
+  senderId: Id_sender,  // ← IMPORTANT
+  content: typeMessage === "text" ? content.trim() : content,
+  typeMessage,
+  status: savedMessage.status,
+  createdAt: savedMessage.createdAt,
+  timestamp: savedMessage.createdAt,
+  isGroup: conversation?.type === "group",
+  
+  // 🔥 AJOUTER CES 2 LIGNES
+  senderUsername: sender?.username || "Utilisateur",
+  senderProfilePicture: sender?.profilePicture || null,
+  
+  tempId,
+  ...additionalData,
+};
 
     // 🔥 envoyer aux AUTRES uniquement
     io.to(finalConversationId.toString())
@@ -728,30 +738,35 @@ export const messageController = {
         throw new Error("ID conversation invalide");
       }
       const skip = (page - 1) * limit;
-      const messages = await Message.find({ conversationId: conversationId })
-        .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
-        .populate({
-          path: 'reactions',
-          populate: {
-            path: 'id_user',
-            select: 'username'
-          }
-        })
-        .lean();
+const messages = await Message.find({ conversationId: conversationId })
+  .sort({ createdAt: -1 })
+  .skip(skip)
+  .limit(limit)
+  .populate('Id_sender', 'username profilePicture')  // ← AJOUTER CETTE LIGNE
+  .populate({
+    path: 'reactions',
+    populate: {
+      path: 'id_user',
+      select: 'username'
+    }
+  })
+  .lean();
 
-      const decryptedMessages = messages.map((msg) => ({
-        ...msg,
-        _id: msg._id.toString(),
-        conversationId: msg.conversationId.toString(),
-        Id_sender: msg.Id_sender.toString(),
-        content:
-          msg.typeMessage === "text"
-            ? decryptContent(msg.content)
-            : msg.content,
-        timestamp: msg.time || msg.createdAt,
-      }));
+// Et modifier le retour pour inclure les infos
+const decryptedMessages = messages.map((msg) => ({
+  ...msg,
+  _id: msg._id.toString(),
+  conversationId: msg.conversationId.toString(),
+  Id_sender: msg.Id_sender._id?.toString() || msg.Id_sender.toString(),
+  senderId: msg.Id_sender._id || msg.Id_sender,
+  senderUsername: msg.Id_sender.username || "Utilisateur",  // ← AJOUTER
+  senderProfilePicture: msg.Id_sender.profilePicture || null,  // ← AJOUTER
+  content:
+    msg.typeMessage === "text"
+      ? decryptContent(msg.content)
+      : msg.content,
+  timestamp: msg.time || msg.createdAt,
+}));
 
       console.log(`${decryptedMessages.length} messages trouvés et déchiffrés`);
       return decryptedMessages;

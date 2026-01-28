@@ -44,6 +44,139 @@ router.get("/:conversationId", protact, async (req, res) => {
   }
 });
 
+// Dans routes/messageRoutes.js, ajoute ces routes AVANT `export default router;`
+
+// Marquer un message comme vu
+router.post("/:messageId/mark-seen", protact, async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const userId = req.user.id;
+    const io = req.app.get("io");
+
+    const Message = (await import("../models/Message.js")).default;
+    const message = await Message.findById(messageId);
+
+    if (!message) {
+      return res.status(404).json({ success: false, error: "Message non trouvé" });
+    }
+
+    // Vérifier que ce n'est pas l'expéditeur qui marque comme vu
+    if (message.Id_sender.toString() === userId) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "L'expéditeur ne peut pas marquer son propre message comme vu" 
+      });
+    }
+
+    // Vérifier si déjà marqué comme vu
+    const alreadySeen = message.readBy?.some(
+      r => r.userId.toString() === userId
+    );
+
+    if (!alreadySeen) {
+      if (!message.readBy) message.readBy = [];
+      
+      message.readBy.push({
+        userId: userId,
+        readAt: new Date()
+      });
+      
+      await message.save();
+
+      // Émettre à TOUS les participants de la conversation
+      if (io) {
+        io.to(message.conversationId.toString()).emit("message:seen", {
+          messageId: message._id.toString(),
+          seenBy: userId,
+          conversationId: message.conversationId.toString(),
+          seenAt: new Date()
+        });
+
+        // Émettre aussi directement à l'expéditeur
+        io.to(`user_${message.Id_sender.toString()}`).emit("message:seen", {
+          messageId: message._id.toString(),
+          seenBy: userId,
+          conversationId: message.conversationId.toString(),
+          seenAt: new Date()
+        });
+      }
+
+      console.log(`✅ Message ${messageId} marqué comme vu par ${userId}`);
+    }
+
+    res.json({ 
+      success: true, 
+      message: "Message marqué comme vu",
+      readBy: message.readBy
+    });
+
+  } catch (error) {
+    console.error("❌ Erreur mark-seen:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Marquer TOUS les messages d'une conversation comme vus
+router.post("/:conversationId/mark-all-seen", protact, async (req, res) => {
+  try {
+    const { conversationId } = req.params;
+    const userId = req.user.id;
+    const io = req.app.get("io");
+
+    const Message = (await import("../models/Message.js")).default;
+    
+    // Trouver tous les messages non lus
+    const messages = await Message.find({
+      conversationId: conversationId,
+      Id_sender: { $ne: userId },
+      "readBy.userId": { $ne: userId }
+    });
+
+    const updatedMessageIds = [];
+
+    for (const message of messages) {
+      if (!message.readBy) message.readBy = [];
+      
+      message.readBy.push({
+        userId: userId,
+        readAt: new Date()
+      });
+      
+      await message.save();
+      updatedMessageIds.push(message._id.toString());
+
+      // Émettre pour chaque message
+      if (io) {
+        io.to(conversationId.toString()).emit("message:seen", {
+          messageId: message._id.toString(),
+          seenBy: userId,
+          conversationId: conversationId,
+          seenAt: new Date()
+        });
+
+        io.to(`user_${message.Id_sender.toString()}`).emit("message:seen", {
+          messageId: message._id.toString(),
+          seenBy: userId,
+          conversationId: conversationId,
+          seenAt: new Date()
+        });
+      }
+    }
+
+    console.log(`✅ ${updatedMessageIds.length} messages marqués comme vus`);
+
+    res.json({
+      success: true,
+      messagesMarked: updatedMessageIds.length,
+      messageIds: updatedMessageIds
+    });
+
+  } catch (error) {
+    console.error("❌ Erreur mark-all-seen:", error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // 🔧 ROUTE AUDIO CORRIGÉE - avec logging du statut
 router.post(
   "/audio/send",

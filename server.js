@@ -22,20 +22,21 @@ import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
 import callRoutes from "./src/routes/callRoutes.js";
 
+import groupRoutes from './src/routes/groupRoutes.js';
+
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
 import padRoutes from "./src/routes/padRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
+import agoraRoutes from "./src/routes/agora.js";
 
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
-
 
 import favoritesRoutes from './src/routes/favoritesRoute.js';
 import contactRouter from './src/routes/contact.js';
 
 import themeRoutes from "./src/routes/themeRoutes.js";
-
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -97,6 +98,7 @@ app.set("io", io);
 // ✅ Configuration des sockets
 configurePadSockets(io);
 configureChatSockets(io);
+
 // 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
 const cleanupOrphans = async () => {
   try {
@@ -109,14 +111,19 @@ const cleanupOrphans = async () => {
 //cleanupOrphans();
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true })); 
 app.use("/public", express.static("public"));
 
-// ✅ 3. Routes
+// 🔥 MIDDLEWARE CRUCIAL : Rendre io accessible dans toutes les routes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+// ✅ 3. Routes (APRÈS le middleware io)
 app.get("/", (req, res) => {
   res.json({ message: "Owly API is running" });
 });
-
-
 
 app.use("/api/messages", messageRoutes);
 app.use("/api/reactions", reactionRoutes);
@@ -129,17 +136,14 @@ app.use("/api/pads", padRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
+app.use("/api/agora", agoraRoutes);
 
 app.use("/api/calls", callRoutes);
-
-
+app.use('/api/groups', groupRoutes); // ← Cette route pourra maintenant accéder à req.io
 app.use("/api/users", userStatusRoutes);
 app.use('/api/favorites', favoritesRoutes);
 app.use('/api', contactRouter);
 app.use("/api/themes", themeRoutes); 
-
-
-
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;
