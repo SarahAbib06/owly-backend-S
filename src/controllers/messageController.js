@@ -623,37 +623,45 @@ export const messageController = {
   },
 
   // FICHIER
-  uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
-    try {
-      validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
-      validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
+  // FICHIER
+uploadFileMessage: async (file, messageData, io = null, userIdFromToken = null) => {
+  try {
+    validateAndConvertUserId(userIdFromToken, 'ID expéditeur');
+    validateFile(file, FILE_CONFIG.file.allowedTypes, FILE_CONFIG.file.maxSize);
 
-      const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
+    const uploadResult = await uploadToCloudinary(file, 'raw', FILE_CONFIG.file.folder);
+    const originalName = uploadResult.original_filename || messageData.originalName || 'fichier';
 
-      const messageDataForCreate = {
-        conversationId: messageData.conversationId,
-        Id_receiver: messageData.Id_receiver,
-        content: uploadResult.secure_url,
-        typeMessage: 'file',
-        tempId: messageData.tempId,
-      };
+    // 🆕 MODIFICATION ICI : Ajouter fl_attachment pour forcer le download
+    let downloadUrl = uploadResult.secure_url;
+    // Insérez /fl_attachment/ après /upload/ (ou /raw/upload/ si c'est le cas)
+    downloadUrl = downloadUrl.replace('/upload/', '/upload/fl_attachment/');
+    // Optionnel : Ajouter le nom de fichier dans l'URL pour forcer le filename (Cloudinary le supporte via fl_attachment:filename=xxx mais mieux via header)
+    // Mais fl_attachment suffit généralement.
 
-      const additionalData = {
-        fileInfo: {
-          url: uploadResult.secure_url,
-          publicId: uploadResult.public_id,
-          originalFilename: uploadResult.original_filename || messageData.originalName || 'fichier',
-          bytes: uploadResult.bytes
-        }
-      };
+    const messageDataForCreate = {
+      conversationId: messageData.conversationId,
+      Id_receiver: messageData.Id_receiver,
+      content: downloadUrl, // 🆕 Utilisez l'URL modifiée au lieu de secure_url brute
+      typeMessage: 'file',
+      fileName: originalName           // Nom du fichier
+    };
 
-      return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
-    } catch (error) {
-      console.error('Erreur upload fichier:', error);
-      throw new Error(`Échec upload fichier: ${error.message}`);
-    }
-  },
+    const additionalData = {
+      fileInfo: {
+        url: downloadUrl, // 🆕 URL modifiée
+        publicId: uploadResult.public_id,
+        originalFilename: originalName,
+        bytes: uploadResult.bytes
+      }
+    };
 
+    return await handleMessageCreation(messageDataForCreate, io, userIdFromToken, additionalData);
+  } catch (error) {
+    console.error('Erreur upload fichier:', error);
+    throw new Error(`Échec upload fichier: ${error.message}`);
+  }
+},
   // 🆕 NOUVELLE FONCTION DEMANDÉE : CONTENU MULTIMÉDIA COMME MESSENGER
   getConversationMedia: async (req, res) => {
     try {

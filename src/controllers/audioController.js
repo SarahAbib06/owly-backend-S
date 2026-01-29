@@ -98,37 +98,53 @@ const audioDuration = cloudinaryResult.duration ? Math.round(cloudinaryResult.du
       .populate("conversationId");
 
     // 🆕 DIFFUSION EN TEMPS RÉEL
-    if (io) {
-      console.log("🔊 Diffusion message audio en temps réel...");
+    // 🆕 DIFFUSION EN TEMPS RÉEL
+if (io) {
+  console.log("🔊 Diffusion message audio en temps réel...");
 
-      // 1. Diffuser aux participants de la conversation
-      io.to(conversationId).emit("new_audio_message", {
-        type: "audio",
-        message: populatedMessage,
-        conversationId: conversationId,
-        timestamp: new Date(),
-      });
+  // 🔥 IMPORTANT : Récupérer le tempId du body
+  const tempId = req.body.tempId;
+  console.log("📌 TempId reçu du frontend:", tempId);
 
-      // 2. Notifier les autres participants
-      const otherParticipants = await Participants.find({
-        Id_Conversation: conversationId,
-        Id_User: { $ne: senderId },
-      }).populate("Id_User", "username");
+  // 1. 🔥 CONFIRMER L'ENVOI À L'ÉMETTEUR EN PREMIER
+  io.to(`user_${senderId}`).emit("message_sent", {
+    success: true,
+    data: populatedMessage.toObject(),
+    tempId: tempId, // ← CRITIQUE : permet de remplacer le message temporaire
+  });
 
-      otherParticipants.forEach((participant) => {
-        io.to(`user_${participant.Id_User._id}`).emit("new_message_alert", {
-          type: "audio_message",
-          conversationId: conversationId,
-          senderId: senderId,
-          senderName: populatedMessage.Id_sender.username,
-          messagePreview: "🎤 Message audio",
-          timestamp: new Date(),
-          messageId: newMessage._id,
-        });
-      });
+  // 2. 🔥 RÉCUPÉRER LES AUTRES PARTICIPANTS (SANS TOI)
+  const otherParticipants = await Participants.find({
+    Id_Conversation: conversationId,
+    Id_User: { $ne: senderId }, // ← Exclure l'émetteur
+  }).populate("Id_User", "username");
 
-      console.log("✅ Message audio diffusé en temps réel");
-    }
+  console.log(`📊 Envoi à ${otherParticipants.length} autres participants`);
+
+  // 3. 🔥 ENVOYER LE MESSAGE UNIQUEMENT AUX AUTRES
+  otherParticipants.forEach((participant) => {
+    // 3a. Envoyer le nouveau message
+    io.to(`user_${participant.Id_User._id}`).emit("new_message", {
+      ...populatedMessage.toObject(),
+      typeMessage: "audio",
+      conversationId: conversationId,
+      senderId: populatedMessage.Id_sender._id,
+    });
+
+    // 3b. Envoyer l'alerte de notification
+    io.to(`user_${participant.Id_User._id}`).emit("new_message_alert", {
+      type: "audio_message",
+      conversationId: conversationId,
+      senderId: senderId,
+      senderName: populatedMessage.Id_sender.username,
+      messagePreview: "🎤 Message audio",
+      timestamp: new Date(),
+      messageId: newMessage._id,
+    });
+  });
+
+  console.log("✅ Message audio diffusé avec tempId:", tempId);
+}
 
     console.log("🎉 MESSAGE AUDIO ENVOYÉ AVEC SUCCÈS");
 
