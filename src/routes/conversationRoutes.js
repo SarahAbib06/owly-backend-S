@@ -464,10 +464,13 @@ const formattedConversations = await Promise.all(
       createdAt: conv.createdAt,
       myRole: participant.Role,
       
-      // 🔥 AJOUTER CES 3 LIGNES !
       isMessageRequest: conv.isMessageRequest || false,
       messageRequestFor: conv.messageRequestFor || null,
       messageRequestFrom: conv.messageRequestFrom || null,
+      
+      // ✅ AJOUTÉ !
+      groupPic: conv.groupPic || null,
+      groupDescription: conv.groupDescription || null,
     };
   })
 );
