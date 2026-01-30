@@ -71,67 +71,128 @@ export const archiveController = {
   },
 
   // 🆕 RÉCUPÉRER LES CONVERSATIONS ARCHIVÉES
-  getArchivedConversations: async (userId) => {
-    if (!mongoose.Types.ObjectId.isValid(userId)) {
-      throw new Error("ID utilisateur invalide");
-    }
+ // controllers/archiveController.js
 
-    const userParticipants = await Participants.find({
-      Id_User: userId,
-    })
-      .populate({
-        path: "Id_Conversation",
-        match: {
-          "archivedBy.userId": userId,
-        },
-      })
-      .populate("Id_User", "username profilePicture");
+getArchivedConversations: async (userId) => {
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    throw new Error("ID utilisateur invalide");
+  }
 
-    const archivedConversations = userParticipants
-      .filter((p) => p.Id_Conversation !== null)
-      .map((participant) => {
-        const conv = participant.Id_Conversation;
+  try {
+    console.log("📂 Recherche conversations archivées pour userId:", userId);
 
-        // Récupérer tous les participants pour les conversations privées
-        let conversationName = null;
+    // 🔥 ÉTAPE 1 : Récupérer les conversations archivées
+    const archivedConvs = await Conversation.find({
+      "archivedBy.userId": userId,
+    }).sort({ lastMessageAt: -1 });
+
+    console.log(`📊 ${archivedConvs.length} conversations trouvées`);
+
+    // 🔥 ÉTAPE 2 : Récupérer les participants pour chaque conversation
+    const archivedConversations = await Promise.all(
+      archivedConvs.map(async (conv) => {
+        // Récupérer les participants avec leurs users
+        const participants = await Participants.find({
+          Id_Conversation: conv._id,
+        }).populate("Id_User", "username profilePicture _id");
+
+        let conversationName = "Utilisateur";
+        let conversationAvatar = "/default-avatar.png";
+        let participantsList = [];
+
+        console.log("🔍 Traitement conversation:", {
+          id: conv._id,
+          type: conv.type,
+          participantCount: participants.length
+        });
+
         if (conv.type === "private") {
-          const otherParticipant = userParticipants.find(
-            (p) =>
-              p.Id_Conversation?._id?.toString() === conv._id.toString() &&
-              p.Id_User._id.toString() !== userId.toString()
+          // 🔥 Trouver l'AUTRE participant
+          const otherParticipant = participants.find(
+            (p) => {
+              if (!p.Id_User) {
+                console.warn("⚠️ Participant sans Id_User:", p);
+                return false;
+              }
+              return String(p.Id_User._id) !== String(userId);
+            }
           );
-          conversationName =
-            otherParticipant?.Id_User?.username || "Utilisateur";
-        } else {
-          conversationName = conv.groupName;
+
+          console.log("👤 Autre participant trouvé:", otherParticipant?.Id_User?.username);
+
+          if (otherParticipant?.Id_User) {
+            conversationName = otherParticipant.Id_User.username || "Utilisateur";
+            conversationAvatar = otherParticipant.Id_User.profilePicture || "/default-avatar.png";
+            
+            participantsList = participants
+              .filter(p => p.Id_User)
+              .map((p) => ({
+                _id: p.Id_User._id,
+                username: p.Id_User.username,
+                profilePicture: p.Id_User.profilePicture,
+              }));
+          }
+        } else if (conv.type === "group") {
+          conversationName = conv.groupName || "Groupe";
+          conversationAvatar = conv.groupPic || "/group-avatar.png";
+          
+          participantsList = participants
+            .filter(p => p.Id_User)
+            .map((p) => ({
+              _id: p.Id_User._id,
+              username: p.Id_User.username,
+              profilePicture: p.Id_User.profilePicture,
+            }));
         }
 
-        // Trouver la date d'archivage
+        // 🔥 Trouver la date d'archivage
         const archiveInfo = conv.archivedBy.find(
-          (a) => a.userId.toString() === userId.toString()
+          (a) => String(a.userId) === String(userId)
         );
 
-        return {
+        // 🔥 Trouver le rôle de l'utilisateur actuel
+        const myParticipant = participants.find(
+          (p) => p.Id_User && String(p.Id_User._id) === String(userId)
+        );
+
+        const result = {
           _id: conv._id,
           type: conv.type,
           name: conversationName,
+          isGroup: conv.type === "group",
+          groupName: conv.type === "group" ? conv.groupName : undefined,
+          groupPic: conv.type === "group" ? conv.groupPic : undefined,
+          avatar: conversationAvatar,
+          participants: participantsList,
           unreadCount:
             conv.unreadCounts?.find(
-              (u) => u.userId && u.userId.toString() === userId
+              (u) => u.userId && String(u.userId) === String(userId)
             )?.count || 0,
           lastMessageAt: conv.lastMessageAt,
           archivedAt: archiveInfo?.archivedAt,
-          participantCount: conv.Id_participant?.length || 0,
-          role: participant.Role,
-          participants: [participant.Id_User], // Garder la cohérence avec votre structure existante
+          participantCount: participants.length,
+          role: myParticipant?.Role || "membre",
+          isFromArchived: true,
         };
-      });
 
-    // Trier par date d'archivage (les plus récentes en premier)
-    return archivedConversations.sort(
-      (a, b) => new Date(b.archivedAt) - new Date(a.archivedAt)
+        console.log("✅ Conversation formatée:", {
+          id: result._id,
+          name: result.name,
+          avatar: result.avatar
+        });
+
+        return result;
+      })
     );
-  },
+
+    console.log(`✅ ${archivedConversations.length} conversations archivées retournées`);
+    return archivedConversations;
+
+  } catch (error) {
+    console.error("❌ Erreur dans getArchivedConversations:", error);
+    throw error;
+  }
+},
 
   // 🆕 VÉRIFIER SI UNE CONVERSATION EST ARCHIVÉE
   isConversationArchived: async (userId, conversationId) => {
