@@ -400,6 +400,54 @@ const conversations = filteredConversations.map((p) => ({
   }
 });
 
+// 🔍 TROUVER UNE CONVERSATION PRIVÉE EXISTANTE AVEC UN UTILISATEUR
+router.get('/find-private/:userId', protact, async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const { userId: targetUserId } = req.params;
+
+    console.log('🔍 Recherche conversation entre:', currentUserId, 'et', targetUserId);
+
+    // Chercher une conversation privée entre les deux utilisateurs
+    const conversation = await Conversation.findOne({
+      type: 'private',
+      participants: {
+        $all: [currentUserId, targetUserId],
+        $size: 2
+      }
+    }).populate('participants', 'username profilePicture status lastSeen');
+
+    if (!conversation) {
+      return res.json({
+        success: false,
+        message: 'Aucune conversation trouvée'
+      });
+    }
+
+    console.log('✅ Conversation trouvée:', conversation._id);
+
+    res.json({
+      success: true,
+      conversation: {
+        _id: conversation._id,
+        type: conversation.type,
+        participants: conversation.participants,
+        lastMessageAt: conversation.lastMessageAt,
+        unreadCount: 0, // Sera calculé côté client
+        isMessageRequest: conversation.isMessageRequest || false,
+        messageRequestFor: conversation.messageRequestFor,
+        messageRequestFrom: conversation.messageRequestFrom,
+      }
+    });
+  } catch (error) {
+    console.error('❌ Erreur recherche conversation:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Erreur lors de la recherche de la conversation'
+    });
+  }
+});
+
 // 🆕 ROUTE CORRIGÉE : UTILISER LA TABLE PARTICIPANTS
 router.get("/", protact, async (req, res) => {
   try {
