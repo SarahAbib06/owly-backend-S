@@ -20,7 +20,7 @@ import archiveRoutes from "./src/routes/archiveRoutes.js";
 import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
-import callRoutes from "./src/routes/callRoutes.js";
+
 
 import groupRoutes from './src/routes/groupRoutes.js';
 
@@ -29,7 +29,6 @@ import userRoutes from "./src/routes/userRoutes.js";
 import padRoutes from "./src/routes/padRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
-import agoraRoutes from "./src/routes/agora.js";
 
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 
@@ -136,9 +135,7 @@ app.use("/api/pads", padRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
-app.use("/api/agora", agoraRoutes);
 
-app.use("/api/calls", callRoutes);
 app.use('/api/groups', groupRoutes); // ← Cette route pourra maintenant accéder à req.io
 app.use("/api/users", userStatusRoutes);
 app.use('/api/favorites', favoritesRoutes);
