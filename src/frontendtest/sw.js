@@ -1,60 +1,55 @@
-// Service Worker pour les notifications push
-const CACHE_NAME = "owly-v1";
-const urlsToCache = [
-  "/",
-  "/login.html",
-  "/conversations.html",
-  "/test-style.css",
-  "/test-script.js",
-];
+// sw.js
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(urlsToCache))
-  );
-});
+self.addEventListener('push', event => {
+  console.log('[Service Worker] Notification reçue');
 
-self.addEventListener("fetch", (event) => {
-  event.respondWith(
-    caches.match(event.request).then((response) => {
-      // Retourne le cache si disponible, sinon fetch du réseau
-      return response || fetch(event.request);
-    })
-  );
-});
-
-self.addEventListener("push", (event) => {
-  if (!event.data) return;
-
-  const data = event.data.json();
-  const options = {
-    body: data.body,
-    icon: "/icon.png",
-    badge: "/badge.png",
-    vibrate: [100, 50, 100],
-    data: {
-      url: data.url || "/conversations.html",
-      conversationId: data.conversationId,
-    },
-    actions: [
-      {
-        action: "open",
-        title: "Ouvrir",
-      },
-      {
-        action: "close",
-        title: "Fermer",
-      },
-    ],
+  let data = {
+    title: 'Nouveau message',
+    body: 'Tu as un nouveau message',
+    icon: '/icon-192.png',
+    badge: '/badge-72.png',
+    data: { url: '/' }
   };
 
-  event.waitUntil(self.registration.showNotification(data.title, options));
+  if (event.data) {
+    try {
+      data = event.data.json();
+    } catch (e) {
+      console.log('Données non JSON');
+    }
+  }
+
+  const options = {
+    body: data.body,
+    icon: data.icon || '/icon-192.png',
+    badge: data.badge || '/badge-72.png',
+    vibrate: [200, 100, 200],
+    data: data.data || { url: '/' },
+    tag: data.tag || 'chat-msg',
+    renotify: true
+  };
+
+  event.waitUntil(
+    self.registration.showNotification(data.title, options)
+  );
 });
 
-self.addEventListener("notificationclick", (event) => {
+self.addEventListener('notificationclick', event => {
+  console.log('[Service Worker] Notification cliquée');
   event.notification.close();
 
-  if (event.action === "open") {
-    event.waitUntil(clients.openWindow(event.notification.data.url));
-  }
+  const url = event.notification.data.url || '/';
+
+  event.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
+      for (const client of clientList) {
+        if (client.url.includes(url) && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(url);
+      }
+    })
+  );
 });

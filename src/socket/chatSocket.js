@@ -1,18 +1,26 @@
-import { messageController } from "../controllers/messageController.js";
+ import { messageController } from "../controllers/messageController.js";
 import { conversationController } from "../controllers/conversationController.js";
+import { callController } from "../controllers/callController.js";
 import Participants from "../models/Participants.js";
 import User from "../models/User.js";
 import Conversation from "../models/Conversation.js";
 import Reaction from "../models/Reaction.js";
-import Call from "../models/Call.js"; // 🆕 IMPORT DU MODÈLE CALL
+import Call from "../models/Call.js"; 
 import jwt from "jsonwebtoken";
 import { archiveSocketService } from "../services/archiveSocketService.js";
 
 export const configureChatSockets = (io) => {
-  console.log("🔧 WebSocket configuré - Système présence avancé activé");
+  console.log("🔧 WebSocket Chat configuré");
 
-  // 🆕 STOCKAGE PRÉSENCE AVANCÉ
   const userPresence = new Map();
+  // 🆕 STOCKAGE APPELS ACTIFS
+
+
+// 🆕 AJOUTER ICI
+const callTimeouts = new Map();
+
+  // 🆕 STOCKAGE APPELS ACTIFS
+  const activeCalls = new Map();
 
   // 🆕 PARTAGE DE LA PRÉSENCE AVEC LE CONTROLLER
   messageController.setUserPresence(userPresence);
@@ -88,24 +96,23 @@ export const configureChatSockets = (io) => {
   };
 
   io.on("connection", (socket) => {
-    console.log("🔗 User connecté:", socket.userId, "- Socket:", socket.id);
+    console.log("🔗 User connecté au Chat:", socket.userId, "- Socket:", socket.id);
+
+      // 🔥 AJOUTEZ CE LOG
+  console.log('📋 userId type:', typeof socket.userId);
+  console.log('📋 userId value:', socket.userId);
 
     let presenceInterval = null;
-
     // ==================== 🎯 RÉACTIONS EN TEMPS RÉEL ====================
 
     socket.on("join_message_reactions", (messageId) => {
       socket.join(`message_${messageId}`);
-      console.log(
-        `🔔 User ${socket.userId} écoute les réactions du message: ${messageId}`
-      );
+     
     });
 
     socket.on("leave_message_reactions", (messageId) => {
       socket.leave(`message_${messageId}`);
-      console.log(
-        `🔔 User ${socket.userId} ne suit plus les réactions du message: ${messageId}`
-      );
+      
     });
 
     socket.on("add_reaction", async (data) => {
@@ -141,25 +148,23 @@ export const configureChatSockets = (io) => {
         const reaction = new Reaction({
           Id_message: messageId,
           id_user: userId,
-          emoji,
+          emoji
         });
         await reaction.save();
         await reaction.populate("id_user", "username avatar");
 
-        // Récupérer le message pour avoir l'ID de conversation
+        // Récupérer le message
         const Message = await import("../models/Message.js");
         const message = await Message.default.findById(messageId);
 
-        // 🆕 DIFFUSER LA RÉACTION À TOUS LES UTILISATEURS CONCERNÉS
-        // 1. Aux utilisateurs qui écoutent ce message spécifique
+        // Diffuser
         socket.to(`message_${messageId}`).emit("reaction_added", {
           reaction,
           messageId,
           userId,
           timestamp: new Date(),
         });
-
-        // 2. À tous les participants de la conversation
+        
         if (message && message.conversationId) {
           io.to(message.conversationId.toString()).emit(
             "conversation_reaction_update",
@@ -174,7 +179,6 @@ export const configureChatSockets = (io) => {
           );
         }
 
-        // 3. Confirmation à l'émetteur
         socket.emit("reaction_added_success", {
           reaction,
           messageId,
@@ -216,11 +220,11 @@ export const configureChatSockets = (io) => {
           return;
         }
 
-        // Récupérer le message pour avoir l'ID de conversation
+        // Récupérer le message
         const Message = await import("../models/Message.js");
         const message = await Message.default.findById(messageId);
 
-        // 🆕 DIFFUSER LA SUPPRESSION
+        // Diffuser la suppression
         socket.to(`message_${messageId}`).emit("reaction_removed", {
           messageId,
           userId,
@@ -713,31 +717,29 @@ export const configureChatSockets = (io) => {
 
     // ==================== VOTRE CODE EXISTANT ====================
 
-    // 🆕 JOIN NOTIFICATIONS AVEC USERID DU TOKEN
     socket.on("join_notifications", async () => {
       try {
         const userId = socket.userId;
 
         socket.join(`user_${userId}`);
 
-        // 🆕 METTRE À JOUR LA PRÉSENCE AVANCÉE
+        // Mettre à jour la présence
         await updateUserPresence(userId, socket.id, "online");
 
         console.log(
           `🔔 User ${userId} a rejoint ses notifications (présence: online)`
         );
 
-        // 🆕 NOTIFIER LES CONTACTS DE LA PRÉSENCE
+        // Notifier les contacts
         notifyUserPresence(io, userId, "online");
 
-        // 🆕 DÉMARRER LE HEARTBEAT
+        // Démarrer le heartbeat
         presenceInterval = startPresenceHeartbeat(userId, socket.id);
       } catch (error) {
         socket.emit("notification_error", { message: error.message });
       }
     });
 
-    // Événements existants
     socket.on("join_conversation", (conversationId) => {
       try {
         if (!conversationId || typeof conversationId !== "string") {
@@ -777,7 +779,7 @@ export const configureChatSockets = (io) => {
           timestamp: new Date(),
         });
 
-        // METTRE À JOUR L'ACTIVITÉ
+        // Mettre à jour l'activité
         await updateUserActivity(socket.userId, socket.id);
       } catch (error) {
         console.error("💥 Erreur typing indicator:", error.message);
@@ -811,73 +813,87 @@ export const configureChatSockets = (io) => {
     });
 
     // 🆕 ÉVÉNEMENT ENVOI MESSAGE SÉCURISÉ - CORRIGÉ SANS DOUBLON
-    socket.on("send_message", async (data) => {
-      console.log("📨 Message reçu:", data);
+socket.on("send_message", async (data) => {
+  console.log("📨 Message reçu:", data);
 
-      try {
-        let messageData = data;
+  try {
+    let messageData = data;
 
-        if (typeof data === "string") {
-          messageData = JSON.parse(data);
-        }
+    if (typeof data === "string") {
+      messageData = JSON.parse(data);
+    }
 
-        const requiredFields = ["content"];
-        const missingFields = requiredFields.filter(
-          (field) => !messageData[field]
-        );
+    const requiredFields = ["content"];
+    const missingFields = requiredFields.filter(
+      (field) => !messageData[field]
+    );
 
-        if (missingFields.length > 0) {
-          throw new Error(`Champs manquants: ${missingFields.join(", ")}`);
-        }
+    if (missingFields.length > 0) {
+      throw new Error(`Champs manquants: ${missingFields.join(", ")}`);
+    }
 
-        // Vérification autorisation si conversationId fourni
-        if (messageData.conversationId) {
-          await conversationController.checkUserAuthorization(
-            socket.userId,
-            messageData.conversationId
-          );
-        }
+    // Vérification autorisation si conversationId fourni
+    if (messageData.conversationId) {
+      await conversationController.checkUserAuthorization(
+        socket.userId,
+        messageData.conversationId
+      );
+    }
 
-        const finalMessageData = {
-          ...messageData,
-          Id_sender: socket.userId, // ← SÉCURISÉ DU TOKEN
-        };
+    // 🔥 RÉCUPÉRER LES INFOS DE L'EXPÉDITEUR
+    const sender = await User.findById(socket.userId).select('username profilePicture');
 
-        // SAUVEGARDE DU MESSAGE (l'émission se fait dans handleMessageCreation)
-        const savedMessage = await messageController.createMessage(
-          finalMessageData,
-          io,
-          socket.userId
-        );
+    const finalMessageData = {
+      ...messageData,
+      Id_sender: socket.userId,
+      // 🆕 AJOUTER CES CHAMPS
+      senderUsername: sender?.username || socket.username,
+      senderProfilePicture: sender?.profilePicture || null,
+    };  
 
-        // METTRE À JOUR L'ACTIVITÉ
-        await updateUserActivity(socket.userId, socket.id);
+    // SAUVEGARDE DU MESSAGE
+    const savedMessage = await messageController.createMessage(
+      finalMessageData,
+      io,
+      socket.userId
+    );
 
-        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit("message_sent", {
-          success: true,
-          data: savedMessage,
-          timestamp: new Date(),
-        });
+    // METTRE À JOUR L'ACTIVITÉ
+    await updateUserActivity(socket.userId, socket.id);
 
-        console.log("🎉 Message traité - ID:", savedMessage._id);
-      } catch (error) {
-        console.error("💥 Erreur traitement message:", error.message);
+    // 🔥 AJOUTER LES INFOS EXPÉDITEUR DANS LA RÉPONSE
+    const messageWithSenderInfo = {
+      ...savedMessage.toObject(),
+      senderUsername: sender?.username || socket.username,
+      senderProfilePicture: sender?.profilePicture || null,
+      tempId: messageData.tempId, // Pour lier au message temporaire
+    };
 
-        socket.emit("message_error", {
-          success: false,
-          error: error.message,
-          timestamp: new Date(),
-        });
-      }
+    // ✅ CONFIRMATION À L'ÉMETTEUR
+    socket.emit("message_sent", {
+      success: true,
+      data: messageWithSenderInfo,
+      tempId: messageData.tempId,
+      timestamp: new Date(),
     });
+
+    console.log("🎉 Message traité - ID:", savedMessage._id);
+  } catch (error) {
+    console.error("💥 Erreur traitement message:", error.message);
+
+    socket.emit("message_error", {
+      success: false,
+      error: error.message,
+      timestamp: new Date(),
+    });
+  }
+});
 
     // 🆕 ÉVÉNEMENT ENVOI IMAGE - CORRIGÉ SANS DOUBLON
     socket.on("send_image_message", async (data) => {
       console.log("🖼️ Image message reçu:", data);
 
       try {
-        // Vérification autorisation
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
             socket.userId,
@@ -889,9 +905,9 @@ export const configureChatSockets = (io) => {
           conversationId: data.conversationId,
           Id_receiver: data.Id_receiver,
           typeMessage: "image",
+           tempId: data.tempId, 
         };
 
-        // Traitement du fichier image
         let fileBuffer;
         if (
           typeof data.file === "string" &&
@@ -905,14 +921,12 @@ export const configureChatSockets = (io) => {
           throw new Error("Format de fichier image non reconnu");
         }
 
-        // Création objet fichier
-        const file = {
+        const file = { 
           buffer: fileBuffer,
           originalname: data.fileName || "image",
           mimetype: data.fileType || "image/jpeg",
         };
 
-        // 🆕 L'émission se fait dans uploadImageMessage via handleMessageCreation
         const savedMessage = await messageController.uploadImageMessage(
           file,
           messageData,
@@ -920,14 +934,13 @@ export const configureChatSockets = (io) => {
           socket.userId
         );
 
-        // METTRE À JOUR L'ACTIVITÉ
         await updateUserActivity(socket.userId, socket.id);
 
-        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit("image_message_sent", {
+        socket.emit('image_message_sent', {
           success: true,
           data: savedMessage,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
 
         console.log("🖼️ Message image traité - ID:", savedMessage._id);
@@ -937,16 +950,15 @@ export const configureChatSockets = (io) => {
           success: false,
           error: error.message,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI FICHIER - CORRIGÉ SANS DOUBLON
-    socket.on("send_file_message", async (data) => {
-      console.log("📎 File message reçu:", data);
-
+    socket.on('send_file_message', async (data) => {
+      console.log('📎 File message reçu:', data);
+      
       try {
-        // Vérification autorisation
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
             socket.userId,
@@ -964,7 +976,6 @@ export const configureChatSockets = (io) => {
           typeMessage: "file",
         };
 
-        // Traitement du fichier
         let fileBuffer;
         if (typeof data.file === "string" && data.file.startsWith("data:")) {
           const base64Data = data.file.split(",")[1];
@@ -975,15 +986,13 @@ export const configureChatSockets = (io) => {
           throw new Error("Format de fichier non reconnu");
         }
 
-        // Création objet fichier
-        const file = {
+        const file = { 
           buffer: fileBuffer,
           originalname: data.fileName || data.originalName || "file",
           mimetype: data.fileType || "application/octet-stream",
           size: data.fileSize,
         };
 
-        // 🆕 L'émission se fait dans uploadFileMessage via handleMessageCreation
         const savedMessage = await messageController.uploadFileMessage(
           file,
           messageData,
@@ -991,10 +1000,8 @@ export const configureChatSockets = (io) => {
           socket.userId
         );
 
-        // METTRE À JOUR L'ACTIVITÉ
         await updateUserActivity(socket.userId, socket.id);
 
-        // Formater le message pour l'interface
         const formattedMessage = {
           _id: savedMessage._id,
           conversationId: savedMessage.conversationId,
@@ -1012,11 +1019,11 @@ export const configureChatSockets = (io) => {
           timestamp: new Date(),
         };
 
-        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit("file_message_sent", {
+        socket.emit('file_message_sent', {
           success: true,
           data: formattedMessage,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
 
         console.log("📎 Message fichier traité - ID:", savedMessage._id);
@@ -1030,16 +1037,14 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // 🆕 ÉVÉNEMENT ENVOI VIDÉO - CORRIGÉ SANS DOUBLON
-    socket.on("send_video_message", async (data) => {
-      console.log("🎥 Video message reçu:", data);
-
+    socket.on('send_video_message', async (data) => {
+      console.log('🎥 Video message reçu:', data);
+      
       try {
         if (!data.file) {
           throw new Error("Aucun fichier vidéo reçu");
         }
 
-        // Vérification autorisation
         if (data.conversationId) {
           await conversationController.checkUserAuthorization(
             socket.userId,
@@ -1054,20 +1059,19 @@ export const configureChatSockets = (io) => {
           fileType: data.fileType,
           fileSize: data.fileSize,
           typeMessage: "video",
+          tempId: data.tempId, 
+          
         };
 
-        // Conversion ArrayBuffer → Buffer Node.js
         const fileBuffer = Buffer.from(new Uint8Array(data.file));
 
-        // Création objet fichier
-        const file = {
+        const file = { 
           buffer: fileBuffer,
           originalname: data.fileName || "video",
           mimetype: data.fileType || "video/mp4",
           size: data.fileSize,
         };
 
-        // 🆕 L'émission se fait dans uploadVideoMessage via handleMessageCreation
         const savedMessage = await messageController.uploadVideoMessage(
           file,
           messageData,
@@ -1075,10 +1079,8 @@ export const configureChatSockets = (io) => {
           socket.userId
         );
 
-        // METTRE À JOUR L'ACTIVITÉ
         await updateUserActivity(socket.userId, socket.id);
 
-        // Formater le message pour l'interface
         const formattedMessage = {
           _id: savedMessage._id,
           conversationId: savedMessage.conversationId,
@@ -1095,11 +1097,11 @@ export const configureChatSockets = (io) => {
           timestamp: new Date(),
         };
 
-        // ✅ SEULEMENT CONFIRMATION À L'ÉMETTEUR - PAS D'ÉMISSION VERS LES AUTRES
-        socket.emit("video_message_sent", {
+        socket.emit('video_message_sent', {
           success: true,
           data: formattedMessage,
           timestamp: new Date(),
+           tempId: data.tempId, 
         });
 
         console.log("🎥 Message vidéo traité - ID:", savedMessage._id);
@@ -1113,7 +1115,6 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // ÉVÉNEMENTS COMPTEURS
     socket.on("get_unread_counts", async () => {
       try {
         const userId = socket.userId;
@@ -1144,6 +1145,7 @@ export const configureChatSockets = (io) => {
           success: true,
           totalUnread: totalUnread,
           conversationCounts: unreadData,
+          
         });
       } catch (error) {
         socket.emit("notification_error", { message: error.message });
@@ -1169,7 +1171,6 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // ÉVÉNEMENT HEARTBEAT PRÉSENCE
     socket.on("user_heartbeat", async () => {
       const userId = socket.userId;
       await updateUserActivity(userId, socket.id);
@@ -1181,7 +1182,6 @@ export const configureChatSockets = (io) => {
       });
     });
 
-    // ÉVÉNEMENT CHANGEMENT STATUT
     socket.on("user_status_change", async (data) => {
       if (data.status) {
         await updateUserStatus(socket.userId, data.status);
@@ -1189,7 +1189,6 @@ export const configureChatSockets = (io) => {
       }
     });
 
-    // Événements existants
     socket.on("ping", () => {
       socket.emit("pong", {
         message: "Serveur actif ✅",
@@ -1197,34 +1196,564 @@ export const configureChatSockets = (io) => {
       });
     });
 
-    socket.on("mark_as_read", async (data) => {
-      try {
-        console.log("👀 Message marqué comme lu:", data);
-        socket.emit("message_read", {
-          success: true,
-          messageId: data.messageId,
+    // Remplacer l'événement existant par :
+socket.on("mark_as_read", async (data) => {
+  try {
+    console.log("👀 Message marqué comme lu:", data);
+    const { messageId, conversationId } = data;
+    const userId = socket.userId;
+
+    // 1. Mettre à jour le message dans la base de données
+    const message = await Message.findById(messageId);
+    if (message) {
+      if (!message.readBy) message.readBy = [];
+      
+      // Ajouter l'utilisateur à la liste readBy s'il n'y est pas déjà
+      const alreadyRead = message.readBy.some(
+        r => r.userId.toString() === userId.toString()
+      );
+      
+      if (!alreadyRead) {
+        message.readBy.push({
+          userId: userId,
+          readAt: new Date()
         });
-      } catch (error) {
-        socket.emit("error", { message: error.message });
+        await message.save();
+        
+        console.log(`✅ Message ${messageId} marqué comme lu par ${userId}`);
       }
+    }
+
+    // 2. Émettre l'événement à TOUS les participants de la conversation
+    // Pour que l'expéditeur voie les deux coches bleues
+    if (conversationId) {
+      io.to(conversationId.toString()).emit("message:seen", {
+        messageId: messageId,
+        seenBy: userId,
+        conversationId: conversationId,
+        timestamp: new Date()
+      });
+      
+      // Émettre aussi spécifiquement à l'expéditeur si différent
+      if (message && message.Id_sender.toString() !== userId.toString()) {
+        io.to(`user_${message.Id_sender.toString()}`).emit("message:seen", {
+          messageId: messageId,
+          seenBy: userId,
+          conversationId: conversationId,
+          timestamp: new Date()
+        });
+      }
+    }
+
+    // 3. Répondre à l'émetteur
+    socket.emit("message_read", {
+      success: true,
+      messageId: data.messageId,
+    });
+  } catch (error) {
+    console.error("💥 Erreur mark_as_read:", error);
+    socket.emit("error", { message: error.message });
+  }
+});
+
+// Ajouter aussi un événement pour marquer TOUS les messages d'une conversation
+socket.on("mark_conversation_read", async (data) => {
+  try {
+    const { conversationId } = data;
+    const userId = socket.userId;
+
+    console.log(`👁️ Marquer toute la conversation comme lue:`, { conversationId, userId });
+
+    // 1. Trouver tous les messages non lus dans cette conversation
+    const messages = await Message.find({
+      conversationId: conversationId,
+      Id_sender: { $ne: userId }, // Pas les messages de l'utilisateur lui-même
+      "readBy.userId": { $ne: userId } // Pas déjà lus
     });
 
+    const updatedMessageIds = [];
+
+    // 2. Marquer chaque message comme lu
+    for (const message of messages) {
+      if (!message.readBy) message.readBy = [];
+      
+      message.readBy.push({
+        userId: userId,
+        readAt: new Date()
+      });
+      
+      await message.save();
+      updatedMessageIds.push(message._id.toString());
+
+      // 3. Émettre pour chaque message
+      io.to(conversationId.toString()).emit("message:seen", {
+        messageId: message._id.toString(),
+        seenBy: userId,
+        conversationId: conversationId,
+        timestamp: new Date()
+      });
+
+      // Informer l'expéditeur
+      io.to(`user_${message.Id_sender.toString()}`).emit("message:seen", {
+        messageId: message._id.toString(),
+        seenBy: userId,
+        conversationId: conversationId,
+        timestamp: new Date()
+      });
+    }
+
+    console.log(`✅ ${updatedMessageIds.length} messages marqués comme lus`);
+
+    // 4. Réinitialiser le compteur de non-lus dans la conversation
+    await Conversation.findByIdAndUpdate(
+      conversationId,
+      {
+        $set: { "unreadCounts.$[elem].count": 0 }
+      },
+      {
+        arrayFilters: [{ "elem.userId": userId }],
+        new: true
+      }
+    );
+
+    socket.emit("conversation_marked_read", {
+      success: true,
+      conversationId: conversationId,
+      messagesRead: updatedMessageIds.length
+    });
+
+  } catch (error) {
+    console.error("💥 Erreur mark_conversation_read:", error);
+    socket.emit("error", { message: error.message });
+  }
+});
+// ==================== 📞 APPELS VIDÉO WEBRTC ====================
+// ==================== 📞 APPELS VIDÉO WEBRTC ====================
+socket.on('call:initiate', async (data) => {
+  console.log('📞 call:initiate received:', data, 'from user:', socket.userId);
+  try {
+    const { conversationId, receiverId, callType = 'video' } = data;
+    const callerId = socket.userId;
+
+    if (callerId === receiverId) {
+      socket.emit('call:error', { error: 'Impossible de s\'appeler soi-même' });
+      return;
+    }
+
+    // 1️⃣ Création DB avec statut 'ringing'
+    const dbCall = await Call.create({
+      conversationId,
+      callerId,
+      receiverId,
+      callType,
+      status: 'ringing',
+      statusHistory: [
+        { status: 'ringing', timestamp: new Date() }
+      ]
+    });
+
+    console.log('📞 Call created in DB:', dbCall._id);
+
+    activeCalls.set(dbCall._id.toString(), {
+      callId: dbCall._id.toString(),
+      callerId,
+      receiverId,
+      conversationId,
+      callType,
+      status: 'ringing',
+      startedAt: new Date()
+    });
+
+    // 2️⃣ Rejoindre la salle d'appel
+    socket.join(`call_${dbCall._id.toString()}`);
+
+    // 3️⃣ Trouver TOUS les sockets du receiver
+    const receiverSockets = Array.from(io.sockets.sockets.values())
+      .filter(s => s.userId === receiverId);
+
+    console.log('🔍 Looking for receiver sockets:', receiverId);
+    console.log('📋 Found', receiverSockets.length, 'sockets for receiver');
+
+    if (receiverSockets.length === 0) {
+      console.log('❌ Receiver offline:', receiverId);
+      
+      // 🆕 METTRE À JOUR EN 'MISSED'
+      await Call.findByIdAndUpdate(dbCall._id, {
+        status: 'missed',
+        endTime: new Date(),
+        duration: 0,
+        $push: {
+          statusHistory: { status: 'missed', timestamp: new Date() }
+        }
+      });
+      
+      socket.emit('call:error', { error: 'Utilisateur hors ligne' });
+      return;
+    }
+
+    // 4️⃣ Envoyer à TOUS les sockets du receiver
+    const callData = {
+      callId: dbCall._id.toString(),
+      callerId,
+      conversationId,
+      callType
+    };
+
+    receiverSockets.forEach((receiverSocket, index) => {
+      receiverSocket.emit('call:incoming', callData);
+      console.log(`📞 Appel envoyé au socket ${index + 1}/${receiverSockets.length}`);
+    });
+
+    console.log('✅ Appel initié, envoyé à', receiverSockets.length, 'socket(s)');
+
+  } catch (error) {
+    console.error('❌ Erreur call:initiate:', error);
+    socket.emit('call:error', { error: error.message });
+  }
+});
+
+socket.on('call:accept', async (data) => {
+  console.log('📞 call:accept received:', data, 'from user:', socket.userId);
+  try {
+    const { callId, callerId } = data;
+    const receiverId = socket.userId;
+
+    // Vérifier autorisation
+    if (receiverId === callerId) {
+      return socket.emit('call:error', { error: 'Impossible de s\'appeler soi-même' });
+    }
+
+    // ✅ Mettre à jour DB en 'ongoing'
+    const acceptedCall = await Call.findByIdAndUpdate(
+      callId,
+      {
+        status: 'ongoing',
+        $push: {
+          statusHistory: { status: 'ongoing', timestamp: new Date() }
+        }
+      },
+      { new: true }
+    );
+    
+    if (!acceptedCall) {
+      return socket.emit('call:error', { error: 'Appel non trouvé' });
+    }
+
+    console.log(`📝 Appel ${callId} accepté: ongoing`);
+
+    // ✅ JOINDRE LA SALLE (ESSENTIEL)
+    socket.join(`call:${callId}`);
+
+    // ✅ ENVOYER À TOUTE LA SALLE (CALLER + RECEIVER)
+    const notificationData = {
+      callId,
+      callerId: acceptedCall.callerId.toString(),
+      receiverId: acceptedCall.receiverId.toString(),
+      conversationId: acceptedCall.conversationId.toString(),
+      callType: acceptedCall.callType,
+      status: 'active'
+    };
+
+    io.to(`call:${callId}`).emit('call:accepted', notificationData);
+    console.log('✅ call:accepted envoyé à salle call:', callId);
+
+  } catch (err) {
+    console.error('❌ call:accept error:', err);
+    socket.emit('call:error', { error: err.message });
+  }
+});
+
+socket.on('call:reject', async (data) => {
+  try {
+    const { callId } = data;
+    const receiverId = socket.userId;
+
+    console.log(`❌ Appel rejeté:`, { callId, receiverId });
+
+    // 1️⃣ Mettre à jour la base de données en 'rejected'
+    const rejectedCall = await Call.findByIdAndUpdate(
+      callId,
+      {
+        status: 'rejected',
+        endTime: new Date(),
+        duration: 0,
+        $push: {
+          statusHistory: { status: 'rejected', timestamp: new Date() }
+        }
+      },
+      { new: true }
+    );
+
+    // 2️⃣ Supprimer de la mémoire
+    activeCalls.delete(callId);
+
+    // 🔥 CRÉER UN MESSAGE D'APPEL REFUSÉ
+    if (rejectedCall) {
+      const { default: Message } = await import("../models/Message.js");
+      const callMessage = await Message.create({
+        conversationId: rejectedCall.conversationId,
+        Id_sender: rejectedCall.callerId,
+        typeMessage: "call",
+        content: `🚫 Appel ${rejectedCall.callType === 'audio' ? 'audio' : 'vidéo'} refusé`,
+        callType: rejectedCall.callType,
+        callResult: "rejected",
+        duration: 0,
+        status: "sent"
+      });
+
+      await callMessage.populate("Id_sender", "username avatar");
+      io.to(rejectedCall.conversationId.toString()).emit("new-message", callMessage);
+    }
+
+    // 3️⃣ Notifier le caller
+    const callerSocket = Array.from(io.sockets.sockets.values())
+      .find(s => s.userId === rejectedCall.callerId.toString());
+
+    if (callerSocket) {
+      callerSocket.emit('call:rejected', {
+        callId,
+        receiverId,
+        timestamp: new Date()
+      });
+    }
+
+    console.log(`✅ Appel ${callId} rejeté et DB mise à jour`);
+
+  } catch (error) {
+    console.error('💥 Erreur rejet appel:', error);
+    socket.emit('call:error', { error: error.message });
+  }
+});
+// 🔧 REMPLACER LES DEUX GESTIONNAIRES call:end ET end-call PAR CELUI-CI
+// (Supprimer les lignes 606-649 et 713-809, garder celui-ci)
+
+socket.on('end-call', async (data) => {
+  const { chatId, channelName, duration = 0, reason = 'ended', callId } = data;
+  const userId = socket.userId;
+
+  console.log(`[end-call] Reçu de ${userId}`, { callId, channelName, chatId, duration, reason });
+
+  let targetCall = null;
+
+  // 1. Recherche par callId (priorité max)
+  if (callId) {
+    targetCall = await Call.findById(callId);
+  }
+
+  // 2. Sinon via activeCalls + channelName
+  if (!targetCall && channelName) {
+    const active = activeCalls.get(channelName);
+    if (active?.dbCallId) {
+      targetCall = await Call.findById(active.dbCallId);
+    }
+  }
+
+  // 3. Dernier recours : appel le plus récent dans cette conversation
+  if (!targetCall && chatId) {
+    targetCall = await Call.findOne({
+      conversationId: chatId,
+      $or: [{ callerId: userId }, { receiverId: userId }],
+      status: { $in: ['ringing', 'ongoing'] }
+    }).sort({ createdAt: -1 });
+  }
+
+  if (!targetCall) {
+    console.warn("Aucun appel actif trouvé pour terminer");
+    socket.emit('call:ended', { reason: 'no_call_found' });
+    return;
+  }
+
+  const callIdStr = targetCall._id.toString();
+
+  // Mise à jour statut
+  const finalStatus = duration < 3 ? 'missed' : 'completed';
+  await Call.findByIdAndUpdate(callIdStr, {
+    status: finalStatus,
+    endTime: new Date(),
+    duration,
+    $push: {
+      statusHistory: {
+        status: finalStatus,
+        endedBy: userId,
+        reason,
+        timestamp: new Date()
+      }
+    }
+  });
+
+  // Nettoyage mémoire
+  activeCalls.delete(callIdStr);
+  if (channelName) activeCalls.delete(channelName);
+
+  // ────────────────────────────────────────────────
+  // MESSAGE DANS LE CHAT (très important)
+  // ────────────────────────────────────────────────
+  const { default: Message } = await import("../models/Message.js");
+
+  const content = duration < 3
+    ? `❌ Appel ${targetCall.callType} manqué`
+    : `📞 Appel ${targetCall.callType} terminé (${Math.floor(duration/60)}:${(duration%60).toString().padStart(2,'0')})`;
+
+  const callMsg = await Message.create({
+    conversationId: targetCall.conversationId,
+    Id_sender: userId,
+    typeMessage: "call",
+    content,
+    callType: targetCall.callType,
+    callResult: duration < 3 ? "missed" : "ended",
+    duration,
+    status: "sent"
+  });
+
+  await callMsg.populate("Id_sender", "username avatar");
+  io.to(targetCall.conversationId.toString()).emit("new-message", callMsg);
+
+  // ────────────────────────────────────────────────
+  // DIFFUSION ULTRA-LARGE de call:ended
+  // ────────────────────────────────────────────────
+  const endedPayload = {
+    callId: callIdStr,
+    conversationId: targetCall.conversationId.toString(),
+    channelName: channelName || `call_${targetCall.conversationId}`,
+    endedBy: userId,
+    duration,
+    reason,
+    timestamp: new Date().toISOString()
+  };
+
+  // A. Toute la conversation (le plus fiable)
+  io.to(targetCall.conversationId.toString()).emit('call:ended', endedPayload);
+
+  // B. Room d'appel (si elle existe encore)
+  io.to(`call:${callIdStr}`).emit('call:ended', endedPayload);
+
+  // C. Rooms personnelles des deux participants
+  io.to(`user_${targetCall.callerId.toString()}`).emit('call:ended', endedPayload);
+  io.to(`user_${targetCall.receiverId.toString()}`).emit('call:ended', endedPayload);
+
+  console.log(`Appel ${callIdStr} terminé et notifié agressivement`);
+
+  // Confirmer à celui qui a raccroché
+  socket.emit('call:ended', { ...endedPayload, success: true });
+});
+
+
+// Ajouter / remplacer par ceci
+
+    // Envoyer offre WebRTC
+socket.on('call:offer', (data) => {
+  const { callId, receiverId, signal } = data;
+  
+  console.log(`📡 OFFER envoyé pour appel ${callId}`);
+
+  // Envoyer à toute la salle
+  io.to(`call_${callId}`).emit('call:offer', {
+    callId,
+    callerId: socket.userId,
+    signal
+  });
+});
+
+    // Envoyer réponse WebRTC
+socket.on('call:answer', (data) => {
+  const { callId, signal } = data;
+  
+  console.log(`📡 ANSWER envoyé pour appel ${callId}`);
+
+  // Envoyer à toute la salle
+  io.to(`call_${callId}`).emit('call:answer', {
+    callId,
+    receiverId: socket.userId,
+    signal
+  });
+});
+
+
+    // Dans la section des appels vidéo
+socket.on('call:ice-candidate', (data) => {
+  const { callId, candidate } = data;
+
+  // ⚠️ VÉRIFIER QUE LE callId EXISTE
+  if (!callId) {
+    console.log('❌ ICE candidate sans callId, ignoré');
+    return;
+  }
+
+  console.log(`🧊 Candidat ICE pour appel ${callId}`);
+
+  // Utiliser la salle d'appel
+  io.to(`call_${callId}`).emit('call:ice-candidate', {
+    senderId: socket.userId,
+    callId, // ⚠️ Inclure le callId dans la réponse
+    candidate
+  });
+});
+
+    
     // 🆕 DÉCONNEXION ROBUSTE
     socket.on("disconnect", async (reason) => {
       console.log("🔴 User déconnecté:", socket.userId, "- Raison:", reason);
+      // Ajouter ceci dans socket.on("disconnect")
+if (socket.userId) {
+  // Chercher et terminer tous les appels en cours de cet utilisateur
+  const callsToEnd = [];
+  for (const [key, call] of activeCalls.entries()) {
+    if (call.callerId === socket.userId || call.recipientId === socket.userId) {
+      callsToEnd.push(key);
+    }
+  }
 
-      // NETTOYAGE INTERVAL
+  for (const callKey of callsToEnd) {
+    const call = activeCalls.get(callKey);
+    if (call && call.dbCallId) {
+      try {
+        await Call.findByIdAndUpdate(
+          call.dbCallId,
+          {
+            status: 'missed', // ou 'disconnected' si tu veux différencier
+            endTime: new Date(),
+            duration: 0,
+            $push: {
+              statusHistory: {
+                status: 'missed',
+                reason: 'peer_disconnected',
+                timestamp: new Date()
+              }
+            }
+          }
+        );
+
+        io.to(call.conversationId.toString()).emit('call:ended', {
+          callId: call.dbCallId.toString(),
+          endedBy: 'system',
+          reason: 'peer_disconnected',
+          timestamp: new Date().toISOString()
+        });
+
+        activeCalls.delete(callKey);
+      } catch (err) {
+        console.error('Erreur cleanup appel sur disconnect:', err);
+      }
+    }
+  }
+}
+
+      // Nettoyage interval
       if (presenceInterval) {
         clearInterval(presenceInterval);
         presenceInterval = null;
       }
 
-      // GARANTIR LA DÉCONNEXION
       if (socket.userId) {
         await removeUserSession(socket.userId, socket.id);
 
         const remainingSessions = await getRemainingSessions(socket.userId);
-
+         console.log(
+      "🧠 SESSIONS ACTIVES POUR",
+      socket.userId,
+      ":",
+      remainingSessions
+    );
         if (remainingSessions === 0) {
           await updateUserStatus(socket.userId, "offline");
           notifyUserPresence(io, socket.userId, "offline");
@@ -1237,17 +1766,16 @@ export const configureChatSockets = (io) => {
           );
         }
 
-        // NETTOYAGE MÉMOIRE
         userPresence.delete(socket.userId);
       }
     });
 
     socket.on("error", (error) => {
       console.error("💥 Erreur socket:", error);
-    });
-  });
+    })
+  ;
 
-  // FONCTIONS HELPER PRÉSENCE AVANCÉE
+  // ==================== FONCTIONS HELPER ====================
 
   async function updateUserPresence(userId, socketId, status = "online") {
     try {
@@ -1321,36 +1849,29 @@ export const configureChatSockets = (io) => {
       console.error("❌ Erreur mise à jour statut:", error);
     }
   }
+  // À l'intérieur de configureChatSockets = (io) => { ...
 
-  // FONCTION CORRIGÉE POUR SUPPRIMER LES SESSIONS
+
   async function removeUserSession(userId, socketId) {
     try {
       console.log(`🗑️  Suppression session: ${socketId} pour user: ${userId}`);
 
-      // Supprimer de la BDD
       await User.findByIdAndUpdate(userId, {
         $pull: {
           activeSessions: { socketId: socketId },
         },
       });
 
-      // Mettre à jour la présence en mémoire
       if (userPresence.has(userId)) {
         const presence = userPresence.get(userId);
-
         if (presence.sessions) {
-          const beforeCount = presence.sessions.length;
           presence.sessions = presence.sessions.filter(
             (s) => s.socketId !== socketId
           );
           const afterCount = presence.sessions.length;
-
+           console.log(`📦 SESSIONS MAP pour ${userId}:`, Array.from(presence.sessions));
           console.log(`🔢 Sessions ${userId}: ${beforeCount} → ${afterCount}`);
 
-          if (afterCount === 0) {
-            presence.status = "offline";
-            console.log(`🔔 User ${userId} marqué comme offline (0 sessions)`);
-          }
         }
       }
     } catch (error) {
@@ -1373,14 +1894,37 @@ export const configureChatSockets = (io) => {
       if (userPresence.has(userId)) {
         await updateUserActivity(userId, socketId);
       }
-    }, 30000); // 30 secondes
+    }, 30000);
   }
 
-  function notifyUserPresence(io, userId, status) {
-    io.emit("user_presence_changed", {
-      userId: userId,
-      status: status,
-      lastSeen: new Date(),
-    });
+async function notifyUserPresence(io, userId, status, lastSeen = new Date()) {
+  try {
+    // ✅ VÉRIFIER LA VISIBILITÉ DU STATUT AVANT D'ÉMETTRE
+    const user = await User.findById(userId).select('statusVisibility');
+    
+    if (!user) {
+      console.log(`⚠️ User ${userId} non trouvé pour notifyUserPresence`);
+      return;
+    }
+
+    // 🔒 SI L'UTILISATEUR A DÉSACTIVÉ SON STATUT, NE PAS ÉMETTRE
+    if (user.statusVisibility === "Personne") {
+      console.log(`🔒 Statut masqué pour ${userId} (visibilité: Personne)`);
+      return; // ← IMPORTANT : On ne fait rien
+    }
+
+    // ✅ SINON, ÉMETTRE NORMALEMENT
+    if (status === "online") {
+      io.emit("user:online", { userId });
+      console.log("📡 EMIT user:online", userId);
+    }
+
+    if (status === "offline") {
+      io.emit("user:offline", { userId, lastSeen });
+      console.log(`📡 EMIT user:offline → User: ${userId}, LastSeen: ${lastSeen}`);
+    }
+  } catch (error) {
+    console.error("❌ Erreur notifyUserPresence:", error);
   }
-};
+  }
+})};

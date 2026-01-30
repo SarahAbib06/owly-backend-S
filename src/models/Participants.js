@@ -19,7 +19,9 @@ const participantsSchema = new mongoose.Schema({
   date: {
     type: Date,
     default: Date.now
-  }
+  },
+   isLocked: { type: Boolean, default: false },
+pinHash: { type: String, default: null },
 });
 
 export default mongoose.model("Participants", participantsSchema);

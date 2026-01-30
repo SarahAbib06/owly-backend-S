@@ -16,6 +16,14 @@ const userSchema = new mongoose.Schema(
       enum: ["online", "offline", "away"],
       default: "offline",
     },
+    statusVisibility: {
+  type: String,
+  enum: ["Tout le monde", "Personne"],
+  default: "Tout le monde"
+},
+    favorites: [
+  { type: mongoose.Schema.Types.ObjectId, ref: "Conversation" }
+],
 
 activeSessions: [
   {
@@ -50,7 +58,10 @@ activeSessions: [
         end: { type: String, default: "07:00" },
       },
     },
-
+onesignalPlayerId: {
+  type: String,
+  default: null
+},
     // Sécurité (DEPUIS la version GitHub)
     failedLoginAttempts: { type: Number, default: 0 },
     lastFailedAttempt: { type: Date },
