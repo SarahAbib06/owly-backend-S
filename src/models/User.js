@@ -58,7 +58,10 @@ activeSessions: [
         end: { type: String, default: "07:00" },
       },
     },
-
+onesignalPlayerId: {
+  type: String,
+  default: null
+},
     // Sécurité (DEPUIS la version GitHub)
     failedLoginAttempts: { type: Number, default: 0 },
     lastFailedAttempt: { type: Date },

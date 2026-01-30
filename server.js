@@ -1,3 +1,4 @@
+
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -12,6 +13,7 @@ import connectDB from "./src/config/db.js";
 import User from "./src/models/User.js";
 import authRoutes from "./src/routes/auth.js";
 import { configureChatSockets } from "./src/socket/chatSocket.js";
+import { configurePadSockets } from "./src/socket/PadSocket.js";
 import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
 import archiveRoutes from "./src/routes/archiveRoutes.js";
@@ -24,6 +26,7 @@ import groupRoutes from './src/routes/groupRoutes.js';
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
+import padRoutes from "./src/routes/padRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
 import agoraRoutes from "./src/routes/agora.js";
@@ -93,6 +96,7 @@ connectDB();
 app.set("io", io);
 
 // ✅ Configuration des sockets
+configurePadSockets(io);
 configureChatSockets(io);
 
 // 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
@@ -128,6 +132,7 @@ app.use("/api/archive", archiveRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/relations", relationRoutes);
+app.use("/api/pads", padRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);

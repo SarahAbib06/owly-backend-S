@@ -1,96 +1,82 @@
-// src/routes/notificationRoutes.js
 import express from 'express';
-import { pushNotificationService } from '../services/pushNotificationService.js';
-import PushToken from '../models/PushToken.js';
+import webpush from 'web-push';
+import PushSubscription from '../models/PushSubscription.js';
 
 const router = express.Router();
 
-// 🆕 ENREGISTRER UN DEVICE PUSH
-router.post('/register-device', async (req, res) => {
-  try {
-    const { userId, token, platform } = req.body;
-    
-    if (!userId || !token || !platform) {
-      return res.status(400).json({
-        success: false,
-        error: 'userId, token et platform requis'
-      });
-    }
+// ============= CONFIGURATION VAPID (une seule fois au démarrage) =============
+webpush.setVapidDetails(
+  process.env.VAPID_SUBJECT,        // ex: mailto:push@tondomaine.com
+  process.env.VAPID_PUBLIC_KEY,
+  process.env.VAPID_PRIVATE_KEY
+);
 
-    const result = await pushNotificationService.registerDevice(userId, token, platform);
-    
-    res.json({
-      success: result,
-      message: result ? `Device ${platform} enregistré` : 'Erreur enregistrement'
-    });
-    
-  } catch (error) {
-    console.error('❌ Erreur enregistrement device:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+// GET : Récupérer la clé publique VAPID (pour le frontend)
+router.get('/vapid-public-key', (req, res) => {
+  if (!process.env.VAPID_PUBLIC_KEY) {
+    return res.status(500).json({ error: 'Clé publique VAPID manquante' });
   }
+  res.json({ publicKey: process.env.VAPID_PUBLIC_KEY });
 });
 
-// 🆕 DÉSACTIVER UN DEVICE (quand user se déconnecte)
-router.post('/unregister-device', async (req, res) => {
-  try {
-    const { token } = req.body;
-    
-    if (!token) {
-      return res.status(400).json({
-        success: false,
-        error: 'token requis'
-      });
-    }
+// POST : Enregistrer un abonnement push
+router.post('/register', async (req, res) => {
+  const { subscription, userId } = req.body;
 
-    await PushToken.findOneAndUpdate(
-      { token },
-      { isActive: false }
+  if (!subscription || !userId) {
+    return res.status(400).json({ error: 'Subscription et userId requis' });
+  }
+
+  try {
+    // Upsert : crée ou met à jour si l'endpoint existe déjà
+    await PushSubscription.findOneAndUpdate(
+      { userId, 'subscription.endpoint': subscription.endpoint },
+      { userId, subscription },
+      { upsert: true, new: true }
     );
 
-    console.log(`✅ Device désactivé: ${token}`);
-    
-    res.json({
-      success: true,
-      message: 'Device désactivé'
-    });
-    
+    res.json({ success: true, message: 'Abonnement push enregistré avec succès' });
   } catch (error) {
-    console.error('❌ Erreur désactivation device:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    console.error('Erreur register push:', error);
+    res.status(500).json({ error: 'Erreur serveur lors de l’enregistrement' });
   }
 });
 
-// 🆕 LISTER LES DEVICES D'UN USER (pour debug)
-router.get('/user-devices/:userId', async (req, res) => {
+// POST : Désabonner (supprimer un abonnement)
+router.post('/unregister', async (req, res) => {
+  const { endpoint, userId } = req.body;
+
+  if (!endpoint || !userId) {
+    return res.status(400).json({ error: 'Endpoint et userId requis' });
+  }
+
   try {
-    const { userId } = req.params;
-    
-    const devices = await PushToken.find({ 
-      userId, 
-      isActive: true 
+    const result = await PushSubscription.deleteOne({
+      userId,
+      'subscription.endpoint': endpoint
     });
 
-    res.json({
-      success: true,
-      devices: devices.map(d => ({
-        platform: d.platform,
-        createdAt: d.createdAt
-      }))
-    });
-    
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ error: 'Abonnement non trouvé' });
+    }
+
+    res.json({ success: true, message: 'Abonnement supprimé' });
   } catch (error) {
-    console.error('❌ Erreur liste devices:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    console.error('Erreur unregister push:', error);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
+});
+
+// GET : Statut du service push
+router.get('/status', (req, res) => {
+  const hasKeys = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY && process.env.VAPID_SUBJECT);
+  
+  res.json({
+    enabled: hasKeys,
+    message: hasKeys 
+      ? 'Web Push API configurée et active ✅' 
+      : 'Clés VAPID manquantes dans .env'
+  });
 });
 
 export default router;

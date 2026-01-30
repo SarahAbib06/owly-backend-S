@@ -4198,6 +4198,107 @@ function updateArchivedCount() {
 
 
 
+// BOUTON TEST TRADUCTION (à coller une seule fois)
+function initTranslationTestButton() {
+  // Ne pas ajouter plusieurs fois
+  if (document.getElementById("translateTestBtn")) return;
+
+  const btn = document.createElement("button");
+  btn.id = "translateTestBtn";
+  btn.innerHTML = `Traduire le dernier message`;
+  btn.style.cssText = `
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 9999;
+    background: #f9ee34;
+    color: #000;
+    font-weight: bold;
+    padding: 14px 20px;
+    border: none;
+    border-radius: 50px;
+    box-shadow: 0 10px 30px rgba(249,238,52,0.6);
+    font-size: 16px;
+    cursor: pointer;
+    transition: all 0.3s;
+  `;
+  btn.onmouseover = () => btn.style.transform = "scale(1.1)";
+  btn.onmouseout = () => btn.style.transform = "scale(1)";
+
+  btn.onclick = async () => {
+    if (!state.currentConversation) {
+      showMessage("Ouvre une conversation d'abord !", "warning");
+      return;
+    }
+
+    const messages = state.messages.get(state.currentConversation._id) || [];
+    if (messages.length === 0) {
+      showMessage("Aucun message dans cette conversation", "warning");
+      return;
+    }
+
+    // On prend le dernier message texte
+    const lastTextMessage = [...messages].reverse().find(m => m.typeMessage === "text");
+    if (!lastTextMessage) {
+      showMessage("Aucun message texte à traduire", "warning");
+      return;
+    }
+
+    const messageId = lastTextMessage._id;
+    btn.disabled = true;
+    btn.textContent = "Traduction en cours...";
+
+    try {
+      const res = await fetch(`${CONFIG.BACKEND_URL}/api/messages/${messageId}/translate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${state.token}`
+        },
+        body: JSON.stringify({ targetLang: "en" }) // tu peux changer "en", "es", "de", "it"...
+      });
+
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        alert(`
+TRADUCTION RÉUSSIE !
+
+Message original (fr) :
+"${data.original}"
+
+Traduit en anglais :
+"${data.translated}"
+
+Langue cible : ${data.targetLang}
+        `.trim());
+        showMessage("Traduction réussie ! Regarde la popup", "success");
+      } else {
+        throw new Error(data.error || "Erreur inconnue");
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Erreur traduction :\n" + err.message);
+      showMessage("Échec de la traduction", "error");
+    } finally {
+      btn.disabled = false;
+      btn.textContent = `Traduire le dernier message`;
+    }
+  };
+
+  document.body.appendChild(btn);
+}
+
+// On sauvegarde la fonction originale AVANT de la redéfinir
+const originalSelectConversations = selectConversation;
+
+selectConversation = async function (conversation) {
+  await originalSelectConversations.call(this, conversation); // ou .apply(this, arguments)
+  setTimeout(initTranslationTestButton, 800);
+};
+
+
+
 
 // Export pour debug
 window.owlyState = state;
