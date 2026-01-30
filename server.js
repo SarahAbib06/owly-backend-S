@@ -20,22 +20,17 @@ import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
 import callRoutes from "./src/routes/callRoutes.js";
-
 import groupRoutes from "./src/routes/groupRoutes.js";
-
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
 import padRoutes from "./src/routes/padRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
 import agoraRoutes from "./src/routes/agora.js";
-
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
-import pollRoutes from "./src/routes/pollRoutes.js"; // ← AJOUT IMPORT DES SONDAGES
-
+import pollRoutes from "./src/routes/pollRoutes.js";
 import favoritesRoutes from "./src/routes/favoritesRoute.js";
 import contactRouter from "./src/routes/contact.js";
-
 import themeRoutes from "./src/routes/themeRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -53,45 +48,62 @@ console.log(
 const app = express();
 const server = createServer(app);
 
+// 🔥 CONFIGURATION CORS POUR PRODUCTION
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:5176",
+  "http://127.0.0.1:5500",
+  "http://localhost:5500",
+  "http://127.0.0.1:5501",
+  "http://localhost:5501",
+  "https://ow-ly.vercel.app", 
+];
+
 // ✅ CONFIGURATION CORS POUR EXPRESS
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "http://localhost:5176",
-      "http://127.0.0.1:5500",
-      "http://localhost:5500",
-      "http://127.0.0.1:5501",
-      "http://localhost:5501",
-      "null",
-    ],
+    origin: (origin, callback) => {
+      // Autoriser les requêtes sans origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ Origine non autorisée: ${origin}`);
+        callback(null, true); // ← En production, change en false si tu veux bloquer
+      }
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
   }),
 );
 
-// 🆕 SOCKET.IO CONFIGURÉ POUR LES FICHIERS
+// 🆕 SOCKET.IO CONFIGURÉ POUR PRODUCTION
 const io = new Server(server, {
   cors: {
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-      "http://127.0.0.1:5500",
-      "http://localhost:5500",
-      "http://127.0.0.1:5501",
-      "http://127.0.0.1:5501",
-      "http://localhost:5501",
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ Socket - Origine non autorisée: ${origin}`);
+        callback(null, true); // ← En production, change en false
+      }
+    },
     credentials: true,
+    methods: ["GET", "POST"],
   },
-  maxHttpBufferSize: 1e8,
+  maxHttpBufferSize: 1e8, // 100MB
+  pingTimeout: 60000,     // ← AJOUT : Timeout pour détecter déconnexions
+  pingInterval: 25000,    // ← AJOUT : Intervalle de ping
+  transports: ['websocket', 'polling'], // ← AJOUT : Fallback polling
 });
 
-// ✅ 1. Connexion à la base de données
+// ✅ Connexion à la base de données
 connectDB();
 app.set("io", io);
 
@@ -99,7 +111,7 @@ app.set("io", io);
 configurePadSockets(io);
 configureChatSockets(io);
 
-// 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS AU DÉMARRAGE
+// 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS
 const cleanupOrphans = async () => {
   try {
     console.log("🔧 Nettoyage des participants orphelins...");
@@ -114,15 +126,19 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use("/public", express.static("public"));
 
-// 🔥 MIDDLEWARE CRUCIAL : Rendre io accessible dans toutes les routes
+// 🔥 MIDDLEWARE : Rendre io accessible dans toutes les routes
 app.use((req, res, next) => {
   req.io = io;
   next();
 });
 
-// ✅ 3. Routes (APRÈS le middleware io)
+// ✅ Routes
 app.get("/", (req, res) => {
-  res.json({ message: "Owly API is running" });
+  res.json({ 
+    message: "Owly API is running",
+    env: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  });
 });
 
 app.use("/api/messages", messageRoutes);
@@ -137,16 +153,29 @@ app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
 app.use("/api/agora", agoraRoutes);
-
 app.use("/api/calls", callRoutes);
-app.use("/api/polls", pollRoutes); // ← AJOUT ROUTE DES SONDAGES
+app.use("/api/polls", pollRoutes);
 app.use("/api/groups", groupRoutes);
 app.use("/api/users", userStatusRoutes);
 app.use("/api/favorites", favoritesRoutes);
 app.use("/api", contactRouter);
 app.use("/api/themes", themeRoutes);
 
-// ✅ 5. Démarrer le serveur
+// 🔥 GESTION D'ERREURS GLOBALE (IMPORTANT POUR LA PROD)
+app.use((err, req, res, next) => {
+  console.error('❌ Erreur serveur:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Une erreur est survenue' 
+      : err.message
+  });
+});
+
+// ✅ Démarrer le serveur
 const PORT = process.env.PORT || 5000;
 
-server.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
