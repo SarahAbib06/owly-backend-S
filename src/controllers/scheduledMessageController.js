@@ -166,7 +166,7 @@ export const scheduledMessageController = {
     }
   },
 
-  // 🆕 Fonction pour envoyer les messages programmés (appelée par le cron)
+  // Fonction pour envoyer les messages programmés (appelée par le cron)
   sendScheduledMessages: async (io) => {
     try {
       const now = new Date();
@@ -193,20 +193,12 @@ export const scheduledMessageController = {
             scheduledMsg.senderId._id
           );
 
-          // 🆕 ÉMETTRE AVEC LE FLAG isScheduled = true
-          io.to(scheduledMsg.conversationId.toString()).emit('new-message', {
-            ...sentMessage.toObject(),
-            isScheduled: true, // ← FLAG CRUCIAL pour que l'émetteur voit le message
-            senderUsername: scheduledMsg.senderId.username,
-            senderProfilePicture: scheduledMsg.senderId.profilePicture
-          });
-
-          console.log(`✅ Message programmé envoyé avec flag isScheduled: ${scheduledMsg._id}`);
-
           // Marquer comme envoyé
           scheduledMsg.status = 'sent';
           scheduledMsg.sentAt = new Date();
           await scheduledMsg.save();
+
+          console.log('✅ Message programmé envoyé:', scheduledMsg._id);
 
         } catch (error) {
           console.error('❌ Erreur envoi message programmé:', error);
