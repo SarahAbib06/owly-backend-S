@@ -32,6 +32,10 @@ import pollRoutes from "./src/routes/pollRoutes.js";
 import favoritesRoutes from "./src/routes/favoritesRoute.js";
 import contactRouter from "./src/routes/contact.js";
 import themeRoutes from "./src/routes/themeRoutes.js";
+import cron from 'node-cron';
+import { scheduledMessageController } from './src/controllers/scheduledMessageController.js';
+import scheduledMessageRoutes from './src/routes/scheduledMessageRoutes.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -103,6 +107,16 @@ const io = new Server(server, {
   transports: ['websocket', 'polling'], // ← AJOUT : Fallback polling
 });
 
+cron.schedule('* * * * *', async () => {
+  try {
+    await scheduledMessageController.sendScheduledMessages(io);
+  } catch (error) {
+    console.error('❌ Erreur cron messages programmés:', error);
+  }
+});
+
+console.log('⏰ Cron job messages programmés démarré');
+
 // ✅ Connexion à la base de données
 connectDB();
 app.set("io", io);
@@ -160,6 +174,8 @@ app.use("/api/users", userStatusRoutes);
 app.use("/api/favorites", favoritesRoutes);
 app.use("/api", contactRouter);
 app.use("/api/themes", themeRoutes);
+app.use('/api/scheduled-messages', scheduledMessageRoutes);
+
 
 // 🔥 GESTION D'ERREURS GLOBALE (IMPORTANT POUR LA PROD)
 app.use((err, req, res, next) => {
