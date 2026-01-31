@@ -11,7 +11,7 @@ import { archiveSocketService } from "../services/archiveSocketService.js";
 import { pollController } from "../controllers/pollController.js"; // AJOUTÉ
 import cron from 'node-cron';
 
-// ✅ Job cron pour nettoyer les appels expirés (toutes les 10 secondes)
+// ✅ Job cron pour nettoyer les appels expirés (toutes les 10 secondes) ubj
 cron.schedule('*/10 * * * * *', async () => {
   try {
     const expiredCalls = await Call.find({
@@ -44,7 +44,7 @@ cron.schedule('*/10 * * * * *', async () => {
     console.error('❌ Erreur cron timeout:', err);
   }
 });
-
+      
 export const configureChatSockets = (io) => {
   console.log("🔧 WebSocket Chat configuré");
 
