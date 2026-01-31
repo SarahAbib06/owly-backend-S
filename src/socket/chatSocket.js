@@ -9,6 +9,41 @@ import Call from "../models/Call.js";
 import jwt from "jsonwebtoken";
 import { archiveSocketService } from "../services/archiveSocketService.js";
 import { pollController } from "../controllers/pollController.js"; // AJOUTÉ
+import cron from 'node-cron';
+
+// ✅ Job cron pour nettoyer les appels expirés (toutes les 10 secondes)
+cron.schedule('*/10 * * * * *', async () => {
+  try {
+    const expiredCalls = await Call.find({
+      status: 'ringing',
+      createdAt: { $lt: new Date(Date.now() - 30000) } // 30 secondes
+    });
+
+    for (const call of expiredCalls) {
+      await Call.findByIdAndUpdate(call._id, {
+        status: 'missed',
+        endTime: new Date(),
+        duration: 0,
+        $push: {
+          statusHistory: { status: 'missed', timestamp: new Date() }
+        }
+      });
+
+      // Notifier si les sockets existent
+      io.to(`user_${call.receiverId}`).emit('call-timeout', {
+        callId: call._id
+      });
+
+      io.to(`user_${call.callerId}`).emit('call-timeout', {
+        callId: call._id
+      });
+
+      console.log(`⏱️ Appel ${call._id} expiré automatiquement (cron)`);
+    }
+  } catch (err) {
+    console.error('❌ Erreur cron timeout:', err);
+  }
+});
 
 export const configureChatSockets = (io) => {
   console.log("🔧 WebSocket Chat configuré");
@@ -51,19 +86,17 @@ export const configureChatSockets = (io) => {
     }
   });
 
-  io.on("connection", (socket) => {
-    console.log(
-      "🔗 User connecté au Chat:",
-      socket.userId,
-      "- Socket:",
-      socket.id,
-    );
+ io.on("connection", (socket) => {
+  console.log("🔗 User connecté au Chat:", socket.userId, "- Socket:", socket.id);
+  
+  // ✅ OBLIGATOIRE : Joindre la room personnelle immédiatement
+  socket.join(`user_${socket.userId}`);
+  console.log(`✅ Socket ${socket.id} auto-joint user_${socket.userId}`);
+  
+  console.log("📋 userId type:", typeof socket.userId);
+  console.log("📋 userId value:", socket.userId);
 
-    // 🔥 AJOUTEZ CE LOG
-    console.log("📋 userId type:", typeof socket.userId);
-    console.log("📋 userId value:", socket.userId);
-
-    let presenceInterval = null;
+  let presenceInterval = null;
 
     // ==================== 📞 SYSTEME D'APPELS UNIFIE (AUDIO + VIDEO) ====================
 
@@ -108,49 +141,56 @@ export const configureChatSockets = (io) => {
           });
         }
 
-        const recipientSockets = getSocketsByUserId(recipientId);
+       const recipientSockets = getSocketsByUserId(recipientId);
 
-        if (!recipientSockets.length) {
-          console.log(`❌ ${recipientId} est hors ligne`);
+if (!recipientSockets.length) {
+  console.log(`❌ ${recipientId} est hors ligne`);
+  
+  // ✅ Créer appel manqué immédiatement
+  const missedCall = await Call.create({
+    conversationId: chatId,
+    callerId,
+    receiverId: recipientId,
+    callType,
+    status: "missed",
+    endTime: new Date(),
+    duration: 0,
+    statusHistory: [
+      { status: "ringing", timestamp: new Date() },
+      { status: "missed", timestamp: new Date() },
+    ],
+  });
 
-          const missedCall = await Call.create({
-            conversationId: chatId,
-            callerId,
-            receiverId: recipientId,
-            callType,
-            status: "missed",
-            endTime: new Date(),
-            duration: 0,
-            statusHistory: [
-              { status: "ringing", timestamp: new Date() },
-              { status: "missed", timestamp: new Date() },
-            ],
-          });
+  // ✅ Message dans le chat
+  const { default: Message } = await import("../models/Message.js");
+  const callMessage = await Message.create({
+    conversationId: chatId,
+    Id_sender: callerId,
+    typeMessage: "call",
+    content: `❌ Appel ${callType === "audio" ? "audio" : "vidéo"} manqué`,
+    callType,
+    callResult: "missed",
+    duration: 0,
+    status: "sent",
+  });
 
-          const { default: Message } = await import("../models/Message.js");
-          const callMessage = await Message.create({
-            conversationId: chatId,
-            Id_sender: callerId,
-            typeMessage: "call",
-            content: `❌ Appel ${callType === "audio" ? "audio" : "vidéo"} manqué`,
-            callType,
-            callResult: "missed",
-            duration: 0,
-            status: "sent",
-          });
+  await callMessage.populate("Id_sender", "username avatar");
+  io.to(chatId).emit("new-message", callMessage);
 
-          await callMessage.populate("Id_sender", "username avatar");
-          io.to(chatId).emit("new-message", callMessage);
+  // ✅ Notifier l'appelant immédiatement
+  socket.emit("call-failed", {
+    reason: "user_offline",
+    recipientId,
+    channelName,
+    callType,
+    callId: missedCall._id,
+    timestamp: new Date().toISOString(),
+  });
 
-          return socket.emit("call-failed", {
-            reason: "user_offline",
-            recipientId,
-            channelName,
-            callType,
-            callId: missedCall._id,
-            timestamp: new Date().toISOString(),
-          });
-        }
+  return; // ✅ STOPPER ICI (crucial)
+}
+
+// ✅ Continuer seulement si le receiver est en ligne
 
         const newCall = await Call.create({
           conversationId: chatId,
