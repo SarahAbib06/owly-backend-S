@@ -51,19 +51,17 @@ export const configureChatSockets = (io) => {
     }
   });
 
-  io.on("connection", (socket) => {
-    console.log(
-      "🔗 User connecté au Chat:",
-      socket.userId,
-      "- Socket:",
-      socket.id,
-    );
+io.on("connection", (socket) => {
+  console.log("🔗 User connecté au Chat:", socket.userId, "- Socket:", socket.id);
+  
+  // ✅ OBLIGATOIRE : Joindre la room personnelle immédiatement
+  socket.join(`user_${socket.userId}`);
+  console.log(`✅ Socket ${socket.id} auto-joint user_${socket.userId}`);
+  
+  console.log("📋 userId type:", typeof socket.userId);
+  console.log("📋 userId value:", socket.userId);
 
-    // 🔥 AJOUTEZ CE LOG
-    console.log("📋 userId type:", typeof socket.userId);
-    console.log("📋 userId value:", socket.userId);
-
-    let presenceInterval = null;
+  let presenceInterval = null;
 
     // ==================== 📞 SYSTEME D'APPELS UNIFIE (AUDIO + VIDEO) ====================
 
