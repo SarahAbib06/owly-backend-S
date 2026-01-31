@@ -1001,6 +1001,12 @@ const decryptedMessages = messages.map((msg) => ({
     }
   },
 
+  // 🆕 CRÉATION DE MESSAGE D'APPEL (MANQUÉ OU TERMINÉ)
+  createCallMessage: async (data, io) => {
+    return await createCallMessage(data, io);
+  },
+}; // ← Fermeture CORRECTE de l’objet messageController
+
   deleteMessage: async (req, res) => {
     try {
       const { messageId } = req.params;
@@ -1066,7 +1072,6 @@ const decryptedMessages = messages.map((msg) => ({
       });
     }
   },
-};
 
 // ============================================
 // FONCTIONS ANNEXES
@@ -1161,3 +1166,118 @@ async function shouldSendPushNotification(userId) {
     return true;
   }
 }
+
+// 🆕 FONCTION POUR CRÉER UN MESSAGE D'APPEL (MANQUÉ OU TERMINÉ)
+const createCallMessage = async (data, io) => {
+  try {
+    const { conversationId, callerId, callType, status, duration } = data;
+
+    if (!conversationId || !callerId || !callType) {
+      throw new Error("Données d'appel incomplètes");
+    }
+
+    let messageContent = "";
+    if (status === "missed") {
+      messageContent =
+        callType === "audio"
+          ? "Appel audio manqué"
+          : "Appel vidéo manqué";
+    } else if (status === "completed" && duration !== undefined) {
+      const mins = Math.floor(duration / 60);
+      const secs = duration % 60;
+      const durationStr =
+        mins > 0
+          ? `${mins}m ${secs}s`
+          : `${secs}s`;
+      messageContent =
+        callType === "audio"
+          ? `Appel audio terminé - Durée: ${durationStr}`
+          : `Appel vidéo terminé - Durée: ${durationStr}`;
+    } else {
+      return null;
+    }
+
+    const message = new Message({
+      conversationId,
+      Id_sender: callerId,
+      content: messageContent,
+      typeMessage: "text",
+      status: "sent",
+      time: new Date(),
+      readBy: [],
+      unreadFor: [],
+      // 🆕 CHAMPS D'APPEL
+      isCallMessage: true,
+      callType,
+      callStatus: status,
+      callDuration: status === "completed" ? duration : null,
+    });
+
+    const savedMessage = await message.save();
+
+    // Mettre à jour les compteurs de messages non lus
+    try {
+      const participants = await Participants.find({
+        Id_Conversation: conversationId,
+      });
+
+      const bulkOperations = [];
+      for (const participant of participants) {
+        if (participant.Id_User.toString() !== callerId.toString()) {
+          bulkOperations.push({
+            updateOne: {
+              filter: {
+                _id: conversationId,
+                "unreadCounts.userId": participant.Id_User,
+              },
+              update: {
+                $inc: { "unreadCounts.$.count": 1 },
+                $set: { lastMessageAt: new Date() },
+              },
+            },
+          });
+        }
+      }
+
+      if (bulkOperations.length > 0) {
+        await Conversation.bulkWrite(bulkOperations);
+      }
+    } catch (error) {
+      console.error("Erreur mise à jour compteurs d'appel:", error.message);
+    }
+
+    // Émettre le message via socket
+    if (io) {
+      io.to(conversationId.toString()).emit("new_message", {
+        _id: savedMessage._id,
+        conversationId,
+        Id_sender: callerId,
+        content: messageContent,
+        typeMessage: "text",
+        status: savedMessage.status,
+        createdAt: savedMessage.createdAt,
+        timestamp: savedMessage.createdAt,
+        isCallMessage: true,
+        callType,
+        callStatus: status,
+      });
+    }
+
+    return {
+      _id: savedMessage._id,
+      conversationId,
+      Id_sender: callerId,
+      content: messageContent,
+      typeMessage: "text",
+      status: savedMessage.status,
+      createdAt: savedMessage.createdAt,
+      timestamp: savedMessage.createdAt,
+      isCallMessage: true,
+      callType,
+      callStatus: status,
+    };
+  } catch (error) {
+    console.error("❌ Erreur création message d'appel:", error.message);
+    return null;
+  }
+};

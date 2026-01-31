@@ -1,17 +1,18 @@
-import "dotenv/config";
+// server.js
+/*import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { Server } from "socket.io";
-import jwt from "jsonwebtoken";
-import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
+// 🔹 DB & Models
 import connectDB from "./src/config/db.js";
 import User from "./src/models/User.js";
+
+// 🔹 Routes
 import authRoutes from "./src/routes/auth.js";
-import { configureChatSockets } from "./src/socket/chatSocket.js";
 import { configurePadSockets } from "./src/socket/PadSocket.js";
 import messageRoutes from "./src/routes/messageRoutes.js";
 import conversationRoutes from "./src/routes/conversationRoutes.js";
@@ -20,13 +21,19 @@ import notificationRoutes from "./src/routes/notificationRoutes.js";
 import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
 import callRoutes from "./src/routes/callRoutes.js";
-import groupRoutes from "./src/routes/groupRoutes.js";
 import { participantController } from "./src/controllers/participantController.js";
+// 🔹 Sockets
+import setupVideoCall from "./src/socket/videoCall.js";
+//import setupGroupVideoCall from "./src/socket/groupVideoCall.js";
+import { configureChatSockets } from "./src/socket/chatSocket.js";
+
+// 🔹 Participants
+import groupRoutes from './src/routes/groupRoutes.js';
+
 import userRoutes from "./src/routes/userRoutes.js";
 import padRoutes from "./src/routes/padRoutes.js";
 import relationRoutesbloquer from "./src/routes/relation.js";
 import relationRoutes from "./src/routes/relationsRoutes.js";
-import agoraRoutes from "./src/routes/agora.js";
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
 import pollRoutes from "./src/routes/pollRoutes.js";
 import favoritesRoutes from "./src/routes/favoritesRoute.js";
@@ -49,8 +56,9 @@ console.log(
   process.env.JWT_SECRET ? "✅ Chargé" : "❌ Non défini",
 );
 
+// 🔹 Initialisation d’Express
 const app = express();
-const server = createServer(app);
+const httpServer = createServer(app);
 
 // 🔥 CONFIGURATION CORS POUR PRODUCTION
 const allowedOrigins = [
@@ -119,7 +127,13 @@ console.log('⏰ Cron job messages programmés démarré');
 
 // ✅ Connexion à la base de données
 connectDB();
+// 🔹 Attacher io à l’app pour y avoir accès partout
 app.set("io", io);
+
+// 🔹 Configurer les sockets
+setupVideoCall(io);        // Appels vidéo 1-to-1
+//setupGroupVideoCall(io);  //  Appels vidéo de groupe
+
 
 // ✅ Configuration des sockets
 configurePadSockets(io);
@@ -166,10 +180,10 @@ app.use("/api/pads", padRoutes);
 app.use("/api/relations", relationRoutesbloquer);
 app.use("/api/auth", authRoutes);
 app.use("/api", searchRelationsRoutes);
-app.use("/api/agora", agoraRoutes);
 app.use("/api/calls", callRoutes);
 app.use("/api/polls", pollRoutes);
-app.use("/api/groups", groupRoutes);
+
+app.use('/api/groups', groupRoutes); // ← Cette route pourra maintenant accéder à req.io
 app.use("/api/users", userStatusRoutes);
 app.use("/api/favorites", favoritesRoutes);
 app.use("/api", contactRouter);
@@ -192,6 +206,220 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 5000;
 
 server.listen(PORT, '0.0.0.0', () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
+});
+*/
+
+
+
+// server.js
+import "dotenv/config";
+import express from "express";
+import cors from "cors";
+import { createServer } from "http";
+import { Server } from "socket.io";
+import path from "path";
+import { fileURLToPath } from "url";
+
+// 🔹 DB & Models
+import connectDB from "./src/config/db.js";
+import User from "./src/models/User.js";
+
+// 🔹 Routes
+import authRoutes from "./src/routes/auth.js";
+import { configurePadSockets } from "./src/socket/PadSocket.js";
+import messageRoutes from "./src/routes/messageRoutes.js";
+import conversationRoutes from "./src/routes/conversationRoutes.js";
+import archiveRoutes from "./src/routes/archiveRoutes.js";
+import notificationRoutes from "./src/routes/notificationRoutes.js";
+import reactionRoutes from "./src/routes/reactionRoutes.js";
+import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
+import callRoutes from "./src/routes/callRoutes.js";
+import { participantController } from "./src/controllers/participantController.js";
+// 🔹 Sockets
+import setupVideoCall from "./src/socket/videoCall.js";
+//import setupGroupVideoCall from "./src/socket/groupVideoCall.js";
+import { configureChatSockets } from "./src/socket/chatSocket.js";
+
+// 🔹 Participants
+import groupRoutes from './src/routes/groupRoutes.js';
+
+import userRoutes from "./src/routes/userRoutes.js";
+import padRoutes from "./src/routes/padRoutes.js";
+import relationRoutesbloquer from "./src/routes/relation.js";
+import relationRoutes from "./src/routes/relationsRoutes.js";
+import userStatusRoutes from "./src/routes/userStatusRoutes.js";
+import pollRoutes from "./src/routes/pollRoutes.js";
+import favoritesRoutes from "./src/routes/favoritesRoute.js";
+import contactRouter from "./src/routes/contact.js";
+import themeRoutes from "./src/routes/themeRoutes.js";
+import cron from 'node-cron';
+import { scheduledMessageController } from './src/controllers/scheduledMessageController.js';
+import scheduledMessageRoutes from './src/routes/scheduledMessageRoutes.js';
+
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+console.log(
+  "🔍 MONGODB_URI:",
+  process.env.MONGODB_URI ? "✅ Chargé" : "❌ Non défini",
+);
+console.log(
+  "🔍 JWT_SECRET:",
+  process.env.JWT_SECRET ? "✅ Chargé" : "❌ Non défini",
+);
+
+// 🔹 Initialisation d'Express
+const app = express();
+
+// ✅ CONFIGURATION CORS POUR EXPRESS
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+  "http://localhost:5176",
+  "http://127.0.0.1:5500",
+  "http://localhost:5500",
+  "http://127.0.0.1:5501",
+  "http://localhost:5501",
+  "https://ow-ly.vercel.app", 
+];
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // Autoriser les requêtes sans origin (mobile apps, Postman, etc.)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ Origine non autorisée: ${origin}`);
+        callback(null, true); // ← En production, change en false si tu veux bloquer
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  }),
+);
+
+// 🔹 Création du serveur HTTP
+const httpServer = createServer(app);
+
+// 🆕 SOCKET.IO CONFIGURÉ POUR PRODUCTION
+const io = new Server(httpServer, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        console.warn(`⚠️ Socket - Origine non autorisée: ${origin}`);
+        callback(null, true); // ← En production, change en false
+      }
+    },
+    credentials: true,
+    methods: ["GET", "POST"],
+  },
+  maxHttpBufferSize: 1e8, // 100MB
+  pingTimeout: 60000,     // ← AJOUT : Timeout pour détecter déconnexions
+  pingInterval: 25000,    // ← AJOUT : Intervalle de ping
+  transports: ['websocket', 'polling'], // ← AJOUT : Fallback polling
+});
+
+cron.schedule('* * * * *', async () => {
+  try {
+    await scheduledMessageController.sendScheduledMessages(io);
+  } catch (error) {
+    console.error('❌ Erreur cron messages programmés:', error);
+  }
+});
+
+console.log('⏰ Cron job messages programmés démarré');
+
+// ✅ Connexion à la base de données
+connectDB();
+// 🔹 Attacher io à l'app pour y avoir accès partout
+app.set("io", io);
+
+// 🔹 Configurer les sockets
+setupVideoCall(io);        // Appels vidéo 1-to-1
+//setupGroupVideoCall(io);  //  Appels vidéo de groupe
+
+// ✅ Configuration des sockets
+configurePadSockets(io);
+configureChatSockets(io);
+
+// 🆕 NETTOYAGE DES PARTICIPANTS ORPHELINS
+const cleanupOrphans = async () => {
+  try {
+    console.log("🔧 Nettoyage des participants orphelins...");
+    await participantController.cleanupOrphanParticipants();
+  } catch (error) {
+    console.log("⚠️ Nettoyage participants échoué:", error.message);
+  }
+};
+//cleanupOrphans();
+
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+app.use("/public", express.static("public"));
+
+// 🔥 MIDDLEWARE : Rendre io accessible dans toutes les routes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+// ✅ Routes
+app.get("/", (req, res) => {
+  res.json({ 
+    message: "Owly API is running",
+    env: process.env.NODE_ENV || 'development',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.use("/api/messages", messageRoutes);
+app.use("/api/reactions", reactionRoutes);
+app.use("/api/conversations", conversationRoutes);
+app.use("/api/archive", archiveRoutes);
+app.use("/api/notifications", notificationRoutes);
+app.use("/api/users", userRoutes);
+app.use("/api/relations", relationRoutes);
+app.use("/api/pads", padRoutes);
+app.use("/api/relations", relationRoutesbloquer);
+app.use("/api/auth", authRoutes);
+app.use("/api", searchRelationsRoutes);
+app.use("/api/calls", callRoutes);
+app.use("/api/polls", pollRoutes);
+
+app.use('/api/groups', groupRoutes); // ← Cette route pourra maintenant accéder à req.io
+app.use("/api/users", userStatusRoutes);
+app.use("/api/favorites", favoritesRoutes);
+app.use("/api", contactRouter);
+app.use("/api/themes", themeRoutes);
+app.use('/api/scheduled-messages', scheduledMessageRoutes);
+
+// 🔥 GESTION D'ERREURS GLOBALE (IMPORTANT POUR LA PROD)
+app.use((err, req, res, next) => {
+  console.error('❌ Erreur serveur:', err);
+  res.status(err.status || 500).json({
+    success: false,
+    error: process.env.NODE_ENV === 'production' 
+      ? 'Une erreur est survenue' 
+      : err.message
+  });
+});
+
+// ✅ Démarrer le serveur
+const PORT = process.env.PORT || 5000;
+
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🌐 Environment: ${process.env.NODE_ENV || 'development'}`);
 });

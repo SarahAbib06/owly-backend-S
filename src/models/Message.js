@@ -1,4 +1,4 @@
-// src/models/Message.js
+  // src/models/Message.js
 import mongoose from "mongoose";
 
 const { Schema, model } = mongoose;
@@ -118,27 +118,48 @@ const messageSchema = new Schema(
       min: 0,
     },
 
-    // Champs pour les médias
-    imageInfo: {
-      url: String,
-      publicId: String,
-      width: Number,
-      height: Number,
-    },
-    videoInfo: {
-      url: String,
-      publicId: String,
-      duration: Number,
-      width: Number,
-      height: Number,
-    },
-    fileInfo: {
-      url: String,
-      publicId: String,
-      originalFilename: String,
-      bytes: Number,
-    },
+    // Ajoute ça dans ton messageSchema, juste avant timestamps
+imageInfo: {
+  url: String,
+  publicId: String,
+  width: Number,
+  height: Number
+},
+videoInfo: {
+  url: String,
+  publicId: String,
+  duration: Number,
+  width: Number,
+  height: Number
+},
+fileInfo: {
+  url: String,
+  publicId: String,
+  originalFilename: String,
+  bytes: Number
+},
 
+// 🆕 CHAMPS POUR LES MESSAGES D'APPEL (appel manqué ou appel terminé)
+isCallMessage: {
+  type: Boolean,
+  default: false,
+  index: true,
+},
+callType: {
+  type: String,
+  enum: ["audio", "video"],
+  default: null,
+},
+callStatus: {
+  type: String,
+  enum: ["missed", "completed"],
+  default: null,
+},
+callDuration: {
+  type: Number, // durée en secondes
+  default: null,
+},
+    
     // NOUVEAUX CHAMPS POUR LES APPELS
     callType: {
       type: String,
