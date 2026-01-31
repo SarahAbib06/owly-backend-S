@@ -1,4 +1,3 @@
-
 import "dotenv/config";
 import express from "express";
 import cors from "cors";
@@ -22,7 +21,7 @@ import reactionRoutes from "./src/routes/reactionRoutes.js";
 import searchRelationsRoutes from "./src/routes/searchRelationsRoutes.js";
 import callRoutes from "./src/routes/callRoutes.js";
 
-import groupRoutes from './src/routes/groupRoutes.js';
+import groupRoutes from "./src/routes/groupRoutes.js";
 
 import { participantController } from "./src/controllers/participantController.js";
 import userRoutes from "./src/routes/userRoutes.js";
@@ -32,9 +31,10 @@ import relationRoutes from "./src/routes/relationsRoutes.js";
 import agoraRoutes from "./src/routes/agora.js";
 
 import userStatusRoutes from "./src/routes/userStatusRoutes.js";
+import pollRoutes from "./src/routes/pollRoutes.js"; // ← AJOUT IMPORT DES SONDAGES
 
-import favoritesRoutes from './src/routes/favoritesRoute.js';
-import contactRouter from './src/routes/contact.js';
+import favoritesRoutes from "./src/routes/favoritesRoute.js";
+import contactRouter from "./src/routes/contact.js";
 
 import themeRoutes from "./src/routes/themeRoutes.js";
 
@@ -43,11 +43,11 @@ const __dirname = path.dirname(__filename);
 
 console.log(
   "🔍 MONGODB_URI:",
-  process.env.MONGODB_URI ? "✅ Chargé" : "❌ Non défini"
+  process.env.MONGODB_URI ? "✅ Chargé" : "❌ Non défini",
 );
 console.log(
   "🔍 JWT_SECRET:",
-  process.env.JWT_SECRET ? "✅ Chargé" : "❌ Non défini"
+  process.env.JWT_SECRET ? "✅ Chargé" : "❌ Non défini",
 );
 
 const app = express();
@@ -70,7 +70,7 @@ app.use(
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
-  })
+  }),
 );
 
 // 🆕 SOCKET.IO CONFIGURÉ POUR LES FICHIERS
@@ -111,7 +111,7 @@ const cleanupOrphans = async () => {
 //cleanupOrphans();
 
 app.use(express.json());
-app.use(express.urlencoded({ extended: true })); 
+app.use(express.urlencoded({ extended: true }));
 app.use("/public", express.static("public"));
 
 // 🔥 MIDDLEWARE CRUCIAL : Rendre io accessible dans toutes les routes
@@ -139,11 +139,12 @@ app.use("/api", searchRelationsRoutes);
 app.use("/api/agora", agoraRoutes);
 
 app.use("/api/calls", callRoutes);
-app.use('/api/groups', groupRoutes); // ← Cette route pourra maintenant accéder à req.io
+app.use("/api/polls", pollRoutes); // ← AJOUT ROUTE DES SONDAGES
+app.use("/api/groups", groupRoutes);
 app.use("/api/users", userStatusRoutes);
-app.use('/api/favorites', favoritesRoutes);
-app.use('/api', contactRouter);
-app.use("/api/themes", themeRoutes); 
+app.use("/api/favorites", favoritesRoutes);
+app.use("/api", contactRouter);
+app.use("/api/themes", themeRoutes);
 
 // ✅ 5. Démarrer le serveur
 const PORT = process.env.PORT || 5000;

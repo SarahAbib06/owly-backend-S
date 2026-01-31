@@ -40,16 +40,33 @@ const messageSchema = new Schema(
 
     typeMessage: {
       type: String,
-      enum: ["text", "image", "video", "audio", "file", "emojis", "call", "system"],
+      enum: [
+        "text",
+        "image",
+        "video",
+        "audio",
+        "file",
+        "emojis",
+        "call",
+        "system",
+        "poll",
+      ],
       default: "text",
+    },
+    // Dans Message.js, ajoutez ce champ dans le schéma :
+    pollRef: {
+      type: Schema.Types.ObjectId,
+      ref: "Poll",
+      default: null,
+      index: true,
     },
 
     status: {
       type: String,
-      enum: ["sending","sent", "delivered", "seen", "pending"],
+      enum: ["sending", "sent", "delivered", "seen", "pending"],
       default: "sending",
     },
- seenBy: [
+    seenBy: [
       {
         userId: {
           type: Schema.Types.ObjectId,
@@ -106,56 +123,56 @@ const messageSchema = new Schema(
       url: String,
       publicId: String,
       width: Number,
-      height: Number
+      height: Number,
     },
     videoInfo: {
       url: String,
       publicId: String,
       duration: Number,
       width: Number,
-      height: Number
+      height: Number,
     },
     fileInfo: {
       url: String,
       publicId: String,
       originalFilename: String,
-      bytes: Number
+      bytes: Number,
     },
-    
+
     // NOUVEAUX CHAMPS POUR LES APPELS
     callType: {
       type: String,
       enum: ["audio", "video"],
-      default: null
+      default: null,
     },
     callResult: {
       type: String,
       enum: ["missed", "rejected", "ended", "accepted"],
-      default: null
+      default: null,
     },
     duration: {
       type: Number, // en secondes
       default: 0,
-      min: 0
+      min: 0,
     },
     callParticipants: [
       {
         type: Schema.Types.ObjectId,
-        ref: "User"
-      }
+        ref: "User",
+      },
     ],
     callStartedAt: {
       type: Date,
-      default: null
+      default: null,
     },
     callEndedAt: {
       type: Date,
-      default: null
-    }
+      default: null,
+    },
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // INDEXES POUR LES PERFORMANCES
@@ -168,6 +185,7 @@ messageSchema.index({ isForwarded: 1 });
 messageSchema.index({ forwardedFrom: 1 });
 messageSchema.index({ originalSender: 1 });
 messageSchema.index({ conversationId: 1, isForwarded: 1, createdAt: -1 });
+messageSchema.index({ pollRef: 1 }); // Afficher "Transféré de @user"
 
 // Nouveaux index pour les appels
 messageSchema.index({ conversationId: 1, typeMessage: 1, createdAt: -1 }); // Pour filtrer les appels dans une conversation
@@ -177,16 +195,16 @@ messageSchema.index({ callStartedAt: -1 }); // Pour trier les appels par date
 messageSchema.index({ typeMessage: 1, createdAt: -1 }); // Index général pour le type de message
 
 // Méthode utilitaire pour vérifier si c'est un message d'appel
-messageSchema.methods.isCall = function() {
+messageSchema.methods.isCall = function () {
   return this.typeMessage === "call";
 };
 
 // Méthode utilitaire pour calculer la durée de l'appel
-messageSchema.methods.getCallDuration = function() {
+messageSchema.methods.getCallDuration = function () {
   if (!this.isCall() || !this.callStartedAt || !this.callEndedAt) {
     return this.duration || 0;
   }
-  
+
   const durationMs = this.callEndedAt - this.callStartedAt;
   return Math.floor(durationMs / 1000);
 };
