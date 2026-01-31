@@ -49,7 +49,7 @@ export const configureChatSockets = (io) => {
   console.log("🔧 WebSocket Chat configuré");
 
   const userPresence = new Map();
-
+  
   // 🆕 AJOUTER ICI
   const callTimeouts = new Map();
 
