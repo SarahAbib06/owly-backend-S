@@ -31,6 +31,7 @@
     "mongoose": "^8.19.3",
     "multer": "^2.0.2",
     "nanoid": "^5.1.6",
+    "node-mailjet": "^6.0.11",
     "nodemailer": "^7.0.10",
     "qrcode": "^1.5.4",
     "react-router-dom": "^7.9.6",
